@@ -259,7 +259,7 @@ log_info "Python: $PYTHON_BIN"
 log_info "pip: $PIP_BIN"
 
 log_do "升级 pip..."
-$PIP_BIN install --upgrade pip -q 2>/dev/null
+$PIP_BIN install --upgrade pip --break-system-packages -q 2>/dev/null
 log_ok "pip 升级完成: $($PIP_BIN --version 2>&1 | awk '{print $2}')"
 
 if [ -f "$BACKEND_DIR/requirements.txt" ]; then
@@ -269,7 +269,7 @@ if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   log_info "依赖数量: ${PKG_COUNT} 个包"
   [ -n "$PIP_INDEX" ] && log_info "使用镜像: $PIP_INDEX"
 
-  PIP_ARGS="-r $BACKEND_DIR/requirements.txt"
+  PIP_ARGS="-r $BACKEND_DIR/requirements.txt --break-system-packages"
   [ -n "$PIP_INDEX" ] && PIP_ARGS="$PIP_ARGS -i $PIP_INDEX --trusted-host $(echo $PIP_INDEX | sed 's|https://||;s|/simple.*||')"
 
   if $PIP_BIN install $PIP_ARGS 2>&1 | tail -8; then
@@ -296,11 +296,11 @@ if [ -d "node_modules" ] && [ "$(ls node_modules 2>/dev/null | wc -l)" -gt 10 ];
   log_ok "node_modules 已存在 ($(ls node_modules | wc -l) 个包)"
 else
   rm -rf node_modules
-  log_do "执行 npm install（首次安装可能需要1-3分钟）..."
+  log_do "执行 npm install --legacy-peer-deps（首次安装可能需要1-3分钟）..."
   log_info "目录: $FRONTEND_DIR"
   [ -n "$NPM_REGISTRY" ] && log_info "使用镜像: $NPM_REGISTRY"
 
-  NPM_INSTALL="npm install"
+  NPM_INSTALL="npm install --legacy-peer-deps"
   [ -n "$NPM_REGISTRY" ] && NPM_INSTALL="$NPM_INSTALL --registry=$NPM_REGISTRY"
 
   NPM_OK=false
@@ -311,17 +311,9 @@ else
   fi
 
   if [ "$NPM_OK" = false ]; then
-    log_do "npm install 失败，尝试 --legacy-peer-deps..."
-    if npm install --legacy-peer-deps 2>&1 | tail -5; then
-      if [ -d "node_modules" ] && [ "$(ls node_modules | wc -l)" -gt 5 ]; then
-        NPM_OK=true
-      fi
-    fi
-  fi
-
-  if [ "$NPM_OK" = false ]; then
     log_fail "npm install 失败（node_modules 不完整）"
-    log_fail "请手动执行: cd $FRONTEND_DIR && npm install --legacy-peer-deps"
+    log_fail "请查看完整日志: $LOG_FILE"
+    log_fail "或手动执行: cd $FRONTEND_DIR && npm install --legacy-peer-deps"
     exit 1
   fi
   log_ok "前端依赖安装完成 ($(ls node_modules | wc -l) 个包) ✓"
