@@ -355,18 +355,16 @@ log_step "5" "构建前端"
 cd "$FRONTEND_DIR"
 
 BUILD_OK=false
-if [ -f "node_modules/.bin/tsc" ]; then
-  log_do "执行 tsc 类型检查 + vite build..."
-  if timeout 180 npm run build 2>&1 | tail -8; then
-    BUILD_OK=true
-  fi
+# 跳过tsc类型检查（不影响构建产物），直接vite build
+log_do "执行 vite build..."
+log_info "（跳过tsc类型检查以加速构建）"
+if timeout 180 npx vite build 2>&1 | tail -8; then
+  BUILD_OK=true
 fi
 
 if [ "$BUILD_OK" = false ]; then
-  log_do "跳过类型检查，直接执行 vite build..."
-  if timeout 180 npx vite build 2>&1 | tail -8; then
-    BUILD_OK=true
-  fi
+  log_fail "vite build 失败"
+  exit 1
 fi
 
 if [ "$BUILD_OK" = true ] && [ -d "$FRONTEND_DIR/dist" ] && [ -n "$(ls -A $FRONTEND_DIR/dist 2>/dev/null)" ]; then

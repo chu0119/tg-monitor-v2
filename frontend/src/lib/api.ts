@@ -376,7 +376,7 @@ export const api = {
       fetch(`${API_BASE}/settings/db/${encodeURIComponent(key)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value, value }),
+        body: JSON.stringify({ value }),
       }).then(handleResponse),
     reset: () =>
       fetch(`${API_BASE}/settings/reset`, {
