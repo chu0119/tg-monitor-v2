@@ -68,23 +68,34 @@ if command -v mysql &>/dev/null; then
 fi
 
 # ── Step 2: 安装缺失依赖 ──
-if [ -n "$MISSING" ]; then
-  echo -e "\n${BOLD}[2/7] 安装缺失的系统依赖...${NC}"
-  sudo apt-get update -qq
-  for pkg in $MISSING; do
-    echo -e "  ${YELLOW}⏳ 安装 $pkg...${NC}"
-    case $pkg in
-      python3) sudo apt-get install -y -qq python3 python3-pip python3-venv ;;
-      pip3) sudo apt-get install -y -qq python3-pip ;;
-      node|npm) 
-        curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - 2>/dev/null
-        sudo apt-get install -y -qq nodejs ;;
-      mysql) sudo apt-get install -y -qq mysql-server ;;
-    esac
-    echo -e "  ${GREEN}✅ $pkg 已安装${NC}"
-  done
+echo -e "\n${BOLD}[2/7] 安装缺失的系统依赖...${NC}"
+sudo apt-get update -qq
+
+# Node.js (需要特殊处理，先统一装)
+if ! command -v node &>/dev/null; then
+  echo -e "  ${YELLOW}⏳ 安装 Node.js...${NC}"
+  if ! dpkg -l | grep -q nodesource; then
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - 2>/dev/null
+  fi
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs 2>&1 | tail -2
+  echo -e "  ${GREEN}✅ Node.js $(node --version 2>/dev/null) 已安装${NC}"
 else
-  echo -e "\n${GREEN}[2/7] 系统依赖检查通过 ✓${NC}"
+  echo -e "  ${GREEN}✅ Node.js 已存在${NC}"
+fi
+
+# pip3
+if ! command -v pip3 &>/dev/null; then
+  echo -e "  ${YELLOW}⏳ 安装 pip3...${NC}"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-pip python3-venv 2>&1 | tail -2
+  echo -e "  ${GREEN}✅ pip3 已安装${NC}"
+fi
+
+# MySQL
+if ! command -v mysql &>/dev/null; then
+  echo -e "  ${YELLOW}⏳ 安装 MySQL...${NC}"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mysql-server 2>&1 | tail -2
+  sudo service mysql start 2>/dev/null || sudo systemctl start mysql 2>/dev/null || true
+  echo -e "  ${GREEN}✅ MySQL 已安装${NC}"
 fi
 
 # ── Step 3: Python虚拟环境和依赖 ──
