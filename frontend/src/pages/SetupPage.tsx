@@ -54,6 +54,8 @@ export function SetupPage() {
   const [botToken, setBotToken] = useState("");
   const [notifyChatId, setNotifyChatId] = useState("");
 
+  const [savingStep, setSavingStep] = useState<string | null>(null);
+
   const handleParseSubscribe = async () => {
     if (!subscribeUrl.trim()) {
       alert("请输入订阅链接");
@@ -176,19 +178,18 @@ export function SetupPage() {
         await api.proxy.selectNode(selectedNode.id);
         await api.proxy.start();
       } else if (proxyMode === "manual") {
-        // 保存手动代理配置到数据库
-        await api.settings.updateDbSetting({
-          settings: {
-            proxy_type: manualProxyType,
-            proxy_host: manualProxyHost,
-            proxy_port: manualProxyPort.toString(),
-          }
-        });
+        await api.settings.updateDbSetting("proxy_type", manualProxyType);
+        await api.settings.updateDbSetting("proxy_host", manualProxyHost);
+        await api.settings.updateDbSetting("proxy_port", manualProxyPort.toString());
       }
 
-      // 2. 添加账号
+      // 2. 请求账号登录（每个账号）
       for (const acc of accounts) {
-        await api.accounts.add(acc);
+        await api.accounts.requestLogin({
+          phone: acc.phone,
+          api_id: acc.api_id,
+          api_hash: acc.api_hash,
+        });
       }
 
       // 3. 保存通知设置
@@ -204,11 +205,7 @@ export function SetupPage() {
       }
 
       // 4. 标记已初始化
-      await api.settings.updateDbSetting({
-        settings: {
-          initialized: "true"
-        }
-      });
+      await api.settings.updateDbSetting("initialized", "true");
 
       // 5. 跳转到仪表盘
       navigate({ to: "/" });
