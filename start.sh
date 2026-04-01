@@ -237,13 +237,33 @@ else
   log_fail "MySQL 启动失败（请执行: sudo systemctl status mysql）"; exit 1
 fi
 
-# 修复认证方式
+# 修复认证方式 + 重置root密码
 log_do "配置 MySQL 认证方式 (mysql_native_password)..."
-sudo mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY ''; FLUSH PRIVILEGES;" 2>/dev/null
-if [ $? -eq 0 ]; then
-  log_ok "MySQL 认证方式配置完成"
+MYSQL_PWD_OK=false
+
+# 尝试空密码
+if sudo mysql -u root -e "SELECT 1" &>/dev/null; then
+  MYSQL_PWD_OK=true
+  log_ok "MySQL root 空密码连接成功"
 else
-  log_do "MySQL 认证配置跳过（可能已配置或密码不为空）"
+  # Ubuntu 25.10 可能用auth_socket，用sudo免密连接
+  if sudo mysql -e "SELECT 1" &>/dev/null; then
+    log_info "MySQL root 使用 auth_socket 认证，正在重置密码..."
+    sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY ''; FLUSH PRIVILEGES;" 2>/dev/null
+    if [ $? -eq 0 ]; then
+      MYSQL_PWD_OK=true
+      log_ok "MySQL root 密码已重置为空"
+    fi
+  fi
+fi
+
+if [ "$MYSQL_PWD_OK" = false ]; then
+  log_fail "无法连接 MySQL（root密码不为空且无法重置）"
+  log_fail "请手动执行以下命令后重新运行脚本："
+  log_fail "  sudo mysql"
+  log_fail "  ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '';"
+  log_fail "  FLUSH PRIVILEGES;"
+  exit 1
 fi
 
 log_ok "系统依赖全部安装完成 ✓"
@@ -385,11 +405,15 @@ log_step "6" "初始化数据库"
 log_do "测试 MySQL 连接..."
 if ! $PYTHON_BIN -c "
 import pymysql
-conn = pymysql.connect(host='localhost', user='root', password='', connect_timeout=5)
-conn.close()
-print('MySQL连接成功')
+try:
+    conn = pymysql.connect(host='localhost', user='root', password='', connect_timeout=5)
+    conn.close()
+    print('MySQL连接成功')
+except Exception as e:
+    import sys; print(f'MySQL连接失败: {e}'); sys.exit(1)
 " 2>&1; then
-  log_fail "无法连接 MySQL（请检查 MySQL 是否运行，root密码是否为空）"
+  log_fail "无法连接 MySQL"
+  log_fail "请手动执行: sudo mysql -e \"ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY ''; FLUSH PRIVILEGES;\""
   exit 1
 fi
 log_ok "MySQL 连接成功"
