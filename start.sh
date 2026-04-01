@@ -336,14 +336,17 @@ fi
   # 如果是安全模式，恢复正常启动
   if [ "$MYSQL_SKIP_GRANT" = true ]; then
     log_do "恢复正常MySQL模式..."
-    sudo mysqladmin shutdown 2>/dev/null
-    sleep 2
-    sudo systemctl start mysql 2>/dev/null
+    sudo pkill -f mysqld_safe 2>/dev/null
+    sudo pkill -f mysqld 2>/dev/null
     sleep 3
+    # 确保socket目录存在
+    sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld
+    sudo systemctl start mysql 2>/dev/null
+    sleep 5
     if systemctl is-active --quiet mysql 2>/dev/null; then
       log_ok "MySQL 正常模式已恢复"
     else
-      log_fail "MySQL 恢复正常模式失败"; exit 1
+      log_fail "MySQL 恢复失败，请手动: sudo systemctl start mysql"; exit 1
     fi
   fi
 else
