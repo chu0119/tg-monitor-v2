@@ -213,49 +213,35 @@ fi
 
 if [ "$VENV_OK" = false ]; then
   log_warn "安装 python3-venv..."
-  # 尝试多种包名（不同Ubuntu版本包名不同）
-  VENV_PKG=""
-  for pkg in "python${PYTHON_VER}-venv" "python3-venv" "python3-${PYTHON_VER}-venv"; do
-    if apt-cache show "$pkg" &>/dev/null; then
-      VENV_PKG="$pkg"
-      break
-    fi
-  done
-
-  if [ -n "$VENV_PKG" ]; then
-    log_warn "  安装 $VENV_PKG..."
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$VENV_PKG" python3-pip 2>&1 | tail -2
-  else
-    log_warn "  未找到venv包，尝试通用安装..."
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip 2>&1 | tail -2
+  # 尝试多种安装方式，每个失败都继续下一个
+  log_warn "  方式1: apt install python${PYTHON_VER}-venv..."
+  if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "python${PYTHON_VER}-venv" python3-pip 2>&1 | tail -2; then
+    python3 -m venv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ] && VENV_OK=true && rm -rf /tmp/test-venv-$$_123
   fi
 
-  # 再次验证
-  if python3 -m venv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ]; then
-    VENV_OK=true
-    rm -rf /tmp/test-venv-$$_123
-  fi
-
-  # 如果还是失败，尝试通过ensurepip手动修复
   if [ "$VENV_OK" = false ]; then
-    log_warn "  尝试通过pip安装venv..."
-    python3 -m ensurepip --upgrade 2>/dev/null || true
-    # 用pip安装virtualenv作为替代
-    if ! command -v pip3 &>/dev/null; then
-      curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 2>/dev/null || true
+    log_warn "  方式2: apt install python3-venv..."
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip 2>&1 | tail -2; then
+      python3 -m venv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ] && VENV_OK=true && rm -rf /tmp/test-venv-$$_123
     fi
+  fi
+
+  if [ "$VENV_OK" = false ]; then
+    log_warn "  方式3: get-pip.py + virtualenv..."
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 2>&1 | tail -2
     if command -v pip3 &>/dev/null; then
-      pip3 install virtualenv -q 2>/dev/null
-      # 用virtualenv创建
-      if command -v virtualenv &>/dev/null; then
+      pip3 install virtualenv -q 2>&1
+      if command -v virtualenv &>/dev/null && virtualenv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ]; then
+        VENV_OK=true
         VENV_CMD="virtualenv"
+        rm -rf /tmp/test-venv-$$_123
       fi
     fi
   fi
 
-  if [ "$VENV_OK" = false ] && [ "$VENV_CMD" != "virtualenv" ]; then
-    log_err "python3-venv 安装失败"
-    log_err "请手动执行: sudo apt install python3-venv"
+  if [ "$VENV_OK" = false ]; then
+    log_err "所有venv安装方式均失败"
+    log_err "请手动执行: curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 && pip3 install virtualenv"
     exit 1
   fi
 fi
