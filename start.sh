@@ -255,17 +255,53 @@ done
 
 if [ "$MYSQL_CONNECT_OK" = false ]; then
   log_fail "sudo mysql 连接失败"
-  log_fail "请检查MySQL状态: sudo systemctl status mysql"
-  # 尝试诊断
-  if ! systemctl is-active --quiet mysql 2>/dev/null; then
-    log_info "MySQL服务未运行，尝试启动..."
-    sudo systemctl start mysql 2>/dev/null
-    sleep 3
-    if sudo mysql -e "SELECT 1" &>/dev/null; then
+  # 诊断信息
+  log_info "=== 诊断信息 ==="
+  log_info "MySQL状态: $(systemctl is-active mysql 2>/dev/null || echo '未知')"
+  log_info "Socket文件: $(ls -la /var/run/mysqld/mysqld.sock 2>/dev/null || ls -la /tmp/mysql.sock 2>/dev/null || echo '未找到')"
+  log_info "MySQL进程: $(pgrep -a mysqld 2>/dev/null | head -2 || echo '未找到')"
+  log_info "插件检查:"
+  sudo mysql -u root -p'' -e "SELECT user,host,plugin FROM mysql.user WHERE user='root';" 2>/dev/null | head -5 && MYSQL_ROOT_EMPTY_OK=true
+  log_info "================="
+  
+  # 尝试方式1: 用socket路径直接连
+  for sock in /var/run/mysqld/mysqld.sock /tmp/mysql.sock /run/mysqld/mysqld.sock; do
+    if [ -S "$sock" ]; then
+      log_info "尝试socket: $sock"
+      if sudo mysql -S "$sock" -e "SELECT 1" &>/dev/null; then
+        MYSQL_CONNECT_OK=true
+        MYSQL_SOCK="$sock"
+        break
+      fi
+    fi
+  done
+
+  # 尝试方式2: 空密码
+  if [ "$MYSQL_CONNECT_OK" = false ]; then
+    log_info "尝试空密码连接..."
+    if sudo mysql -u root -p'' -e "SELECT 1" &>/dev/null; then
       MYSQL_CONNECT_OK=true
     fi
   fi
-  [ "$MYSQL_CONNECT_OK" = false ] && exit 1
+
+  # 尝试方式3: 停止重置
+  if [ "$MYSQL_CONNECT_OK" = false ]; then
+    log_info "尝试停止MySQL安全模式重启..."
+    sudo systemctl stop mysql 2>/dev/null
+    sleep 2
+    sudo mysqld_safe --skip-grant-tables &
+    sleep 5
+    if sudo mysql -e "SELECT 1" &>/dev/null; then
+      MYSQL_CONNECT_OK=true
+      log_info "安全模式连接成功"
+    else
+      sudo pkill -f mysqld_safe 2>/dev/null
+      sudo systemctl start mysql 2>/dev/null
+      sleep 3
+    fi
+  fi
+
+  [ "$MYSQL_CONNECT_OK" = false ] && { log_fail "所有连接方式均失败，请手动检查MySQL"; exit 1; }
 fi
   echo ""
   echo -e "  ${CYAN}请为 MySQL root 设置一个密码（用于程序连接数据库）：${NC}"
@@ -288,7 +324,9 @@ fi
   done
 
   # 强制重置密码
-  sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
+  MYSQL_SOCK_ARG=""
+[ -n "$MYSQL_SOCK" ] && MYSQL_SOCK_ARG="-S $MYSQL_SOCK"
+sudo mysql $MYSQL_SOCK_ARG -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
   if [ $? -eq 0 ]; then
     if [ -z "$MYSQL_ROOT_PWD" ]; then
       log_ok "MySQL root: 无密码"
@@ -312,7 +350,7 @@ DB_USER="tgmonitor"
 DB_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 DB_NAME="tg_monitor"
 
-sudo mysql -u root ${MYSQL_ROOT_PWD:+-p"$MYSQL_ROOT_PWD"} << EOSQL 2>/dev/null
+sudo mysql $MYSQL_SOCK_ARG -u root ${MYSQL_ROOT_PWD:+-p"$MYSQL_ROOT_PWD"} << EOSQL 2>/dev/null
 CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
 GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
