@@ -83,17 +83,17 @@ else
   echo -e "  ${GREEN}✅ Node.js 已存在${NC}"
 fi
 
-# pip3
-if ! command -v pip3 &>/dev/null; then
-  echo -e "  ${YELLOW}⏳ 安装 pip3...${NC}"
+# pip3 + python3-venv
+if ! command -v pip3 &>/dev/null || ! dpkg -l | grep -q python3-venv; then
+  echo -e "  ${YELLOW}⏳ 安装 pip3 和 python3-venv...${NC}"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-pip python3-venv 2>&1 | tail -2
   echo -e "  ${GREEN}✅ pip3 已安装${NC}"
 fi
 
 # MySQL
 if ! command -v mysql &>/dev/null; then
-  echo -e "  ${YELLOW}⏳ 安装 MySQL...${NC}"
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mysql-server 2>&1 | tail -2
+  echo -e "  ${YELLOW}⏳ 安装 MySQL（可能需要1-2分钟）...${NC}"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mysql-server
   sudo service mysql start 2>/dev/null || sudo systemctl start mysql 2>/dev/null || true
   echo -e "  ${GREEN}✅ MySQL 已安装${NC}"
 fi
