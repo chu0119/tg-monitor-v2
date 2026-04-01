@@ -220,9 +220,14 @@ echo -e "\n${BOLD}[4/8] 安装前端依赖...${NC}"
 cd "$FRONTEND_DIR"
 
 if [ ! -d "node_modules" ]; then
-  echo -e "  ${YELLOW}⏳ npm install...${NC}"
-  npm install 2>&1 | tail -3
-  echo -e "  ${GREEN}✅ 前端依赖安装完成${NC}"
+  echo -e "  ${YELLOW}⏳ npm install（可能需要1-2分钟）...${NC}"
+  if npm install 2>&1 | tail -5; then
+    echo -e "  ${GREEN}✅ 前端依赖安装完成${NC}"
+  else
+    echo -e "  ${RED}❌ npm install 失败${NC}"
+    echo -e "  ${YELLOW}  尝试: cd $FRONTEND_DIR && npm install --legacy-peer-deps${NC}"
+    exit 1
+  fi
 else
   echo -e "  ${GREEN}✅ node_modules 已存在${NC}"
 fi
@@ -234,12 +239,12 @@ cd "$PROJECT_DIR"
 echo -e "\n${BOLD}[5/8] 构建前端...${NC}"
 cd "$FRONTEND_DIR"
 
-if npm run build 2>&1 | tail -5; then
-  echo -e "  ${GREEN}✅ 前端构建完成${NC}"
+# 检查tsc是否可用
+if ! npx tsc --version &>/dev/null; then
+  echo -e "  ${YELLOW}⚠️  tsc 未找到，跳过类型检查，直接构建${NC}"
+  npx vite build 2>&1 | tail -5
 else
-  echo -e "  ${RED}❌ 前端构建失败${NC}"
-  echo -e "  ${YELLOW}提示: 请检查 Node.js 版本是否 >= 18，运行 'node --version' 确认${NC}"
-  exit 1
+  npm run build 2>&1 | tail -5
 fi
 cd "$PROJECT_DIR"
 
