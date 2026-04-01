@@ -76,10 +76,7 @@ if [ -n "$MISSING" ]; then
     case $pkg in
       python3) sudo apt-get install -y -qq python3 python3-pip python3-venv ;;
       pip3) sudo apt-get install -y -qq python3-pip ;;
-      node) 
-        curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - 2>/dev/null
-        sudo apt-get install -y -qq nodejs ;;
-      npm)
+      node|npm) 
         curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - 2>/dev/null
         sudo apt-get install -y -qq nodejs ;;
       mysql) sudo apt-get install -y -qq mysql-server ;;
