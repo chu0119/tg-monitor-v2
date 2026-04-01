@@ -262,6 +262,26 @@ log_do "升级 pip..."
 $PIP_BIN install --upgrade pip --break-system-packages -q 2>/dev/null
 log_ok "pip 升级完成: $($PIP_BIN --version 2>&1 | awk '{print $2}')"
 
+# Ubuntu 25.04+ 移除了 distutils，某些包需要它
+log_do "检查 distutils..."
+if ! $PYTHON_BIN -c "import distutils" 2>/dev/null; then
+  log_info "distutils 不可用，安装 setuptools..."
+  $PIP_BIN install setuptools --break-system-packages -q 2>/dev/null
+  if $PYTHON_BIN -c "import distutils" 2>/dev/null; then
+    log_ok "distutils 安装成功 (通过 setuptools)"
+  else
+    log_info "尝试 apt 安装..."
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-distutils 2>&1 | tail -2 || true
+    if $PYTHON_BIN -c "import distutils" 2>/dev/null; then
+      log_ok "distutils 安装成功 (apt)"
+    else
+      log_fail "distutils 安装失败，部分包可能无法安装"
+    fi
+  fi
+else
+  log_ok "distutils 可用"
+fi
+
 if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   log_do "安装 requirements.txt 中的依赖..."
   log_info "依赖文件: $BACKEND_DIR/requirements.txt"
