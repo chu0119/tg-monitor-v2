@@ -36,7 +36,6 @@ fi
 MARKER="$PROJECT_DIR/.deployed"
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
-VENV_DIR="$BACKEND_DIR/venv"
 SERVICE_NAME="tgmonitor"
 LOG_FILE="/tmp/tg-monitor-deploy.log"
 
@@ -203,55 +202,18 @@ if ! command -v python3 &>/dev/null; then
   fi
 fi
 
-# python3-venv（必须能成功创建venv才算OK）
-PYTHON_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-VENV_OK=false
-if python3 -m venv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ]; then
-  VENV_OK=true
-  rm -rf /tmp/test-venv-$$_123
-fi
-
-if [ "$VENV_OK" = false ]; then
-  log_warn "安装 python3-venv..."
-  # 尝试多种安装方式，每个失败都继续下一个
-  log_warn "  方式1: apt install python${PYTHON_VER}-venv..."
-  if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "python${PYTHON_VER}-venv" python3-pip 2>&1 | tail -2; then
-    python3 -m venv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ] && VENV_OK=true && rm -rf /tmp/test-venv-$$_123
-  fi
-
-  if [ "$VENV_OK" = false ]; then
-    log_warn "  方式2: apt install python3-venv..."
-    if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip 2>&1 | tail -2; then
-      python3 -m venv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ] && VENV_OK=true && rm -rf /tmp/test-venv-$$_123
-    fi
-  fi
-
-  if [ "$VENV_OK" = false ]; then
-    log_warn "  方式3: get-pip.py + virtualenv..."
-    curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 2>&1 | tail -2
-    if command -v pip3 &>/dev/null; then
-      pip3 install virtualenv -q 2>&1
-      if command -v virtualenv &>/dev/null && virtualenv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ]; then
-        VENV_OK=true
-        VENV_CMD="virtualenv"
-        rm -rf /tmp/test-venv-$$_123
-      fi
-    fi
-  fi
-
-  if [ "$VENV_OK" = false ]; then
-    log_err "所有venv安装方式均失败"
-    log_err "请手动执行: curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 && pip3 install virtualenv"
-    exit 1
-  fi
-fi
-
-# pip
+# pip（系统级安装）
 if ! command -v pip3 &>/dev/null; then
   log_warn "安装 pip..."
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip 2>&1 | tail -2
+  curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 2>&1 | tail -2
+  if ! command -v pip3 &>/dev/null; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip 2>&1 | tail -2
+  fi
 fi
-log_info "Python3 $(python3 --version 2>&1 | awk '{print $2}')"
+PYTHON_BIN=$(which python3)
+PIP_BIN=$(which pip3)
+log_info "Python3 $($PYTHON_BIN --version 2>&1 | awk '{print $2}')"
+log_info "使用系统Python（无虚拟环境）"
 
 # ── Node.js ──
 log_warn "检查 Node.js..."
@@ -342,30 +304,7 @@ sudo mysql -u root -e "
 # ═══════════════════════════════════════════════
 log_step "3/9" "安装Python依赖"
 
-if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/python3" ] || [ ! -f "$VENV_DIR/bin/pip" ]; then
-  log_warn "创建虚拟环境 → $VENV_DIR"
-  rm -rf "$VENV_DIR"
-  if [ "$VENV_CMD" = "virtualenv" ]; then
-    virtualenv "$VENV_DIR"
-  else
-    python3 -m venv "$VENV_DIR"
-  fi
-  if [ ! -f "$VENV_DIR/bin/python3" ] || [ ! -f "$VENV_DIR/bin/pip" ]; then
-    log_err "虚拟环境创建失败"
-    log_err "请执行: sudo apt install python3-venv"
-    exit 1
-  fi
-  log_info "虚拟环境已创建"
-else
-  log_info "虚拟环境已存在"
-fi
-
-VENV_PYTHON="$VENV_DIR/bin/python3"
-VENV_PIP="$VENV_DIR/bin/pip"
-log_info "Python: $VENV_PYTHON ($($VENV_PYTHON --version 2>&1 | awk '{print $2}'))"
-
-# 升级pip
-$VENV_PIP install --upgrade pip -q 2>/dev/null
+$PIP_BIN install --upgrade pip -q 2>/dev/null
 
 if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   log_warn "pip install -r requirements.txt..."
@@ -373,12 +312,12 @@ if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   if [ -n "$PIP_INDEX" ]; then
     PIP_ARGS="$PIP_ARGS -i $PIP_INDEX --trusted-host $(echo $PIP_INDEX | sed 's|https://||;s|/simple||')"
   fi
-  if $VENV_PIP install $PIP_ARGS 2>&1 | tail -8; then
+  if $PIP_BIN install $PIP_ARGS 2>&1 | tail -8; then
     log_info "Python依赖安装完成"
   else
     # 重试一次（网络不稳定）
     log_warn "首次安装可能有问题，重试中..."
-    if $VENV_PIP install $PIP_ARGS 2>&1 | tail -5; then
+    if $PIP_BIN install $PIP_ARGS 2>&1 | tail -5; then
       log_info "Python依赖安装完成（重试成功）"
     else
       log_err "Python依赖安装失败"
@@ -473,7 +412,7 @@ log_step "6/9" "初始化数据库"
 
 # 测试MySQL连接
 log_warn "测试MySQL连接..."
-if ! $VENV_PYTHON -c "
+if ! $PYTHON_BIN -c "
 import pymysql
 try:
     conn = pymysql.connect(host='localhost', user='root', password='', connect_timeout=5)
@@ -484,13 +423,13 @@ except Exception as e:
 " 2>&1; then
   log_err "无法连接MySQL"
   log_err "请检查: sudo systemctl status mysql"
-  log_err "如果root有密码，请手动执行: $VENV_PYTHON $BACKEND_DIR/init_db.py"
+  log_err "如果root有密码，请手动执行: $PYTHON_BIN $BACKEND_DIR/init_db.py"
   exit 1
 fi
 
 if [ -f "$BACKEND_DIR/init_db.py" ]; then
   log_warn "执行数据库初始化..."
-  if $VENV_PYTHON "$BACKEND_DIR/init_db.py" 2>&1; then
+  if $PYTHON_BIN "$BACKEND_DIR/init_db.py" 2>&1; then
     log_info "数据库初始化完成"
   else
     log_err "数据库初始化失败，请查看上方错误信息"
@@ -568,8 +507,8 @@ Wants=mysql.service
 [Service]
 Type=simple
 WorkingDirectory=$BACKEND_DIR
-Environment=PATH=$VENV_DIR/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=$VENV_PYTHON -m uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=$PYTHON_BIN -m uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT
 Restart=always
 RestartSec=5
 StartLimitBurst=5
@@ -636,7 +575,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$PROJECT_DIR
-ExecStart=$VENV_PYTHON -m http.server $FRONTEND_PORT --directory $FRONTEND_DIR/dist
+ExecStart=$PYTHON_BIN -m http.server $FRONTEND_PORT --directory $FRONTEND_DIR/dist
 Restart=always
 RestartSec=5
 StandardOutput=journal
