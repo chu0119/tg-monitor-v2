@@ -10,15 +10,25 @@
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-# ── 路径（处理嵌套目录问题）──
+# ── 路径 ──
+# 脚本所在目录（解析软链接）
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-# 如果当前目录结构是 tg-monitor-v2/tg-monitor-v2/，自动修正
-if [ -d "$SCRIPT_DIR/backend" ] && [ -d "$SCRIPT_DIR/frontend" ]; then
-  PROJECT_DIR="$SCRIPT_DIR"
-elif [ -d "$SCRIPT_DIR/../../backend" ] && [ -d "$SCRIPT_DIR/../../frontend" ]; then
-  PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-else
-  echo -e "${RED}❌ 找不到 backend/ 和 frontend/ 目录，请确认项目结构${NC}"
+
+# 项目根目录：向上查找包含 backend/ 和 frontend/ 的目录
+PROJECT_DIR=""
+_dir="$SCRIPT_DIR"
+while [ "$_dir" != "/" ]; do
+  if [ -d "$_dir/backend" ] && [ -d "$_dir/frontend" ]; then
+    PROJECT_DIR="$_dir"
+    break
+  fi
+  _dir="$(dirname "$_dir")"
+done
+
+if [ -z "$PROJECT_DIR" ]; then
+  echo -e "${RED}❌ 找不到包含 backend/ 和 frontend/ 的项目目录${NC}"
+  echo -e "${YELLOW}当前目录: $SCRIPT_DIR${NC}"
+  echo -e "${YELLOW}请确认从项目根目录运行: cd <项目目录> && ./start.sh${NC}"
   exit 1
 fi
 
@@ -177,15 +187,20 @@ fi
 echo -e "\n${BOLD}[3/8] 安装Python依赖...${NC}"
 
 if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/python3" ]; then
-  echo -e "  ${YELLOW}⏳ 创建虚拟环境...${NC}"
+  echo -e "  ${YELLOW}⏳ 创建虚拟环境 → $VENV_DIR${NC}"
   rm -rf "$VENV_DIR"
   python3 -m venv "$VENV_DIR"
+  if [ ! -f "$VENV_DIR/bin/python3" ]; then
+    echo -e "  ${RED}❌ 虚拟环境创建失败，请先安装: sudo apt install python3-venv${NC}"
+    exit 1
+  fi
   echo -e "  ${GREEN}✅ 虚拟环境已创建${NC}"
 else
-  echo -e "  ${GREEN}✅ 虚拟环境已存在${NC}"
+  echo -e "  ${GREEN}✅ 虚拟环境已存在: $VENV_DIR${NC}"
 fi
 
 source "$VENV_DIR/bin/activate"
+echo -e "  ${GREEN}  Python: $(which python3)$(python3 --version 2>&1 | awk '{print " ("$2")"}')${NC}"
 
 # 升级pip
 pip install --upgrade pip -q 2>/dev/null
@@ -233,23 +248,36 @@ cd "$PROJECT_DIR"
 # ═══════════════════════════════════════════
 echo -e "\n${BOLD}[6/8] 初始化数据库...${NC}"
 
+# 确保在正确的venv中
+source "$VENV_DIR/bin/activate"
+
 # 检查MySQL连接
-if ! $VENV_DIR/bin/python3 -c "import pymysql; pymysql.connect(host='localhost', user='root', password='')" 2>/dev/null; then
-  if ! $VENV_DIR/bin/python3 -c "import pymysql; pymysql.connect(host='localhost', user='root')" 2>/dev/null; then
-    echo -e "  ${YELLOW}⚠️  MySQL root 用户可能需要密码，尝试无密码连接...${NC}"
-  fi
+echo -e "  ${YELLOW}⏳ 检查MySQL连接...${NC}"
+if ! python3 -c "
+import pymysql
+try:
+    pymysql.connect(host='localhost', user='root', password='', connect_timeout=5)
+    print('    MySQL连接成功（无密码）')
+except Exception as e:
+    print(f'    MySQL连接失败: {e}')
+    print('    请检查MySQL是否运行，或手动设置root密码')
+    import sys; sys.exit(1)
+" 2>&1; then
+  echo -e "  ${RED}❌ 无法连接MySQL，请先确保MySQL服务正常运行${NC}"
+  echo -e "  ${YELLOW}  修复: sudo systemctl start mysql${NC}"
+  echo -e "  ${YELLOW}  如果root有密码，请手动执行: $VENV_DIR/bin/python3 $BACKEND_DIR/init_db.py${NC}"
+  exit 1
 fi
 
-source "$VENV_DIR/bin/activate"
 if [ -f "$BACKEND_DIR/init_db.py" ]; then
   echo -e "  ${YELLOW}⏳ 执行数据库初始化...${NC}"
   if python3 "$BACKEND_DIR/init_db.py" 2>&1; then
     echo -e "  ${GREEN}✅ 数据库初始化完成${NC}"
   else
-    echo -e "  ${YELLOW}⚠️  数据库初始化出现警告，可能需要手动检查${NC}"
+    echo -e "  ${YELLOW}⚠️  数据库初始化出现警告，请查看上方输出${NC}"
   fi
 else
-  echo -e "  ${YELLOW}⚠️  未找到 init_db.py，跳过数据库初始化${NC}"
+  echo -e "  ${YELLOW}⚠️  未找到 init_db.py，跳过${NC}"
 fi
 
 # ═══════════════════════════════════════════
