@@ -203,13 +203,24 @@ if ! command -v python3 &>/dev/null; then
   fi
 fi
 
-# python3-venv
+# python3-venv（必须能成功创建venv才算OK）
 PYTHON_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-if ! python3 -c "import venv" 2>/dev/null; then
+VENV_OK=false
+# 尝试实际创建一个临时venv来验证
+if python3 -m venv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ]; then
+  VENV_OK=true
+  rm -rf /tmp/test-venv-$$_123
+fi
+
+if [ "$VENV_OK" = false ]; then
   log_warn "安装 python${PYTHON_VER}-venv..."
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "python${PYTHON_VER}-venv" 2>&1 | tail -2 || \
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv 2>&1 | tail -2
-  if ! python3 -c "import venv" 2>/dev/null; then
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "python${PYTHON_VER}-venv" python3-pip 2>&1 | tail -2
+  # 再次验证
+  if python3 -m venv /tmp/test-venv-$$_123 &>/dev/null && [ -f /tmp/test-venv-$$_123/bin/python3 ]; then
+    VENV_OK=true
+    rm -rf /tmp/test-venv-$$_123
+  fi
+  if [ "$VENV_OK" = false ]; then
     log_err "python3-venv 安装失败"; exit 1
   fi
 fi
@@ -310,21 +321,22 @@ sudo mysql -u root -e "
 # ═══════════════════════════════════════════════
 log_step "3/9" "安装Python依赖"
 
-if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/python3" ]; then
+if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/python3" ] || [ ! -f "$VENV_DIR/bin/pip3" ]; then
   log_warn "创建虚拟环境 → $VENV_DIR"
   rm -rf "$VENV_DIR"
   python3 -m venv "$VENV_DIR"
-  if [ ! -f "$VENV_DIR/bin/python3" ]; then
-    log_err "虚拟环境创建失败"; exit 1
+  if [ ! -f "$VENV_DIR/bin/python3" ] || [ ! -f "$VENV_DIR/bin/pip3" ]; then
+    log_err "虚拟环境创建失败（python3-venv可能未正确安装）"
+    log_err "请执行: sudo apt install python${PYTHON_VER}-venv"
+    exit 1
   fi
   log_info "虚拟环境已创建"
 else
   log_info "虚拟环境已存在"
 fi
 
-# 激活venv（用source可能不生效，直接用绝对路径更可靠）
 VENV_PYTHON="$VENV_DIR/bin/python3"
-VENV_PIP="$VENV_DIR/bin/pip3"
+VENV_PIP="$VENV_DIR/bin/pip"
 log_info "Python: $VENV_PYTHON ($($VENV_PYTHON --version 2>&1 | awk '{print $2}'))"
 
 # 升级pip
@@ -365,19 +377,29 @@ if [ ! -d "node_modules" ]; then
     NPM_INSTALL="$NPM_INSTALL --registry=$NPM_REGISTRY"
   fi
 
+  NPM_OK=false
   if $NPM_INSTALL 2>&1 | tail -5; then
-    log_info "前端依赖安装完成"
-  else
+    if [ -d "node_modules" ] && [ "$(ls node_modules | wc -l)" -gt 5 ]; then
+      NPM_OK=true
+    fi
+  fi
+
+  if [ "$NPM_OK" = false ]; then
     # 重试：legacy-peer-deps
     log_warn "首次安装失败，尝试 --legacy-peer-deps..."
     if npm install --legacy-peer-deps 2>&1 | tail -5; then
-      log_info "前端依赖安装完成（legacy-peer-deps）"
-    else
-      log_err "npm install 失败"
-      log_err "请手动执行: cd $FRONTEND_DIR && npm install --legacy-peer-deps"
-      exit 1
+      if [ -d "node_modules" ] && [ "$(ls node_modules | wc -l)" -gt 5 ]; then
+        NPM_OK=true
+      fi
     fi
   fi
+
+  if [ "$NPM_OK" = false ]; then
+    log_err "npm install 失败（node_modules不完整）"
+    log_err "请手动执行: cd $FRONTEND_DIR && npm install --legacy-peer-deps"
+    exit 1
+  fi
+  log_info "前端依赖安装完成"
 else
   log_info "node_modules 已存在"
 fi
@@ -392,14 +414,14 @@ cd "$FRONTEND_DIR"
 BUILD_OK=false
 if [ -f "node_modules/.bin/tsc" ]; then
   log_warn "tsc && vite build..."
-  if npm run build 2>&1 | tail -5; then
+  if timeout 120 npm run build 2>&1 | tail -5; then
     BUILD_OK=true
   fi
 fi
 
 if [ "$BUILD_OK" = false ]; then
   log_warn "跳过类型检查，直接 vite build..."
-  if npx vite build 2>&1 | tail -5; then
+  if timeout 120 npx vite build 2>&1 | tail -5; then
     BUILD_OK=true
   fi
 fi
