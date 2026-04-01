@@ -243,7 +243,30 @@ MYSQL_ROOT_PWD=""
 MYSQL_PWD_OK=false
 
 # 强制通过sudo mysql重置密码（Ubuntu的auth_socket免密）
-if sudo mysql -e "SELECT 1" &>/dev/null; then
+MYSQL_CONNECT_OK=false
+for try in 1 2 3 4 5; do
+  if sudo mysql -e "SELECT 1" &>/dev/null; then
+    MYSQL_CONNECT_OK=true
+    break
+  fi
+  log_info "等待MySQL就绪... ($try/5)"
+  sleep 2
+done
+
+if [ "$MYSQL_CONNECT_OK" = false ]; then
+  log_fail "sudo mysql 连接失败"
+  log_fail "请检查MySQL状态: sudo systemctl status mysql"
+  # 尝试诊断
+  if ! systemctl is-active --quiet mysql 2>/dev/null; then
+    log_info "MySQL服务未运行，尝试启动..."
+    sudo systemctl start mysql 2>/dev/null
+    sleep 3
+    if sudo mysql -e "SELECT 1" &>/dev/null; then
+      MYSQL_CONNECT_OK=true
+    fi
+  fi
+  [ "$MYSQL_CONNECT_OK" = false ] && exit 1
+fi
   echo ""
   echo -e "  ${CYAN}请为 MySQL root 设置一个密码（用于程序连接数据库）：${NC}"
   echo -e "  ${DIM}（如果之前没设过密码，现在设置一个就行）${NC}"
