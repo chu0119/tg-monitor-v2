@@ -289,7 +289,7 @@ if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   log_info "依赖数量: ${PKG_COUNT} 个包"
   [ -n "$PIP_INDEX" ] && log_info "使用镜像: $PIP_INDEX"
 
-  PIP_ARGS="-r $BACKEND_DIR/requirements.txt --break-system-packages"
+  PIP_ARGS="-r $BACKEND_DIR/requirements.txt --break-system-packages --ignore-installed"
   [ -n "$PIP_INDEX" ] && PIP_ARGS="$PIP_ARGS -i $PIP_INDEX --trusted-host $(echo $PIP_INDEX | sed 's|https://||;s|/simple.*||')"
 
   PIP_OUTPUT=$($PIP_BIN install $PIP_ARGS 2>&1)
