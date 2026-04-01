@@ -291,6 +291,42 @@ fi
 
 [ "$MYSQL_PWD_OK" = false ] && { log_fail "无法连接 MySQL"; exit 1; }
 
+# 创建MySQL数据库和专用用户
+log_do "创建 MySQL 数据库和用户..."
+# 生成随机密码给tgmonitor用户
+DB_USER="tgmonitor"
+DB_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+DB_NAME="tg_monitor"
+
+sudo mysql -u root ${MYSQL_ROOT_PWD:+-p"$MYSQL_ROOT_PWD"} << EOSQL 2>/dev/null
+CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
+GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
+FLUSH PRIVILEGES;
+EOSQL
+
+if [ $? -eq 0 ]; then
+  log_ok "数据库 ${DB_NAME} 创建完成"
+  log_ok "用户 ${DB_USER} 创建完成"
+else
+  log_fail "数据库/用户创建失败"; exit 1
+fi
+
+# 生成 .env 文件
+log_do "生成 backend/.env 配置文件..."
+cat > "$BACKEND_DIR/.env" << EOF
+# MySQL 数据库配置（自动生成，请勿手动修改）
+DATABASE_TYPE=mysql
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=${DB_USER}
+MYSQL_PASSWORD=${DB_PASS}
+MYSQL_DATABASE=${DB_NAME}
+EOF
+
+log_ok "配置文件已生成: $BACKEND_DIR/.env"
+log_info "数据库: ${DB_NAME} / 用户: ${DB_USER}"
+
 log_ok "系统依赖全部安装完成 ✓"
 
 # ═══════════════════════════════════════════════════════════════
