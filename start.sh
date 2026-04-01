@@ -318,9 +318,10 @@ fi
     fi
   done
 
-  # 强制重置密码
-  sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
-  if [ $? -eq 0 ]; then
+  # 强制重置密码（安全模式下需要先flush）
+  sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>&1
+  SQL_EXIT=$?
+  if [ $SQL_EXIT -eq 0 ]; then
     if [ -z "$MYSQL_ROOT_PWD" ]; then
       log_ok "MySQL root: 无密码"
     else
