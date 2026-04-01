@@ -272,14 +272,22 @@ if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   PIP_ARGS="-r $BACKEND_DIR/requirements.txt --break-system-packages"
   [ -n "$PIP_INDEX" ] && PIP_ARGS="$PIP_ARGS -i $PIP_INDEX --trusted-host $(echo $PIP_INDEX | sed 's|https://||;s|/simple.*||')"
 
-  if $PIP_BIN install $PIP_ARGS 2>&1 | tail -8; then
+  PIP_OUTPUT=$($PIP_BIN install $PIP_ARGS 2>&1)
+  PIP_EXIT=$?
+  echo "$PIP_OUTPUT" | tail -8
+  if [ $PIP_EXIT -eq 0 ]; then
     log_ok "Python 依赖安装完成 ✓"
   else
-    log_do "首次安装可能有问题，正在重试..."
-    if $PIP_BIN install $PIP_ARGS 2>&1 | tail -5; then
+    log_do "首次安装失败（退出码: $PIP_EXIT），正在重试..."
+    PIP_OUTPUT=$($PIP_BIN install $PIP_ARGS 2>&1)
+    PIP_EXIT=$?
+    echo "$PIP_OUTPUT" | tail -5
+    if [ $PIP_EXIT -eq 0 ]; then
       log_ok "Python 依赖安装完成（重试成功）✓"
     else
-      log_fail "Python 依赖安装失败"; exit 1
+      log_fail "Python 依赖安装失败（退出码: $PIP_EXIT）"
+      echo "$PIP_OUTPUT" | grep -i "error\|failed\|Could not" | head -5 | sed 's/^/    /'
+      exit 1
     fi
   fi
 else

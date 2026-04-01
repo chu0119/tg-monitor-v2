@@ -59,7 +59,7 @@ export function ProxyPage() {
   const [testingNodes, setTestingNodes] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const [abortController, = useState<AbortController | null>(null);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   const [savingStep, setSavingStep] = useState<string | null>(null);
 
