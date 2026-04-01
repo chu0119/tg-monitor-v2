@@ -290,7 +290,7 @@ if [ "$MYSQL_CONNECT_OK" = false ]; then
       log_fail "  sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld"
       log_fail "  sudo mysqld_safe --skip-grant-tables &"
       log_fail "  sleep 5 && sudo mysql"
-      log_fail "  ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '你的密码';"
+      log_fail "  ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '你的密码';"
       log_fail "  FLUSH PRIVILEGES;"
       sudo pkill -f mysqld_safe 2>/dev/null
       sudo systemctl start mysql 2>/dev/null
@@ -319,7 +319,8 @@ fi
   done
 
   # 强制重置密码（安全模式下需要先flush）
-  sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>&1
+  # MySQL 8.4+ 不再支持 mysql_native_password，改用 caching_sha2_password
+  sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>&1
   SQL_EXIT=$?
   if [ $SQL_EXIT -eq 0 ]; then
     if [ -z "$MYSQL_ROOT_PWD" ]; then
