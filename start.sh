@@ -254,54 +254,49 @@ for try in 1 2 3 4 5; do
 done
 
 if [ "$MYSQL_CONNECT_OK" = false ]; then
-  log_fail "sudo mysql 连接失败"
-  # 诊断信息
+  log_fail "sudo mysql 需要密码（auth_socket未启用）"
   log_info "=== 诊断信息 ==="
-  log_info "MySQL状态: $(systemctl is-active mysql 2>/dev/null || echo '未知')"
-  log_info "Socket文件: $(ls -la /var/run/mysqld/mysqld.sock 2>/dev/null || ls -la /tmp/mysql.sock 2>/dev/null || echo '未找到')"
-  log_info "MySQL进程: $(pgrep -a mysqld 2>/dev/null | head -2 || echo '未找到')"
-  log_info "插件检查:"
-  sudo mysql -u root -p'' -e "SELECT user,host,plugin FROM mysql.user WHERE user='root';" 2>/dev/null | head -5 && MYSQL_ROOT_EMPTY_OK=true
+  log_info "MySQL状态: $(systemctl is-active mysql 2>/dev/null)"
+  log_info "Socket: $(ls -la /var/run/mysqld/mysqld.sock 2>/dev/null || echo '未找到')"
   log_info "================="
+
+  # 方式: skip-grant-tables 重置密码
+  log_do "使用安全模式重置MySQL密码..."
+  sudo systemctl stop mysql 2>/dev/null
+  sleep 2
   
-  # 尝试方式1: 用socket路径直接连
-  for sock in /var/run/mysqld/mysqld.sock /tmp/mysql.sock /run/mysqld/mysqld.sock; do
-    if [ -S "$sock" ]; then
-      log_info "尝试socket: $sock"
-      if sudo mysql -S "$sock" -e "SELECT 1" &>/dev/null; then
-        MYSQL_CONNECT_OK=true
-        MYSQL_SOCK="$sock"
-        break
-      fi
-    fi
-  done
-
-  # 尝试方式2: 空密码
-  if [ "$MYSQL_CONNECT_OK" = false ]; then
-    log_info "尝试空密码连接..."
-    if sudo mysql -u root -p'' -e "SELECT 1" &>/dev/null; then
-      MYSQL_CONNECT_OK=true
-    fi
-  fi
-
-  # 尝试方式3: 停止重置
-  if [ "$MYSQL_CONNECT_OK" = false ]; then
-    log_info "尝试停止MySQL安全模式重启..."
-    sudo systemctl stop mysql 2>/dev/null
-    sleep 2
-    sudo mysqld_safe --skip-grant-tables &
+  # 确保目录存在
+  sudo mkdir -p /var/run/mysqld
+  sudo chown mysql:mysql /var/run/mysqld
+  
+  # 用skip-grant-tables启动
+  sudo mysqld_safe --skip-grant-tables --skip-networking >/dev/null 2>&1 &
+  sleep 5
+  
+  if sudo mysql -e "SELECT 1" &>/dev/null; then
+    MYSQL_CONNECT_OK=true
+    MYSQL_SKIP_GRANT=true
+    log_ok "安全模式连接成功"
+  else
+    # 再等一下
     sleep 5
     if sudo mysql -e "SELECT 1" &>/dev/null; then
       MYSQL_CONNECT_OK=true
-      log_info "安全模式连接成功"
+      MYSQL_SKIP_GRANT=true
+      log_ok "安全模式连接成功（重试）"
     else
+      log_fail "安全模式也失败，请手动执行:"
+      log_fail "  sudo systemctl stop mysql"
+      log_fail "  sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld"
+      log_fail "  sudo mysqld_safe --skip-grant-tables &"
+      log_fail "  sleep 5 && sudo mysql"
+      log_fail "  ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '你的密码';"
+      log_fail "  FLUSH PRIVILEGES;"
       sudo pkill -f mysqld_safe 2>/dev/null
       sudo systemctl start mysql 2>/dev/null
-      sleep 3
+      exit 1
     fi
   fi
-
-  [ "$MYSQL_CONNECT_OK" = false ] && { log_fail "所有连接方式均失败，请手动检查MySQL"; exit 1; }
 fi
   echo ""
   echo -e "  ${CYAN}请为 MySQL root 设置一个密码（用于程序连接数据库）：${NC}"
@@ -324,9 +319,7 @@ fi
   done
 
   # 强制重置密码
-  MYSQL_SOCK_ARG=""
-[ -n "$MYSQL_SOCK" ] && MYSQL_SOCK_ARG="-S $MYSQL_SOCK"
-sudo mysql $MYSQL_SOCK_ARG -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
+  sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
   if [ $? -eq 0 ]; then
     if [ -z "$MYSQL_ROOT_PWD" ]; then
       log_ok "MySQL root: 无密码"
@@ -336,6 +329,20 @@ sudo mysql $MYSQL_SOCK_ARG -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' I
     MYSQL_PWD_OK=true
   else
     log_fail "密码设置失败"; exit 1
+  fi
+
+  # 如果是安全模式，恢复正常启动
+  if [ "$MYSQL_SKIP_GRANT" = true ]; then
+    log_do "恢复正常MySQL模式..."
+    sudo mysqladmin shutdown 2>/dev/null
+    sleep 2
+    sudo systemctl start mysql 2>/dev/null
+    sleep 3
+    if systemctl is-active --quiet mysql 2>/dev/null; then
+      log_ok "MySQL 正常模式已恢复"
+    else
+      log_fail "MySQL 恢复正常模式失败"; exit 1
+    fi
   fi
 else
   log_fail "sudo mysql 连接失败，请检查MySQL服务"; exit 1
