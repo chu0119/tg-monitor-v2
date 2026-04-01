@@ -304,30 +304,32 @@ else
   if [ -n "$DL_ARCH" ]; then
     echo -e "  ${YELLOW}⏳ 下载 mihomo ($DL_ARCH)...${NC}"
     MIHOMO_VER="v1.19.21"
-    DL_URL="https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-${DL_ARCH}-${MIHOMO_VER}.gz"
+    # 尝试多个下载源
+    DL_URLS=(
+      "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-${DL_ARCH}-${MIHOMO_VER}.gz"
+      "https://bgithub.xyz/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-${DL_ARCH}-${MIHOMO_VER}.gz"
+    )
     mkdir -p "$PROXY_DIR"
 
-    if command -v curl &>/dev/null; then
-      DL_CMD="curl -fsSL"
-    elif command -v wget &>/dev/null; then
-      DL_CMD="wget -qO-"
-    else
-      echo -e "  ${RED}❌ curl 和 wget 都不可用，无法下载${NC}"
-      DL_CMD=""
-    fi
-
-    if [ -n "$DL_CMD" ] && $DL_CMD "$DL_URL" -o /tmp/mihomo.gz 2>/dev/null; then
-      gunzip -f /tmp/mihomo.gz 2>/dev/null
-      if [ -f /tmp/mihomo ]; then
-        mv /tmp/mihomo "$MIHOMO_PATH"
-        chmod +x "$MIHOMO_PATH"
-        echo -e "  ${GREEN}✅ mihomo 内核已下载 ($(du -h "$MIHOMO_PATH" | cut -f1))${NC}"
-      else
-        echo -e "  ${RED}❌ mihomo 解压失败${NC}"
+    DL_OK=false
+    for url in "${DL_URLS[@]}"; do
+      echo -e "  ${YELLOW}  尝试: ${url}${NC}"
+      if [ -n "$DL_CMD" ] && $DL_CMD "$url" -o /tmp/mihomo.gz 2>/dev/null; then
+        gunzip -f /tmp/mihomo.gz 2>/dev/null
+        if [ -f /tmp/mihomo ] && [ -s /tmp/mihomo ]; then
+          mv /tmp/mihomo "$MIHOMO_PATH"
+          chmod +x "$MIHOMO_PATH"
+          echo -e "  ${GREEN}✅ mihomo 内核已下载 ($(du -h "$MIHOMO_PATH" | cut -f1))${NC}"
+          DL_OK=true
+          break
+        fi
       fi
-    else
-      echo -e "  ${YELLOW}⚠️  mihomo 下载失败（可能需要代理），请手动下载到 $MIHOMO_PATH${NC}"
-      echo -e "  ${YELLOW}  下载地址: $DL_URL${NC}"
+    done
+
+    if [ "$DL_OK" = false ]; then
+      echo -e "  ${YELLOW}⚠️  所有源下载失败，请手动下载到 $MIHOMO_PATH${NC}"
+      echo -e "  ${YELLOW}  源1: ${DL_URLS[0]}${NC}"
+      echo -e "  ${YELLOW}  源2: ${DL_URLS[1]}${NC}"
     fi
   fi
 fi
