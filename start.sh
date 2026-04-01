@@ -4,7 +4,7 @@
 #  用法: ./start.sh [--reset] [--no-autostart]
 #  适用: Ubuntu 20.04+ / Debian 11+ (全新系统直接跑)
 # ============================================================
-set -e
+# 不用 set -e，手动处理错误，避免静默退出
 
 # ── 颜色 ──
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -106,28 +106,32 @@ check_cmd git || true
 echo -e "\n${BOLD}[2/8] 安装系统依赖...${NC}"
 
 # 确保有基本的构建工具
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl wget git build-essential > /dev/null 2>&1
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq 2>&1 || { echo -e "  ${RED}❌ apt-get update 失败${NC}"; exit 1; }
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl wget git build-essential 2>&1 | tail -1
+echo -e "  ${GREEN}✅ 基础工具已就绪${NC}"
 
 # Python3 + venv + pip
 echo -e "  ${YELLOW}⏳ 检查 Python3 环境...${NC}"
 if ! command -v python3 &>/dev/null; then
   echo -e "  ${YELLOW}  安装 python3...${NC}"
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 2>&1 | tail -2
+  if ! command -v python3 &>/dev/null; then
+    echo -e "  ${RED}❌ python3 安装失败${NC}"; exit 1
+  fi
 fi
 
 # python3-venv（Ubuntu 24.04+需要单独装）
 PYTHON_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 if ! python3 -c "import venv" 2>/dev/null; then
   echo -e "  ${YELLOW}  安装 python${PYTHON_VER}-venv...${NC}"
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "python${PYTHON_VER}-venv" || \
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "python${PYTHON_VER}-venv" 2>&1 | tail -2 || \
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv 2>&1 | tail -2
 fi
 
 # pip
 if ! command -v pip3 &>/dev/null; then
   echo -e "  ${YELLOW}  安装 pip...${NC}"
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip 2>&1 | tail -2
 fi
 echo -e "  ${GREEN}✅ Python3 $(python3 --version 2>&1 | awk '{print $2}')${NC}"
 
