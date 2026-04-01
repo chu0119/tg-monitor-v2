@@ -237,13 +237,40 @@ else
   log_fail "MySQL 启动失败（请执行: sudo systemctl status mysql）"; exit 1
 fi
 
-# 配置MySQL密码（交互式）
+# 配置MySQL密码
 log_do "配置 MySQL root 密码..."
-MYSQL_ROOT_PWD=""
 MYSQL_PWD_OK=false
+MYSQL_ROOT_PWD=""
+DB_USER="tgmonitor"
+DB_PASS=""
+DB_NAME="tg_monitor"
 
-# 强制通过sudo mysql重置密码（Ubuntu的auth_socket免密）
-MYSQL_CONNECT_OK=false
+# 检查是否已经配置过（.env存在且数据库可连接）
+if [ -f "$BACKEND_DIR/.env" ]; then
+  # 从.env读取密码
+  SAVED_DB_USER=$(grep "^MYSQL_USER=" "$BACKEND_DIR/.env" 2>/dev/null | cut -d= -f2)
+  SAVED_DB_PASS=$(grep "^MYSQL_PASSWORD=" "$BACKEND_DIR/.env" 2>/dev/null | cut -d= -f2)
+  SAVED_DB_NAME=$(grep "^MYSQL_DATABASE=" "$BACKEND_DIR/.env" 2>/dev/null | cut -d= -f2)
+
+  if [ -n "$SAVED_DB_USER" ] && [ -n "$SAVED_DB_PASS" ]; then
+    log_info "检测到已有配置，验证数据库连接..."
+    if $PYTHON_BIN -c "
+import pymysql
+conn = pymysql.connect(host='localhost', user='$SAVED_DB_USER', password='$SAVED_DB_PASS', connect_timeout=5)
+conn.close()
+" 2>/dev/null; then
+      log_ok "数据库连接正常，跳过密码设置"
+      DB_USER="$SAVED_DB_USER"
+      DB_PASS="$SAVED_DB_PASS"
+      DB_NAME="${SAVED_DB_NAME:-tg_monitor}"
+      MYSQL_PWD_OK=true
+    else
+      log_info "已有配置但连接失败，将重新配置"
+    fi
+  fi
+fi
+
+if [ "$MYSQL_PWD_OK" = false ]; then
 for try in 1 2 3 4 5; do
   if sudo mysql -e "SELECT 1" &>/dev/null; then
     MYSQL_CONNECT_OK=true
