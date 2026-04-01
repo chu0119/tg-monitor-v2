@@ -1,0 +1,14 @@
+# Backend specific
+venv/
+*.session
+*.db
+*.log
+logs/
+uploads/
+exports/
+__pycache__/
+*.pyc
+
+# Environment
+.env
+.env.local

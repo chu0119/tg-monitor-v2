@@ -1,0 +1,49 @@
+[Unit]
+Description=TG Monitor Backend Service
+Documentation=https://github.com/yourusername/tgjiankong
+After=network.target mysql.service
+Wants=network.target
+
+[Service]
+Type=notify
+User=xingchuan
+Group=xingchuan
+WorkingDirectory=/home/xingchuan/桌面/tgjiankong/backend
+Environment="PATH=/home/xingchuan/桌面/tgjiankong/backend/venv/bin"
+EnvironmentFile=/home/xingchuan/桌面/tgjiankong/backend/.env
+
+ExecStart=/home/xingchuan/桌面/tgjiankong/backend/venv/bin/gunicorn app.main:app \
+    --bind 0.0.0.0:8000 \
+    --workers 1 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --timeout 120 \
+    --keep-alive 30 \
+    --backlog 4096 \
+    --log-level info \
+    --access-logfile /tmp/tg-monitor-access.log \
+    --error-logfile /tmp/tg-monitor-error.log \
+    --max-requests 10000 \
+    --max-requests-jitter 1000
+
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=30
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=5
+
+# 安全设置
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/xingchuan/桌面/tgjiankong/backend
+ReadWritePaths=/tmp
+
+# 资源限制
+MemoryMax=1G
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

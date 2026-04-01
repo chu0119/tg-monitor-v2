@@ -1,0 +1,61 @@
+# 环境变量
+.env
+*.env
+backend/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# Node
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
+# 数据库
+*.db
+*.sqlite3
+
+# 日志
+logs/
+*.log
+
+# Telegram sessions（敏感）
+sessions/
+backend/sessions/
+*.session
+*.session-journal
+
+# 备份
+backups/
+backend/backups/
+uploads/
+
+# 导出数据
+exports/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 部署标记
+.deployed
+
+# 代理内核（太大，通过start.sh下载）
+backend/app/proxy/mihomo
+
+# 临时文件
+*.pid
+*.tmp
+proxy/config.yaml

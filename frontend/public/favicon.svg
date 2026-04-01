@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- 背景 - 圆形 -->
+  <circle cx="32" cy="32" r="30" fill="#0369a1"/>
+
+  <!-- 盾牌外轮廓 -->
+  <path d="M32 8 L48 14 V30 C48 42 40 50 32 54 C24 50 16 42 16 30 V14 L32 8Z"
+        fill="#ffffff" opacity="0.2"/>
+
+  <!-- 盾牌内轮廓 -->
+  <path d="M32 12 L44 17 V30 C44 40 38 46 32 50 C26 46 20 40 20 30 V17 L32 12Z"
+        fill="none" stroke="#ffffff" stroke-width="2"/>
+
+  <!-- 警徽星星 -->
+  <path d="M32 22 L34 28 L40 28 L35 32 L37 38 L32 34 L27 38 L29 32 L24 28 L30 28 Z"
+        fill="#ffd700"/>
+
+  <!-- 雷达扫描效果 - 外圈 -->
+  <circle cx="32" cy="42" r="8" fill="none" stroke="#00ff88" stroke-width="1.5" opacity="0.8">
+    <animate attributeName="r" from="4" to="12" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" from="1" to="0" dur="2s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- 雷达扫描效果 - 内圈 -->
+  <circle cx="32" cy="42" r="5" fill="none" stroke="#00ff88" stroke-width="1.5" opacity="0.8">
+    <animate attributeName="r" from="2" to="8" dur="2s" repeatCount="indefinite" begin="0.5s"/>
+    <animate attributeName="opacity" from="1" to="0" dur="2s" repeatCount="indefinite" begin="0.5s"/>
+  </circle>
+
+  <!-- 雷达中心点 -->
+  <circle cx="32" cy="42" r="2" fill="#00ff88"/>
+</svg>
