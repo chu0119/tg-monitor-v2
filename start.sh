@@ -242,12 +242,13 @@ log_do "配置 MySQL root 密码..."
 MYSQL_ROOT_PWD=""
 MYSQL_PWD_OK=false
 
-# 尝试通过auth_socket免密连接
+# 强制通过sudo mysql重置密码（Ubuntu的auth_socket免密）
 if sudo mysql -e "SELECT 1" &>/dev/null; then
   echo ""
-  echo -e "  ${CYAN}请为 MySQL root 设置密码（用于程序连接数据库）：${NC}"
+  echo -e "  ${CYAN}请为 MySQL root 设置一个密码（用于程序连接数据库）：${NC}"
+  echo -e "  ${DIM}（如果之前没设过密码，现在设置一个就行）${NC}"
   while true; do
-    echo -ne "  ${YELLOW}输入密码（留空则不设密码）: ${NC}"
+    echo -ne "  ${YELLOW}输入密码: ${NC}"
     read -s MYSQL_ROOT_PWD
     echo ""
     if [ -z "$MYSQL_ROOT_PWD" ]; then
@@ -263,30 +264,20 @@ if sudo mysql -e "SELECT 1" &>/dev/null; then
     fi
   done
 
-  if [ -z "$MYSQL_ROOT_PWD" ]; then
-    sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY ''; FLUSH PRIVILEGES;" 2>/dev/null
-    log_ok "MySQL root: 无密码"
-  else
-    sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
-    log_ok "MySQL root: 密码已设置"
-  fi
-  MYSQL_PWD_OK=true
-# 尝试空密码
-elif sudo mysql -u root -p'' -e "SELECT 1" &>/dev/null; then
-  log_ok "MySQL root: 无密码"
-  MYSQL_PWD_OK=true
-else
-  echo ""
-  echo -e "  ${CYAN}MySQL root 已有密码，请输入：${NC}"
-  echo -ne "  ${YELLOW}密码: ${NC}"
-  read -s MYSQL_ROOT_PWD
-  echo ""
-  if sudo mysql -u root -p"$MYSQL_ROOT_PWD" -e "SELECT 1" &>/dev/null; then
-    log_ok "MySQL root: 密码验证通过"
+  # 强制重置密码
+  sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
+  if [ $? -eq 0 ]; then
+    if [ -z "$MYSQL_ROOT_PWD" ]; then
+      log_ok "MySQL root: 无密码"
+    else
+      log_ok "MySQL root: 密码已设置"
+    fi
     MYSQL_PWD_OK=true
   else
-    log_fail "密码错误"; exit 1
+    log_fail "密码设置失败"; exit 1
   fi
+else
+  log_fail "sudo mysql 连接失败，请检查MySQL服务"; exit 1
 fi
 
 [ "$MYSQL_PWD_OK" = false ] && { log_fail "无法连接 MySQL"; exit 1; }
