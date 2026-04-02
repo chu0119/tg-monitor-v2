@@ -65,7 +65,7 @@ async def insert_default_settings():
         from sqlalchemy import select
 
         default_settings = [
-            {"key_name": "initialized", "value": "false", "category": "system"},
+            {"key_name": "initialized", "value": "true", "category": "system"},
             {"key_name": "proxy_port", "value": "7897", "category": "proxy"},
             {"key_name": "proxy_enabled", "value": "false", "category": "proxy"},
         ]
