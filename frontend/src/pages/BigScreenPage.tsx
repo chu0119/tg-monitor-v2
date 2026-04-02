@@ -178,7 +178,7 @@ export function BigScreenPage() {
     try {
       const [statsData, healthData] = await Promise.all([
         api.dashboard.getStats(),
-        fetch("/health").then((r) => r.json()),
+        fetch("/health").then((r) => r.json()).catch(() => null),
       ]);
       setStats(statsData);
       setHealth(healthData);

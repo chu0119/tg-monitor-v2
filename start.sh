@@ -647,6 +647,10 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_read_timeout 300s;
     }
+    location /health {
+        proxy_pass http://127.0.0.1:$BACKEND_PORT;
+        proxy_set_header Host \$host;
+    }
     location /ws/ {
         proxy_pass http://127.0.0.1:$BACKEND_PORT;
         proxy_http_version 1.1;

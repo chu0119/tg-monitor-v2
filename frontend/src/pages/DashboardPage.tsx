@@ -132,7 +132,7 @@ export function DashboardPage() {
     try {
       const [statsData, healthData] = await Promise.all([
         api.dashboard.getStats(),
-        fetch("/health").then((r) => r.ok ? r.json() : null),
+        fetch("/health").then((r) => r.ok ? r.json() : null).catch(() => null),
       ]);
       setStats(statsData);
       setHealth(healthData);
