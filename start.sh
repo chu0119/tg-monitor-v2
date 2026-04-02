@@ -383,7 +383,7 @@ if [ -z "$PIP_BIN" ]; then
   # pip3命令不存在但模块可用，创建临时wrapper
   PIP_WRAPPER="/tmp/tg-monitor-pip3"
   echo '#!/bin/bash' > "$PIP_WRAPPER"
-  echo 'python3 -m pip "$@"' >> "$PIP_WRAPPER"
+  echo 'sudo pip3 "$@"' >> "$PIP_WRAPPER"
   chmod +x "$PIP_WRAPPER"
   PIP_BIN="$PIP_WRAPPER"
 fi
