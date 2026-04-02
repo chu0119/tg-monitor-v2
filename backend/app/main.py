@@ -241,6 +241,21 @@ async def lifespan(app: FastAPI):
         accounts = result.scalars().all()
     logger.info(f"找到 {len(accounts)} 个已授权活跃账号待连接")
 
+    # 启动前先确保mihomo代理可用（如果有配置）
+    try:
+        from app.proxy.manager import ProxyManager
+        proxy_mgr = ProxyManager()
+        proxy_status = await proxy_mgr.get_status()
+        if proxy_status.get("config_exists") and not proxy_status.get("running"):
+            logger.info("检测到代理配置存在但未运行，自动启动mihomo...")
+            result = await proxy_mgr.start()
+            if result.get("success"):
+                logger.info("mihomo自动启动成功")
+            else:
+                logger.warning(f"mihomo自动启动失败: {result}")
+    except Exception as e:
+        logger.warning(f"自动启动mihomo失败（非致命）: {e}")
+
     # 并行连接账号，提高启动速度（每个账号最多等15秒）
     async def connect_account(account):
         try:
