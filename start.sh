@@ -387,17 +387,22 @@ log_do "升级 pip..."
 $PIP_RUN install --upgrade pip --break-system-packages -q 2>/dev/null
 log_ok "pip 升级完成: $($PIP_BIN --version 2>&1 | awk '{print $2}')"
 
-# Ubuntu 25.04+ 移除了 distutils，某些包需要它
+# Ubuntu 25.04+ 移除了 distutils，通过 apt 安装 setuptools 提供
 log_do "检查 distutils..."
 if ! sudo $PYTHON_BIN -c "import distutils" 2>/dev/null; then
-  log_info "distutils 不可用，手动创建..."
-  # 直接用pip装setuptools到系统目录，用sudo python执行
-  curl -fsSL https://bootstrap.pypa.io/get-pip.py | sudo $PYTHON_BIN 2>/dev/null
-  sudo $PYTHON_BIN -m pip install setuptools --break-system-packages -q 2>/dev/null
+  log_info "distutils 不可用，通过 apt 安装 setuptools..."
+  sudo apt-get install -y python3-setuptools 2>/dev/null
   if sudo $PYTHON_BIN -c "import distutils" 2>/dev/null; then
     log_ok "distutils 安装成功"
   else
-    log_fail "distutils 安装失败"; exit 1
+    # apt 失败则尝试 pip
+    log_info "apt 安装失败，尝试 pip 安装 setuptools..."
+    sudo $PYTHON_BIN -m pip install setuptools --break-system-packages -q 2>/dev/null
+    if sudo $PYTHON_BIN -c "import distutils" 2>/dev/null; then
+      log_ok "distutils 安装成功"
+    else
+      log_fail "distutils 安装失败"; exit 1
+    fi
   fi
 else
   log_ok "distutils 可用"
