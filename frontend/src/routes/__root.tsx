@@ -11,7 +11,7 @@ const checkInitialized = async ({ location }: { location: { pathname: string } }
 
   try {
     const status = await api.system.getStatus();
-    if (!status.initialized) {
+    if (status.initialized === false) {
       // 未初始化，重定向到设置页面
       // @ts-expect-error - setup route exists but types may not be updated
       throw redirect({ to: "/setup" });
