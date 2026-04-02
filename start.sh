@@ -271,116 +271,100 @@ conn.close()
 fi
 
 if [ "$MYSQL_PWD_OK" = false ]; then
-for try in 1 2 3 4 5; do
-  if sudo mysql -e "SELECT 1" &>/dev/null; then
-    MYSQL_CONNECT_OK=true
-    break
-  fi
-  log_info "等待MySQL就绪... ($try/5)"
-  sleep 2
-done
-
-if [ "$MYSQL_CONNECT_OK" = false ]; then
-  log_fail "sudo mysql 需要密码（auth_socket未启用）"
-  log_info "=== 诊断信息 ==="
-  log_info "MySQL状态: $(systemctl is-active mysql 2>/dev/null)"
-  log_info "Socket: $(ls -la /var/run/mysqld/mysqld.sock 2>/dev/null || echo '未找到')"
-  log_info "================="
-
-  # 方式: skip-grant-tables 重置密码
-  log_do "使用安全模式重置MySQL密码..."
-  sudo systemctl stop mysql 2>/dev/null
-  sleep 2
-  
-  # 确保目录存在
-  sudo mkdir -p /var/run/mysqld
-  sudo chown mysql:mysql /var/run/mysqld
-  
-  # 用skip-grant-tables启动
-  sudo mysqld_safe --skip-grant-tables --skip-networking >/dev/null 2>&1 &
-  sleep 5
-  
-  if sudo mysql -e "SELECT 1" &>/dev/null; then
-    MYSQL_CONNECT_OK=true
-    MYSQL_SKIP_GRANT=true
-    log_ok "安全模式连接成功"
-  else
-    # 再等一下
-    sleep 5
+  log_info "尝试 sudo mysql 直连..."
+  MYSQL_CONNECT_OK=false
+  for try in 1 2 3 4 5; do
     if sudo mysql -e "SELECT 1" &>/dev/null; then
-      MYSQL_CONNECT_OK=true
-      MYSQL_SKIP_GRANT=true
-      log_ok "安全模式连接成功（重试）"
-    else
-      log_fail "安全模式也失败，请手动执行:"
-      log_fail "  sudo systemctl stop mysql"
-      log_fail "  sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld"
-      log_fail "  sudo mysqld_safe --skip-grant-tables &"
-      log_fail "  sleep 5 && sudo mysql"
-      log_fail "  ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '你的密码';"
-      log_fail "  FLUSH PRIVILEGES;"
-      sudo pkill -f mysqld_safe 2>/dev/null
-      sudo systemctl start mysql 2>/dev/null
-      exit 1
+      MYSQL_CONNECT_OK=true; break
     fi
-  fi
-fi
-  echo ""
-  echo -e "  ${CYAN}请为 MySQL root 设置一个密码（用于程序连接数据库）：${NC}"
-  echo -e "  ${DIM}（如果之前没设过密码，现在设置一个就行）${NC}"
-  while true; do
-    echo -ne "  ${YELLOW}输入密码: ${NC}"
-    read -s MYSQL_ROOT_PWD
-    echo ""
-    if [ -z "$MYSQL_ROOT_PWD" ]; then
-      echo -ne "  ${YELLOW}确认不设密码? (y/N): ${NC}"
-      read -r CONFIRM
-      [[ "$CONFIRM" =~ ^[Yy]$ ]] && break
-    else
-      echo -ne "  ${YELLOW}再次确认: ${NC}"
-      read -s MYSQL_ROOT_PWD2
-      echo ""
-      [ "$MYSQL_ROOT_PWD" = "$MYSQL_ROOT_PWD2" ] && break
-      echo -e "  ${RED}两次不一致，请重试${NC}"
-    fi
+    sleep 2
   done
 
-  # 强制重置密码（安全模式下需要先flush）
-  # MySQL 8.4+ 不再支持 mysql_native_password，改用 caching_sha2_password
-  sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>&1
-  SQL_EXIT=$?
-  if [ $SQL_EXIT -eq 0 ]; then
-    if [ -z "$MYSQL_ROOT_PWD" ]; then
-      log_ok "MySQL root: 无密码"
-    else
-      log_ok "MySQL root: 密码已设置"
-    fi
-    MYSQL_PWD_OK=true
-  else
-    log_fail "密码设置失败"; exit 1
-  fi
+  if [ "$MYSQL_CONNECT_OK" = false ]; then
+    log_do "使用安全模式重置MySQL密码..."
+    # 确保旧进程完全停止
+    sudo systemctl stop mysql 2>/dev/null
+    sleep 2
+    sudo killall -9 mysqld 2>/dev/null
+    sleep 2
 
-  # 如果是安全模式，恢复正常启动
-  if [ "$MYSQL_SKIP_GRANT" = true ]; then
-    log_do "恢复正常MySQL模式..."
-    sudo pkill -f mysqld_safe 2>/dev/null
-    sudo pkill -f mysqld 2>/dev/null
-    sleep 3
-    # 确保socket目录存在
+    # 用init-file方式重置密码（比skip-grant-tables更可靠）
+    # 先创建临时SQL文件
+    TMP_SQL=$(mktemp)
+    echo "FLUSH PRIVILEGES;" > "$TMP_SQL"
+    echo "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'tg_monitor_init_pwd';" >> "$TMP_SQL"
+    echo "FLUSH PRIVILEGES;" >> "$TMP_SQL"
+
     sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld
-    sudo systemctl start mysql 2>/dev/null
-    sleep 5
-    if systemctl is-active --quiet mysql 2>/dev/null; then
-      log_ok "MySQL 正常模式已恢复"
+
+    # 用init-file启动
+    sudo mysqld_safe --init-file="$TMP_SQL" --skip-networking >/dev/null 2>&1 &
+    sleep 8
+
+    # 测试连接
+    MYSQL_INIT_OK=false
+    if sudo mysql -u root -p'tg_monitor_init_pwd' -e "SELECT 1" &>/dev/null; then
+      MYSQL_INIT_OK=true
+    fi
+
+    # 清理：杀掉init-file启动的mysqld
+    sudo killall -9 mysqld 2>/dev/null
+    sleep 2
+    rm -f "$TMP_SQL"
+
+    if [ "$MYSQL_INIT_OK" = true ]; then
+      MYSQL_ROOT_PWD="tg_monitor_init_pwd"
+      MYSQL_CONNECT_OK=true
+      log_ok "安全模式密码重置成功（临时密码: tg_monitor_init_pwd）"
     else
-      log_fail "MySQL 恢复失败，请手动: sudo systemctl start mysql"; exit 1
+      log_fail "安全模式重置失败"
+      # 最后手段：skip-grant-tables
+      sudo mysqld_safe --skip-grant-tables --skip-networking >/dev/null 2>&1 &
+      sleep 8
+      if sudo mysql -e "SELECT 1" &>/dev/null; then
+        sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'tg_monitor_init_pwd'; FLUSH PRIVILEGES;" 2>&1
+        sudo killall -9 mysqld 2>/dev/null; sleep 2
+        MYSQL_ROOT_PWD="tg_monitor_init_pwd"
+        MYSQL_CONNECT_OK=true
+        log_ok "skip-grant-tables 重置成功"
+      else
+        sudo killall -9 mysqld 2>/dev/null; sleep 2
+        log_fail "所有重置方式均失败"; exit 1
+      fi
     fi
   fi
-else
-  log_fail "sudo mysql 连接失败，请检查MySQL服务"; exit 1
-fi
+  # 恢复正常MySQL模式
+  sudo killall -9 mysqld 2>/dev/null; sleep 2
+  sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld
+  sudo systemctl start mysql 2>/dev/null
+  sleep 5
+  if ! systemctl is-active --quiet mysql 2>/dev/null; then
+    log_fail "MySQL 启动失败"; exit 1
+  fi
+  log_ok "MySQL 服务恢复正常"
 
-[ "$MYSQL_PWD_OK" = false ] && { log_fail "无法连接 MySQL"; exit 1; }
+  # 如果通过init-file已经设了临时密码，让用户决定是否修改
+  if [ "$MYSQL_ROOT_PWD" = "tg_monitor_init_pwd" ]; then
+    echo ""
+    echo -e "  ${CYAN}MySQL root 临时密码已设置，是否修改？${NC}"
+    echo -ne "  ${YELLOW}回车跳过，或输入新密码: ${NC}"
+    read -s NEW_PWD
+    echo ""
+    if [ -n "$NEW_PWD" ]; then
+      echo -ne "  ${YELLOW}再次确认: ${NC}"
+      read -s NEW_PWD2
+      echo ""
+      if [ "$NEW_PWD" = "$NEW_PWD2" ]; then
+        sudo mysql -u root -p"$MYSQL_ROOT_PWD" -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '${NEW_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
+        MYSQL_ROOT_PWD="$NEW_PWD"
+        log_ok "密码已更新"
+      else
+        log_info "保留临时密码"
+      fi
+    fi
+  fi
+  MYSQL_PWD_OK=true
+fi
 
 # 创建MySQL数据库和专用用户
 log_do "创建 MySQL 数据库和用户..."
@@ -389,7 +373,7 @@ DB_USER="tgmonitor"
 DB_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 DB_NAME="tg_monitor"
 
-sudo mysql $MYSQL_SOCK_ARG -u root ${MYSQL_ROOT_PWD:+-p"$MYSQL_ROOT_PWD"} << EOSQL 2>/dev/null
+sudo mysql -u root ${MYSQL_ROOT_PWD:+-p"$MYSQL_ROOT_PWD"} << EOSQL 2>/dev/null
 CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
 GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
