@@ -35,7 +35,7 @@ import {
 interface Message {
   id: number;
   conversation_id: number;
-  sender_id: number;
+  sender_telegram_id?: number;
   message_type: string;
   text: string;
   date: string;
@@ -1020,8 +1020,8 @@ function MessageCard({ message }: MessageCardProps) {
             <div>
               <label className="text-xs sm:text-sm text-muted-foreground">发送者</label>
               <p className="text-sm sm:text-base font-medium">{message.sender_username || "未知会话"}</p>
-              {message.sender_id && (
-                <p className="text-xs text-muted-foreground mt-0.5">ID: {message.sender_id}</p>
+              {message.sender_telegram_id && (
+                <p className="text-xs text-muted-foreground mt-0.5">ID: {message.sender_telegram_id}</p>
               )}
             </div>
             <div>
