@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, memo } from "react";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
 import {
   MessageSquare,
   AlertTriangle,

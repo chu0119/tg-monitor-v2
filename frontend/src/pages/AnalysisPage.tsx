@@ -46,7 +46,7 @@ export function AnalysisPage() {
             </div>
           )
         ) : (
-          <ReportViewer />
+          <ReportViewer reportType="daily" />
         )}
       </div>
     </div>
