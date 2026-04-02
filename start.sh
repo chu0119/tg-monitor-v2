@@ -308,8 +308,8 @@ if [ "$MYSQL_PWD_OK" = false ]; then
     fi
 
     # 清理：杀掉init-file启动的mysqld
-    sudo killall -9 mysqld 2>/dev/null
-    sleep 2
+    sudo mysqladmin -u root -p'tg_monitor_init_pwd' shutdown 2>/dev/null || sudo killall -9 mysqld 2>/dev/null
+    sleep 3
     rm -f "$TMP_SQL"
 
     if [ "$MYSQL_INIT_OK" = true ]; then
@@ -323,7 +323,9 @@ if [ "$MYSQL_PWD_OK" = false ]; then
       sleep 8
       if sudo mysql -e "SELECT 1" &>/dev/null; then
         sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'tg_monitor_init_pwd'; FLUSH PRIVILEGES;" 2>&1
-        sudo killall -9 mysqld 2>/dev/null; sleep 2
+        # 立即shutdown，避免后续kill卡住
+        sudo mysqladmin -u root shutdown 2>/dev/null || sudo killall -9 mysqld 2>/dev/null
+        sleep 3
         MYSQL_ROOT_PWD="tg_monitor_init_pwd"
         MYSQL_CONNECT_OK=true
         log_ok "skip-grant-tables 重置成功"
