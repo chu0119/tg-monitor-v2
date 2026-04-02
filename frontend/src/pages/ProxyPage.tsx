@@ -72,7 +72,7 @@ export function ProxyPage() {
       try {
         const data = await api.proxy.getStatus();
         if (!controller.signal.aborted) {
-          setStatus(data);
+          setStatus(data.status || data);
         }
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -108,7 +108,8 @@ export function ProxyPage() {
   const fetchStatus = async () => {
     try {
       const data = await api.proxy.getStatus();
-      setStatus(data);
+      // API返回 {success, status: {...}}，前端需要的是内层的status对象
+      setStatus(data.status || data);
     } catch (error) {
       console.error("Failed to fetch proxy status:", error);
     }
