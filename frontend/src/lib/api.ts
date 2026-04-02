@@ -59,7 +59,16 @@ async function handleResponse(res: Response): Promise<any> {
     let errorMessage = `HTTP ${res.status}: ${res.statusText}`;
     try {
       const errorData = await res.json();
-      errorMessage = errorData.detail || errorData.message || errorMessage;
+      const detail = errorData.detail;
+      if (typeof detail === "string") {
+        errorMessage = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        errorMessage = detail.map((d: any) => d.msg || JSON.stringify(d)).join("; ");
+      } else if (detail && typeof detail === "object") {
+        errorMessage = detail.message || JSON.stringify(detail);
+      } else if (errorData.message) {
+        errorMessage = errorData.message;
+      }
     } catch {
       // 如果无法解析 JSON，使用默认错误消息
     }

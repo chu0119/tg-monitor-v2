@@ -152,7 +152,8 @@ class SubscribeParser:
             # 获取订阅内容 - 使用subprocess调用curl（更可靠，支持重试）
             import subprocess
             curl_cmd = [
-                "curl", "-fsSL",
+                "curl", "-sSL",
+                "-w", "\\n__HTTP_CODE__%{http_code}",
                 "-H", "User-Agent: clash-verge/v2.2.4",
                 "-m", "60",
                 "--retry", "2",
@@ -171,11 +172,24 @@ class SubscribeParser:
             except Exception:
                 pass
 
-            result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=60)
+            result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
                 raise ValueError(f"获取订阅失败: {result.stderr.strip() or f'exit code {result.returncode}'}")
-            content = result.stdout
-            logger.info(f"订阅内容获取成功，长度: {len(content)} 字符，前100字符: {content[:100]}")
+
+            # 从输出中提取HTTP状态码
+            output = result.stdout
+            http_code_marker = "\n__HTTP_CODE__"
+            if http_code_marker in output:
+                parts = output.rsplit(http_code_marker, 1)
+                content = parts[0]
+                http_code = parts[1].strip()
+                logger.info(f"订阅请求HTTP状态: {http_code}, 内容长度: {len(content)} 字符")
+                if http_code != "200":
+                    raise ValueError(f"订阅请求返回HTTP {http_code}: {content[:200]}")
+            else:
+                content = output
+
+            logger.info(f"订阅内容获取成功，长度: {len(content)} 字符")
 
             # 检测格式并解析
             content = content.strip()
