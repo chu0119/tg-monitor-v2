@@ -632,7 +632,15 @@ log_do "配置前端服务..."
 if ! command -v nginx &>/dev/null; then
   log_do "安装 nginx..."
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nginx 2>&1 | tail -2
+  if ! command -v nginx &>/dev/null; then
+    log_fail "nginx 安装失败（前端服务必需）"; exit 1
+  fi
+  log_ok "nginx 安装完成"
 fi
+
+# 删除nginx默认站点，避免端口冲突
+sudo rm -f /etc/nginx/sites-enabled/default
+
 FRONTEND_USING_NGINX=false
 if command -v nginx &>/dev/null; then
   log_info "检测到 nginx，配置反向代理..."
@@ -666,29 +674,10 @@ EOF
     log_info "前端: $FRONTEND_DIR/dist → 端口 $FRONTEND_PORT"
     log_info "API:  /api/* → 127.0.0.1:$BACKEND_PORT"
   else
-    log_fail "nginx 配置测试失败，回退到 Python HTTP Server"
+    log_fail "nginx 配置测试失败"
+    sudo nginx -t 2>&1 | sed 's/^/    /'
+    exit 1
   fi
-fi
-
-if [ "$FRONTEND_USING_NGINX" = false ]; then
-  log_info "nginx 不可用，使用 Python HTTP Server（刷新页面可能404）"
-  cat > "/tmp/${SERVICE_NAME}-frontend.service" << EOF
-[Unit]
-Description=TG Monitor v2 Frontend
-After=network.target
-[Service]
-Type=simple
-WorkingDirectory=$PROJECT_DIR
-ExecStart=$PYTHON_BIN -m http.server $FRONTEND_PORT --directory $FRONTEND_DIR/dist
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-[Install]
-WantedBy=multi-user.target
-EOF
-  sudo cp "/tmp/${SERVICE_NAME}-frontend.service" /etc/systemd/system/
-  log_ok "前端服务文件已生成 (Python HTTP Server)"
 fi
 
 log_do "重载 systemd..."
@@ -702,13 +691,8 @@ else
   log_do "配置开机自启..."
   sudo systemctl enable "${SERVICE_NAME}-backend" 2>/dev/null
   log_ok "后端开机自启: 已启用"
-  if [ "$FRONTEND_USING_NGINX" = true ]; then
-    sudo systemctl enable nginx 2>/dev/null
-    log_ok "nginx 开机自启: 已启用"
-  else
-    sudo systemctl enable "${SERVICE_NAME}-frontend" 2>/dev/null
-    log_ok "前端开机自启: 已启用"
-  fi
+  sudo systemctl enable nginx 2>/dev/null
+  log_ok "nginx 开机自启: 已启用"
 fi
 
 log_ok "系统服务配置完成 ✓"
@@ -723,36 +707,76 @@ sudo systemctl start "${SERVICE_NAME}-backend"
 sleep 3
 BACKEND_OK=$(systemctl is-active "${SERVICE_NAME}-backend" 2>/dev/null)
 if [ "$BACKEND_OK" = "active" ]; then
-  log_ok "后端启动成功 ✓"
+  # 等待后端完全启动并验证API可用
+  log_info "等待后端就绪..."
+  API_READY=false
+  for api_try in 1 2 3 4 5 6; do
+    sleep 2
+    if curl -sf "http://127.0.0.1:$BACKEND_PORT/health" >/dev/null 2>&1; then
+      API_READY=true; break
+    fi
+  done
+  if [ "$API_READY" = true ]; then
+    log_ok "后端启动成功 ✓ (API验证通过)"
+  else
+    log_fail "后端进程运行中但API无响应"
+    echo -e "  ${YELLOW}  最近日志:${NC}"
+    journalctl -u "${SERVICE_NAME}-backend" -n 15 --no-pager 2>/dev/null | sed 's/^/    /'
+  fi
 else
   log_fail "后端启动失败"
+  echo -e "  ${YELLOW}  诊断信息:${NC}"
+  echo -e "    工作目录: $(sudo systemctl show ${SERVICE_NAME}-backend -p WorkingDirectory --value 2>/dev/null)"
+  echo -e "    Python: $PYTHON_BIN"
+  echo -e "    .env: $(ls -la $BACKEND_DIR/.env 2>/dev/null || echo '不存在')"
+  $PYTHON_BIN -c "import fastapi, uvicorn, sqlalchemy, pymysql" 2>&1 | sed 's/^/    import: /' || true
   echo -e "  ${YELLOW}  最近日志:${NC}"
-  journalctl -u "${SERVICE_NAME}-backend" -n 10 --no-pager 2>/dev/null | sed 's/^/    /'
+  journalctl -u "${SERVICE_NAME}-backend" -n 15 --no-pager 2>/dev/null | sed 's/^/    /'
 fi
 
-log_do "启动前端 (端口 $FRONTEND_PORT)..."
-if [ "$FRONTEND_USING_NGINX" = true ]; then
-  sudo systemctl start nginx 2>/dev/null || sudo systemctl reload nginx 2>/dev/null || true
-  sleep 1
-  FRONTEND_OK=$(systemctl is-active nginx 2>/dev/null)
-else
-  sudo systemctl start "${SERVICE_NAME}-frontend"
-  sleep 1
-  FRONTEND_OK=$(systemctl is-active "${SERVICE_NAME}-frontend" 2>/dev/null)
-fi
+log_do "启动前端 (nginx, 端口 $FRONTEND_PORT)..."
+sudo systemctl start nginx 2>/dev/null || sudo systemctl reload nginx 2>/dev/null || true
+sleep 1
+FRONTEND_OK=$(systemctl is-active nginx 2>/dev/null)
 if [ "$FRONTEND_OK" = "active" ]; then
   log_ok "前端启动成功 ✓"
 else
-  log_fail "前端启动失败"
-  echo -e "  ${YELLOW}  最近日志:${NC}"
-  journalctl -u nginx -n 5 --no-pager 2>/dev/null | sed 's/^/    /'
-  journalctl -u "${SERVICE_NAME}-frontend" -n 5 --no-pager 2>/dev/null | sed 's/^/    /'
+  log_fail "nginx 启动失败"
+  sudo nginx -t 2>&1 | sed 's/^/    /'
 fi
 
 # ═══════════════════════════════════════════════════════════════
 #  完成
 # ═══════════════════════════════════════════════════════════════
 touch "$PROJECT_DIR/.deployed"
+
+# ── 端到端验证 ──
+echo ""
+log_do "端到端验证..."
+VERIFY_OK=true
+# 1. 后端API
+if curl -sf "http://127.0.0.1:$BACKEND_PORT/health" >/dev/null 2>&1; then
+  log_ok "后端 API: 正常"
+else
+  log_fail "后端 API: 无响应"; VERIFY_OK=false
+fi
+# 2. 前端页面
+if curl -sf "http://127.0.0.1:$FRONTEND_PORT/" >/dev/null 2>&1; then
+  log_ok "前端页面: 正常"
+else
+  log_fail "前端页面: 无响应"; VERIFY_OK=false
+fi
+# 3. API代理
+if curl -sf "http://127.0.0.1:$FRONTEND_PORT/api/v1/system/status" >/dev/null 2>&1; then
+  log_ok "API代理 (nginx→后端): 正常"
+else
+  log_fail "API代理 (nginx→后端): 失败"; VERIFY_OK=false
+fi
+
+if [ "$VERIFY_OK" = false ]; then
+  log_fail "端到端验证未全部通过，请检查上方错误"
+fi
+
 exec > /dev/tty 2>&1
 
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
