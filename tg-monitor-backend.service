@@ -8,11 +8,11 @@ Wants=network.target
 Type=notify
 User=xingchuan
 Group=xingchuan
-WorkingDirectory=/home/xingchuan/桌面/tgjiankong/backend
-Environment="PATH=/home/xingchuan/桌面/tgjiankong/backend/venv/bin"
-EnvironmentFile=/home/xingchuan/桌面/tgjiankong/backend/.env
+WorkingDirectory=/home/xingchuan/tg-monitor-v2/backend
+Environment="PATH=/home/xingchuan/tg-monitor-v2/backend/venv/bin"
+EnvironmentFile=/home/xingchuan/tg-monitor-v2/backend/.env
 
-ExecStart=/home/xingchuan/桌面/tgjiankong/backend/venv/bin/gunicorn app.main:app \
+ExecStart=/home/xingchuan/tg-monitor-v2/backend/venv/bin/gunicorn app.main:app \
     --bind 0.0.0.0:8000 \
     --workers 1 \
     --worker-class uvicorn.workers.UvicornWorker \
@@ -38,7 +38,7 @@ PrivateTmp=true
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/home/xingchuan/桌面/tgjiankong/backend
+ReadWritePaths=/home/xingchuan/tg-monitor-v2/backend
 ReadWritePaths=/tmp
 
 # 资源限制

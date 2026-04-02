@@ -8,25 +8,25 @@ Wants=network.target
 Type=simple
 User=xingchuan
 Group=xingchuan
-WorkingDirectory=/home/xingchuan/桌面/tgjiankong/frontend
+WorkingDirectory=/home/xingchuan/tg-monitor-v2/frontend
 Environment=PATH=/home/xingchuan/.nvm/versions/node/v24.13.0/bin:/usr/local/bin:/usr/bin:/bin
 Environment=NODE_ENV=production
-PIDFile=/home/xingchuan/桌面/tgjiankong/frontend.pid
+PIDFile=/home/xingchuan/tg-monitor-v2/frontend.pid
 
 # 启动前清理可能残留的进程
-ExecStartPre=/bin/sh -c 'killall -9 node vite 2>/dev/null || true; killall -9 esbuild 2>/dev/null || true; rm -f /home/xingchuan/桌面/tgjiankong/frontend.pid'
+ExecStartPre=/bin/sh -c 'killall -9 node vite 2>/dev/null || true; killall -9 esbuild 2>/dev/null || true; rm -f /home/xingchuan/tg-monitor-v2/frontend.pid'
 
 ExecStart=/home/xingchuan/.nvm/versions/node/v24.13.0/bin/npm run dev
 ExecReload=/bin/kill -HUP $MAINPID
-ExecStop=/bin/sh -c 'kill $MAINPID 2>/dev/null; rm -f /home/xingchuan/桌面/tgjiankong/frontend.pid; killall -9 node vite 2>/dev/null || true; killall -9 esbuild 2>/dev/null || true'
+ExecStop=/bin/sh -c 'kill $MAINPID 2>/dev/null; rm -f /home/xingchuan/tg-monitor-v2/frontend.pid; killall -9 node vite 2>/dev/null || true; killall -9 esbuild 2>/dev/null || true'
 
 KillMode=process
 KillSignal=SIGTERM
 TimeoutStopSec=30
 Restart=always
 RestartSec=5
-StandardOutput=append:/home/xingchuan/桌面/tgjiankong/logs/frontend.log
-StandardError=append:/home/xingchuan/桌面/tgjiankong/logs/frontend.log
+StandardOutput=append:/home/xingchuan/tg-monitor-v2/logs/frontend.log
+StandardError=append:/home/xingchuan/tg-monitor-v2/logs/frontend.log
 
 # 安全设置
 NoNewPrivileges=true
