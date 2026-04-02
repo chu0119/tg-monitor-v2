@@ -516,7 +516,7 @@ log_do "测试 MySQL 连接..."
 if ! $PYTHON_BIN -c "
 import pymysql
 try:
-    conn = pymysql.connect(host='localhost', user='root', password='$MYSQL_ROOT_PWD', connect_timeout=5)
+    conn = pymysql.connect(host='localhost', user='$DB_USER', password='$DB_PASS', connect_timeout=5)
     conn.close()
     print('MySQL连接成功')
 except Exception as e:
