@@ -2,7 +2,7 @@
 from typing import List
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update, delete, or_
+from sqlalchemy import select, update, delete, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
@@ -15,6 +15,8 @@ from app.schemas.account import (
     TelegramAccountLoginCode,
 )
 from app.models.account import TelegramAccount
+from app.models.conversation import Conversation
+from app.models.message import Message
 from app.telegram.client import client_manager
 
 router = APIRouter(prefix="/accounts", tags=["账号管理"])
@@ -25,6 +27,22 @@ async def list_accounts(db: AsyncSession = Depends(get_db)):
     """获取账号列表"""
     result = await db.execute(select(TelegramAccount))
     accounts = result.scalars().all()
+
+    # 实时统计每个账号的消息数和会话数
+    for account in accounts:
+        msg_result = await db.execute(
+            select(func.count(Message.id))
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .where(Conversation.account_id == account.id)
+        )
+        account.total_messages = msg_result.scalar() or 0
+
+        conv_result = await db.execute(
+            select(func.count(Conversation.id))
+            .where(Conversation.account_id == account.id)
+        )
+        account.total_conversations = conv_result.scalar() or 0
+
     return accounts
 
 

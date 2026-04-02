@@ -466,9 +466,25 @@ async def list_conversations(
     result = await db.execute(query)
     conversations = result.scalars().all()
 
+    # 实时统计每个会话的消息数
+    conv_ids = [c.id for c in conversations]
+    msg_counts = {}
+    if conv_ids:
+        count_result = await db.execute(
+            select(Message.conversation_id, func.count(Message.id))
+            .where(Message.conversation_id.in_(conv_ids))
+            .group_by(Message.conversation_id)
+        )
+        msg_counts = {row[0]: row[1] for row in count_result.all()}
+
+    items = []
+    for c in conversations:
+        c.total_messages = msg_counts.get(c.id, 0)
+        items.append(c)
+
     # 返回分页格式
     return {
-        "items": conversations,
+        "items": items,
         "total": total,
         "page": page,
         "page_size": page_size,
