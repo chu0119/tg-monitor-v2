@@ -190,6 +190,12 @@ export function ProxyPage() {
     try {
       await api.proxy.selectNode(id);
       await fetchStatus();
+      // 如果代理正在运行，自动重启以应用新节点
+      if (status?.running) {
+        setActionLoading("restart");
+        await api.proxy.restart();
+        await fetchStatus();
+      }
       alert("节点已切换");
     } catch (error: any) {
       alert(error.message || "切换节点失败");

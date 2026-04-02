@@ -75,7 +75,7 @@ class ProxyManager:
 
     async def select_node(self, node: ProxyNode, proxy_port: int = 7897) -> bool:
         """
-        选择节点，生成配置，重启mihomo
+        选择节点，生成配置（不自动重启mihomo）
 
         Args:
             node: 选中的代理节点
@@ -85,14 +85,13 @@ class ProxyManager:
             是否成功
         """
         try:
-            # 生成并保存配置
+            # 只生成并保存配置，不重启
             if not self.generator.generate_and_save(node, proxy_port=proxy_port):
                 logger.error("生成配置失败")
                 return False
 
-            # 重启mihomo
-            result = await self.restart()
-            return result.get("success", False)
+            logger.info(f"已选择节点: {node.name}，配置已保存")
+            return True
 
         except Exception as e:
             logger.error(f"选择节点失败: {e}")

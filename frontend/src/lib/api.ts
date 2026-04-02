@@ -482,6 +482,10 @@ export const api = {
       fetch(`${API_BASE}/proxy/stop`, {
         method: "POST",
       }).then(handleResponse),
+    restart: () =>
+      fetch(`${API_BASE}/proxy/restart`, {
+        method: "POST",
+      }).then(handleResponse),
   },
 
   // 系统状态
