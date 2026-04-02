@@ -29,6 +29,22 @@ class TelegramClientManager:
         """从配置获取默认代理，返回 Telethon 可用的元组"""
         socks5_url = getattr(settings, 'SOCKS5_PROXY', None)
         logger.info(f"_get_default_proxy called: SOCKS5_PROXY={socks5_url}")
+
+        # 如果没有配置SOCKS5_PROXY，尝试检测mihomo代理
+        if not socks5_url:
+            try:
+                from app.proxy.manager import ProxyManager
+                import asyncio
+                proxy_mgr = ProxyManager()
+                config = proxy_mgr.generator.read_config()
+                if config and config.get("mixed-port"):
+                    port = config["mixed-port"]
+                    logger.info(f"_get_default_proxy: detected mihomo on port {port}, using as SOCKS5 proxy")
+                    import socks as socklib
+                    return (socklib.SOCKS5, "127.0.0.1", port, None, None)
+            except Exception as e:
+                logger.warning(f"_get_default_proxy: failed to detect mihomo: {e}")
+
         if socks5_url and socks5_url.startswith('socks5://'):
             # socks5://user:pass@host:port
             import re
