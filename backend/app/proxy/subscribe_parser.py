@@ -149,28 +149,32 @@ class SubscribeParser:
             节点列表
         """
         try:
-            # 获取订阅内容
-            import aiohttp
-            headers = {
-                "User-Agent": "clash-verge/v2.2.4"
-            }
-
-            # 检测本地是否有mihomo代理可用
-            connector = None
-            proxy_url = None
+            # 获取订阅内容 - 使用subprocess调用curl（更可靠，支持重试）
+            import subprocess
+            curl_cmd = [
+                "curl", "-fsSL",
+                "-H", "User-Agent: clash-verge/v2.2.4",
+                "-m", "30",
+                "--retry", "2",
+                "--retry-delay", "3",
+                url
+            ]
+            # 如果有本地代理可用，通过代理请求
             try:
                 import socket
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 if sock.connect_ex(("127.0.0.1", 7897)) == 0:
-                    proxy_url = "http://127.0.0.1:7897"
+                    curl_cmd.insert(2, "-x")
+                    curl_cmd.insert(3, "http://127.0.0.1:7897")
                 sock.close()
             except Exception:
                 pass
 
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True, proxy=proxy_url) as response:
-                    content = await response.text()
+            result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                raise ValueError(f"获取订阅失败: {result.stderr.strip() or f'exit code {result.returncode}'}")
+            content = result.stdout
 
             # 检测格式并解析
             content = content.strip()
