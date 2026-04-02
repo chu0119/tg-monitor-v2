@@ -390,8 +390,10 @@ log_ok "pip 升级完成: $($PIP_BIN --version 2>&1 | awk '{print $2}')"
 # Ubuntu 25.04+ 移除了 distutils，某些包需要它
 log_do "检查 distutils..."
 if ! sudo $PYTHON_BIN -c "import distutils" 2>/dev/null; then
-  log_info "distutils 不可用，通过apt安装..."
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-setuptools 2>&1 | tail -2
+  log_info "distutils 不可用，手动创建..."
+  # 直接用pip装setuptools到系统目录，用sudo python执行
+  curl -fsSL https://bootstrap.pypa.io/get-pip.py | sudo $PYTHON_BIN 2>/dev/null
+  sudo $PYTHON_BIN -m pip install setuptools --break-system-packages -q 2>/dev/null
   if sudo $PYTHON_BIN -c "import distutils" 2>/dev/null; then
     log_ok "distutils 安装成功"
   else
