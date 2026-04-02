@@ -495,19 +495,23 @@ class TelegramClientManager:
     def _start_client_loop(self, account_id: int, client: TelegramClient):
         """在后台启动Telethon事件循环，使注册的事件处理器开始工作"""
         if hasattr(client, '_event_loop_task') and not client._event_loop_task.done():
+            logger.info(f"账号 {account_id} 事件循环已在运行，跳过")
             return  # 已在运行
         client._event_loop_task = asyncio.create_task(
             self._run_client_loop(account_id, client)
         )
+        logger.info(f"账号 {account_id} 事件循环已创建（后台任务）")
 
     async def _run_client_loop(self, account_id: int, client: TelegramClient):
         """后台运行Telethon事件循环"""
+        logger.info(f"账号 {account_id} 事件循环开始运行 (connected={client.is_connected()})")
         try:
             await client.run_until_disconnected()
+            logger.warning(f"账号 {account_id} 事件循环已退出 (connected={client.is_connected()})")
         except asyncio.CancelledError:
             logger.info(f"账号 {account_id} 事件循环已取消")
         except Exception as e:
-            logger.error(f"账号 {account_id} 事件循环异常: {e}")
+            logger.error(f"账号 {account_id} 事件循环异常: {type(e).__name__}: {e}")
 
     async def disconnect_all(self):
         """断开所有客户端并清理事件处理器"""
