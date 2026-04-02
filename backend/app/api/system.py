@@ -38,7 +38,7 @@ async def system_status(db: AsyncSession = Depends(get_db)):
             select(Settings).where(Settings.key_name == "initialized")
         )
         init_setting = result.scalar_one_or_none()
-        is_initialized = bool(init_setting and init_setting.value == "true")
+        is_initialized = init_setting and init_setting.value == "true"
 
         # 获取账号数量
         from app.models.account import TelegramAccount
