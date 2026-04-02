@@ -107,9 +107,10 @@ chmod +x start.sh
 ### 🌐 内置代理（V2 新增）
 
 - **mihomo 内核** — 内置 Clash Meta 内核，无需额外安装
-- **订阅链接** — 支持粘贴订阅链接，自动解析节点
-- **多格式解析** — Clash / Base64 / SS / VMess / Trojan / VLESS / Hysteria2
-- **手动配置** — 支持手动添加代理节点
+- **订阅链接** — 支持粘贴机场订阅链接，自动解析节点（Clash YAML / Base64）
+- **多格式解析** — SS / SSR / VMess / Trojan / VLESS / Hysteria2 / Clash YAML
+- **手动导入** — 支持粘贴单条或多条节点链接直接导入
+- **节点测试** — 一键测试节点延迟，快速找到最优线路
 - **一键切换** — Web 界面选择节点，即时生效
 
 ### ⚙️ 系统管理
@@ -194,9 +195,9 @@ tg-monitor-v2/
 │       │   └── ...             # 其他 API
 │       ├── proxy/
 │       │   ├── manager.py      # mihomo 进程管理（单例模式）
-│       │   ├── subscribe_parser.py  # 多格式订阅解析
+│       │   ├── subscribe_parser.py  # 多格式订阅解析（SS/VMess/Trojan/VLESS/Hysteria2/Clash）
 │       │   ├── config_generator.py  # mihomo 配置生成
-│       │   └── mihomo          # 代理内核二进制
+│       │   └── ../proxy/mihomo      # 代理内核二进制（部署时自动下载）
 │       ├── models/
 │       ├── services/
 │       └── telegram/
@@ -273,7 +274,7 @@ curl -L https://bgithub.xyz/MetaCubeX/mihomo/releases/download/v1.19.21/mihomo-l
 # 解压并放置
 gunzip /tmp/mihomo.gz
 chmod +x /tmp/mihomo
-mv /tmp/mihomo backend/app/proxy/mihomo
+mv /tmp/mihomo backend/proxy/mihomo
 ```
 
 </details>
