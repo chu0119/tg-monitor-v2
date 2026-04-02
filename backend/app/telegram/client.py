@@ -119,6 +119,24 @@ class TelegramClientManager:
         """创建Telegram客户端，返回 (client, authorized)"""
         session_path = self.get_session_path(phone)
 
+        # 检查session文件是否损坏，损坏则删除
+        import os
+        session_db = session_path + ".session"
+        if os.path.exists(session_db):
+            try:
+                import sqlite3
+                conn = sqlite3.connect(session_db)
+                conn.execute("SELECT count(*) FROM sqlite_master")
+                conn.close()
+            except Exception:
+                logger.warning(f"Session文件损坏，自动删除: {session_db}")
+                os.remove(session_db)
+                # 同时删除可能的journal/wal文件
+                for suffix in [".session-journal", ".session-wal", ".session-shm"]:
+                    p = session_path + suffix
+                    if os.path.exists(p):
+                        os.remove(p)
+
         # 规范化代理配置，如果没有传入则尝试从环境变量/配置获取
         if proxy is None:
             proxy = self._get_default_proxy()
