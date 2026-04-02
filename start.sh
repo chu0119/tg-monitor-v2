@@ -533,7 +533,7 @@ fi
 #  [7/9] 下载代理内核
 # ═══════════════════════════════════════════════════════════════
 log_step "7" "下载代理内核 (mihomo)"
-PROXY_DIR="$BACKEND_DIR/app/proxy"
+PROXY_DIR="$BACKEND_DIR/proxy"
 MIHOMO_PATH="$PROXY_DIR/mihomo"
 
 if [ -f "$MIHOMO_PATH" ] && [ -x "$MIHOMO_PATH" ]; then
