@@ -147,14 +147,16 @@ fi
 if command -v pip3 &>/dev/null; then
   log_ok "pip3 已安装"
 else
-  log_do "安装 pip3 (通过 get-pip.py)..."
-  if curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 2>&1 | tail -2; then
-    log_ok "pip3 安装成功"
+  log_do "安装 pip3..."
+  # 先尝试apt
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip 2>&1 | tail -2
+  if command -v pip3 &>/dev/null; then
+    log_ok "pip3 安装成功 (apt)"
   else
-    log_do "get-pip.py 失败，尝试 apt 安装..."
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip 2>&1 | tail -2
+    # 回退get-pip.py
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py | sudo python3 2>&1 | tail -2
     if command -v pip3 &>/dev/null; then
-      log_ok "pip3 安装成功 (apt)"
+      log_ok "pip3 安装成功 (get-pip.py)"
     else
       log_fail "pip3 安装失败"; exit 1
     fi
@@ -399,7 +401,15 @@ log_ok "系统依赖全部安装完成 ✓"
 log_step "3" "安装 Python 依赖"
 
 PYTHON_BIN=$(which python3)
-PIP_BIN=$(which pip3)
+PIP_BIN=$(which pip3 2>/dev/null)
+if [ -z "$PIP_BIN" ]; then
+  # pip3命令不存在但模块可用，创建临时wrapper
+  PIP_WRAPPER="/tmp/tg-monitor-pip3"
+  echo '#!/bin/bash' > "$PIP_WRAPPER"
+  echo 'python3 -m pip "$@"' >> "$PIP_WRAPPER"
+  chmod +x "$PIP_WRAPPER"
+  PIP_BIN="$PIP_WRAPPER"
+fi
 log_info "Python: $PYTHON_BIN"
 log_info "pip: $PIP_BIN"
 
