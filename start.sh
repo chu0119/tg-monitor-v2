@@ -378,27 +378,20 @@ log_ok "系统依赖全部安装完成 ✓"
 log_step "3" "安装 Python 依赖"
 
 PYTHON_BIN=${PYTHON_BIN:-$(which python3)}
-PIP_BIN=$(which pip3 2>/dev/null)
-if [ -z "$PIP_BIN" ]; then
-  # pip3命令不存在但模块可用，创建临时wrapper
-  PIP_WRAPPER="/tmp/tg-monitor-pip3"
-  echo '#!/bin/bash' > "$PIP_WRAPPER"
-  echo 'sudo pip3 "$@"' >> "$PIP_WRAPPER"
-  chmod +x "$PIP_WRAPPER"
-  PIP_BIN="$PIP_WRAPPER"
-fi
+PIP_BIN=$(which pip3 2>/dev/null || echo "pip3")
+PIP_RUN="sudo $PIP_BIN"
 log_info "Python: $PYTHON_BIN"
 log_info "pip: $PIP_BIN"
 
 log_do "升级 pip..."
-$PIP_BIN install --upgrade pip --break-system-packages -q 2>/dev/null
+$PIP_RUN install --upgrade pip --break-system-packages -q 2>/dev/null
 log_ok "pip 升级完成: $($PIP_BIN --version 2>&1 | awk '{print $2}')"
 
 # Ubuntu 25.04+ 移除了 distutils，某些包需要它
 log_do "检查 distutils..."
 if ! $PYTHON_BIN -c "import distutils" 2>/dev/null; then
   log_info "distutils 不可用，安装 setuptools..."
-  $PIP_BIN install setuptools --break-system-packages -q 2>/dev/null
+  $PIP_RUN install setuptools --break-system-packages -q 2>/dev/null
   if $PYTHON_BIN -c "import distutils" 2>/dev/null; then
     log_ok "distutils 安装成功 (通过 setuptools)"
   else
@@ -424,14 +417,14 @@ if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   PIP_ARGS="-r $BACKEND_DIR/requirements.txt --break-system-packages --ignore-installed --no-user"
   [ -n "$PIP_INDEX" ] && PIP_ARGS="$PIP_ARGS -i $PIP_INDEX --trusted-host $(echo $PIP_INDEX | sed 's|https://||;s|/simple.*||')"
 
-  PIP_OUTPUT=$($PIP_BIN install $PIP_ARGS 2>&1)
+  PIP_OUTPUT=$($PIP_RUN install $PIP_ARGS 2>&1)
   PIP_EXIT=$?
   echo "$PIP_OUTPUT" | tail -8
   if [ $PIP_EXIT -eq 0 ]; then
     log_ok "Python 依赖安装完成 ✓"
   else
     log_do "首次安装失败（退出码: $PIP_EXIT），正在重试..."
-    PIP_OUTPUT=$($PIP_BIN install $PIP_ARGS 2>&1)
+    PIP_OUTPUT=$($PIP_RUN install $PIP_ARGS 2>&1)
     PIP_EXIT=$?
     echo "$PIP_OUTPUT" | tail -5
     if [ $PIP_EXIT -eq 0 ]; then
