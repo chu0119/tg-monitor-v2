@@ -42,3 +42,4 @@ apscheduler==3.11.0
 python-dateutil==2.9.0.post0
 psutil==6.1.1  # 系统资源监控
 greenlet>=3.0
+aiofiles>=24.1
