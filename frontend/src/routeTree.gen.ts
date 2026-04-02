@@ -18,6 +18,7 @@ import { Route as KeywordsRouteImport } from './routes/keywords'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ConversationsRouteImport } from './routes/conversations'
 import { Route as BigscreenRouteImport } from './routes/bigscreen'
+import { Route as AnalysisRouteImport } from './routes/analysis'
 import { Route as AlertsRouteImport } from './routes/alerts'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as IndexRouteImport } from './routes/index'
@@ -67,6 +68,11 @@ const BigscreenRoute = BigscreenRouteImport.update({
   path: '/bigscreen',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AnalysisRoute = AnalysisRouteImport.update({
+  id: '/analysis',
+  path: '/analysis',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AlertsRoute = AlertsRouteImport.update({
   id: '/alerts',
   path: '/alerts',
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/alerts': typeof AlertsRoute
+  '/analysis': typeof AnalysisRoute
   '/bigscreen': typeof BigscreenRoute
   '/conversations': typeof ConversationsRoute
   '/dashboard': typeof DashboardRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/alerts': typeof AlertsRoute
+  '/analysis': typeof AnalysisRoute
   '/bigscreen': typeof BigscreenRoute
   '/conversations': typeof ConversationsRoute
   '/dashboard': typeof DashboardRoute
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/alerts': typeof AlertsRoute
+  '/analysis': typeof AnalysisRoute
   '/bigscreen': typeof BigscreenRoute
   '/conversations': typeof ConversationsRoute
   '/dashboard': typeof DashboardRoute
@@ -132,6 +141,7 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/alerts'
+    | '/analysis'
     | '/bigscreen'
     | '/conversations'
     | '/dashboard'
@@ -146,6 +156,7 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/alerts'
+    | '/analysis'
     | '/bigscreen'
     | '/conversations'
     | '/dashboard'
@@ -160,6 +171,7 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/alerts'
+    | '/analysis'
     | '/bigscreen'
     | '/conversations'
     | '/dashboard'
@@ -175,6 +187,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsRoute: typeof AccountsRoute
   AlertsRoute: typeof AlertsRoute
+  AnalysisRoute: typeof AnalysisRoute
   BigscreenRoute: typeof BigscreenRoute
   ConversationsRoute: typeof ConversationsRoute
   DashboardRoute: typeof DashboardRoute
@@ -251,6 +264,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BigscreenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/analysis': {
+      id: '/analysis'
+      path: '/analysis'
+      fullPath: '/analysis'
+      preLoaderRoute: typeof AnalysisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/alerts': {
       id: '/alerts'
       path: '/alerts'
@@ -279,6 +299,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsRoute: AccountsRoute,
   AlertsRoute: AlertsRoute,
+  AnalysisRoute: AnalysisRoute,
   BigscreenRoute: BigscreenRoute,
   ConversationsRoute: ConversationsRoute,
   DashboardRoute: DashboardRoute,
