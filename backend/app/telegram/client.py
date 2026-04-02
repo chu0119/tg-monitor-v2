@@ -337,6 +337,7 @@ class TelegramClientManager:
             client = self.clients[account_id]
             # 检查客户端是否仍连接
             if client.is_connected():
+                self._start_client_loop(account_id, client)
                 return client
             else:
                 # 客户端已断开，移除并重新创建
