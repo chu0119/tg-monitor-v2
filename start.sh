@@ -724,11 +724,24 @@ else
 fi
 
 log_do "启动前端 (nginx, 端口 $FRONTEND_PORT)..."
-sudo systemctl start nginx 2>/dev/null || sudo systemctl reload nginx 2>/dev/null || true
+sudo systemctl reload nginx 2>/dev/null || sudo systemctl start nginx 2>/dev/null || true
 sleep 1
 FRONTEND_OK=$(systemctl is-active nginx 2>/dev/null)
 if [ "$FRONTEND_OK" = "active" ]; then
-  log_ok "前端启动成功 ✓"
+  # 验证nginx确实在监听FRONTEND_PORT
+  if sudo ss -tlnp | grep -q ":${FRONTEND_PORT}.*nginx"; then
+    log_ok "前端启动成功 ✓"
+  else
+    log_fail "nginx运行中但未监听端口 $FRONTEND_PORT，尝试restart..."
+    sudo systemctl restart nginx 2>/dev/null
+    sleep 1
+    if sudo ss -tlnp | grep -q ":${FRONTEND_PORT}.*nginx"; then
+      log_ok "前端启动成功 ✓ (restart后)"
+    else
+      log_fail "nginx仍未监听端口 $FRONTEND_PORT"
+      sudo nginx -T 2>&1 | grep "listen" | sed 's/^/    /'
+    fi
+  fi
 else
   log_fail "nginx 启动失败"
   sudo nginx -t 2>&1 | sed 's/^/    /'
