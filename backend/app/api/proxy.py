@@ -34,6 +34,11 @@ class SubscribeRequest(BaseModel):
     replace: bool = Field(default=False, description="是否替换现有节点")
 
 
+class ImportNodesRequest(BaseModel):
+    """手动导入节点请求"""
+    nodes_text: str = Field(..., description="节点链接文本，每行一个，支持 ss:// ssr:// vmess:// trojan:// vless:// hysteria2:// hysteria2://")
+
+
 class NodeSelectRequest(BaseModel):
     """节点选择请求"""
     proxy_port: int = Field(default=7897, description="代理端口")
@@ -132,6 +137,57 @@ async def parse_subscribe(
         await db.rollback()
         logger.error(f"解析订阅失败: {e}")
         raise HTTPException(status_code=500, detail=f"解析失败: {str(e)}")
+
+
+@router.post("/import")
+async def import_nodes(
+    request: ImportNodesRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """手动导入节点（支持粘贴单条或多条节点URI）"""
+    try:
+        from app.proxy.subscribe_parser import SubscribeParser
+        nodes = await SubscribeParser._parse_uri_lines(request.nodes_text)
+
+        if not nodes:
+            raise HTTPException(status_code=400, detail="未解析到任何节点，请检查格式（支持 ss:// ssr:// vmess:// trojan:// vless:// hysteria2://）")
+
+        saved_nodes = []
+        for node in nodes:
+            existing = await db.execute(
+                select(ProxyNodeModel).where(ProxyNodeModel.name == node.name)
+            )
+            if existing.scalar_one_or_none():
+                continue
+
+            node_model = ProxyNodeModel(
+                name=node.name,
+                type=node.type,
+                server=node.server,
+                port=node.port,
+                config_json=json.dumps(node.to_dict(), ensure_ascii=False),
+                subscription_url="manual",
+                is_selected=False,
+                latency_ms=None
+            )
+            db.add(node_model)
+            saved_nodes.append(node.name)
+
+        await db.commit()
+
+        return {
+            "success": True,
+            "total_nodes": len(nodes),
+            "saved_nodes": len(saved_nodes),
+            "nodes": [{"name": n.name, "type": n.type, "server": n.server} for n in nodes]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"导入节点失败: {e}")
+        raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
 
 
 @router.get("/nodes")

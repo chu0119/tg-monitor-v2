@@ -55,6 +55,7 @@ export function ProxyPage() {
   const [nodes, setNodes] = useState<ProxyNode[]>([]);
   const [subscribeSources, setSubscribeSources] = useState<SubscribeSource[]>([]);
   const [subscribeUrl, setSubscribeUrl] = useState("");
+  const [importText, setImportText] = useState("");
   const [loading, setLoading] = useState(true);
   const [testingNodes, setTestingNodes] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -162,6 +163,26 @@ export function ProxyPage() {
 
   const handleRemoveSubscribe = (url: string) => {
     setSubscribeSources((prev) => prev.filter((s) => s.url !== url));
+  };
+
+  const handleImportNodes = async () => {
+    if (!importText.trim()) {
+      alert("请粘贴节点链接");
+      return;
+    }
+
+    setActionLoading("import");
+    try {
+      const data = await api.proxy.importNodes(importText);
+      const saved = data.saved_nodes || 0;
+      setImportText("");
+      await fetchNodes();
+      alert(`成功导入 ${saved} 个节点`);
+    } catch (error: any) {
+      alert(error.message || "导入节点失败");
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const handleSelectNode = async (id: string) => {
@@ -434,6 +455,36 @@ export function ProxyPage() {
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* 手动导入节点 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">手动导入节点</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <textarea
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+            placeholder={"每行粘贴一个节点链接，支持格式：\nss://...\nvmess://...\ntrojan://...\nvless://...\nhysteria2://..."}
+            className="w-full h-28 rounded-lg border border-cyber-blue/20 bg-secondary/30 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-cyber-blue/50 placeholder:text-muted-foreground"
+          />
+          <div className="flex gap-3">
+            <Button
+              variant="tech"
+              onClick={handleImportNodes}
+              disabled={actionLoading === "import"}
+              className="flex-1 sm:flex-none"
+            >
+              {actionLoading === "import" ? (
+                <RefreshCw size={18} className="mr-2 animate-spin" />
+              ) : (
+                <Plus size={18} className="mr-2" />
+              )}
+              导入节点
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

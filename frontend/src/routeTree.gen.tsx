@@ -34,6 +34,12 @@ import {
     ProxyPage,
 } from "@/pages/ProxyPage"
 import {
+    SetupPage,
+} from "@/pages/SetupPage"
+import {
+    AnalysisPage,
+} from "@/pages/AnalysisPage"
+import {
     MainLayout,
 } from "@/components/layout/MainLayout"
 
@@ -107,6 +113,18 @@ const proxyRoute = createRoute({
   component: ProxyPage,
 })
 
+const setupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/setup",
+  component: SetupPage,
+})
+
+const analysisRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/analysis",
+  component: AnalysisPage,
+})
+
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   dashboardRoute,
@@ -119,4 +137,6 @@ export const routeTree = rootRoute.addChildren([
   settingsRoute,
   bigscreenRoute,
   proxyRoute,
+  setupRoute,
+  analysisRoute,
 ])

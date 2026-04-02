@@ -459,6 +459,12 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       }).then(handleResponse),
+    importNodes: (nodesText: string) =>
+      fetch(`${API_BASE}/proxy/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodes_text: nodesText }),
+      }).then(handleResponse),
     getNodes: () => fetch(`${API_BASE}/proxy/nodes`).then(handleResponse),
     selectNode: (id: string) =>
       fetch(`${API_BASE}/proxy/nodes/${id}/select`, {

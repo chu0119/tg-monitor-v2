@@ -151,8 +151,11 @@ class SubscribeParser:
         try:
             # 获取订阅内容
             import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=30) as response:
+            headers = {
+                "User-Agent": "clash-verge/v2.2.4"
+            }
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as response:
                     content = await response.text()
 
             # 检测格式并解析
