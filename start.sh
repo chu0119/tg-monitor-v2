@@ -628,6 +628,11 @@ log_info "启动命令: $PYTHON_BIN -m uvicorn app.main:app --host 0.0.0.0 --por
 
 # ── 前端 ──
 log_do "配置前端服务..."
+# nginx用于SPA路由+API反向代理，必须安装
+if ! command -v nginx &>/dev/null; then
+  log_do "安装 nginx..."
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nginx 2>&1 | tail -2
+fi
 FRONTEND_USING_NGINX=false
 if command -v nginx &>/dev/null; then
   log_info "检测到 nginx，配置反向代理..."
