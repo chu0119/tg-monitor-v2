@@ -662,6 +662,9 @@ EOF
     log_ok "nginx 配置完成 (SPA路由 + API反向代理)"
     log_info "前端: $FRONTEND_DIR/dist → 端口 $FRONTEND_PORT"
     log_info "API:  /api/* → 127.0.0.1:$BACKEND_PORT"
+    # 确保nginx(www-data)能访问home目录下的文件
+    chmod o+x "$HOME" 2>/dev/null
+    chmod -R o+r "$FRONTEND_DIR/dist" 2>/dev/null
   else
     log_fail "nginx 配置测试失败"
     sudo nginx -t 2>&1 | sed 's/^/    /'
