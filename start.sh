@@ -387,23 +387,10 @@ log_do "升级 pip..."
 $PIP_RUN install --upgrade pip --break-system-packages -q 2>/dev/null
 log_ok "pip 升级完成: $($PIP_BIN --version 2>&1 | awk '{print $2}')"
 
-# Ubuntu 25.04+ 移除了 distutils，尝试安装但不阻塞流程（虚拟环境会自带）
-log_do "检查 distutils..."
-if ! sudo $PYTHON_BIN -c "import distutils" 2>/dev/null; then
-  log_info "distutils 不可用，尝试安装（非阻塞）..."
-  # 方案1: apt 安装
-  if sudo apt-get install -y python3-setuptools 2>/dev/null; then
-    log_ok "distutils 安装成功 (apt)"
-  # 方案2: pip 安装到系统
-  elif sudo $PYTHON_BIN -m pip install setuptools --break-system-packages -q 2>/dev/null; then
-    log_ok "distutils 安装成功 (pip)"
-  # 方案3: 跳过，虚拟环境会自带
-  else
-    log_warn "distutils 安装失败，将在虚拟环境中自动安装 setuptools（不影响使用）"
-  fi
-else
-  log_ok "distutils 可用"
-fi
+# 确保 setuptools 可用（pip 安装依赖时会自动处理）
+log_do "安装 setuptools..."
+sudo $PYTHON_BIN -m pip install setuptools --break-system-packages -q 2>/dev/null || true
+log_ok "setuptools 就绪"
 
 if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   log_do "安装 requirements.txt 中的依赖..."
@@ -412,7 +399,7 @@ if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   log_info "依赖数量: ${PKG_COUNT} 个包"
   [ -n "$PIP_INDEX" ] && log_info "使用镜像: $PIP_INDEX"
 
-  PIP_ARGS="-r $BACKEND_DIR/requirements.txt --break-system-packages --ignore-installed --no-user"
+  PIP_ARGS="-r $BACKEND_DIR/requirements.txt --break-system-packages"
   [ -n "$PIP_INDEX" ] && PIP_ARGS="$PIP_ARGS -i $PIP_INDEX --trusted-host $(echo $PIP_INDEX | sed 's|https://||;s|/simple.*||')"
 
   PIP_OUTPUT=$($PIP_RUN install $PIP_ARGS 2>&1)
@@ -605,7 +592,6 @@ Wants=mysql.service
 Type=simple
 WorkingDirectory=$BACKEND_DIR
 Environment="PATH=/home/$SUDO_USER/.local/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="PYTHONPATH=/home/$SUDO_USER/.local/lib/python${PY_VER}/site-packages"
 ExecStart=$PYTHON_BIN -m uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT
 Restart=always
 RestartSec=5
