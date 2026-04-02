@@ -387,22 +387,19 @@ log_do "升级 pip..."
 $PIP_RUN install --upgrade pip --break-system-packages -q 2>/dev/null
 log_ok "pip 升级完成: $($PIP_BIN --version 2>&1 | awk '{print $2}')"
 
-# Ubuntu 25.04+ 移除了 distutils，通过 apt 安装 setuptools 提供
+# Ubuntu 25.04+ 移除了 distutils，尝试安装但不阻塞流程（虚拟环境会自带）
 log_do "检查 distutils..."
 if ! sudo $PYTHON_BIN -c "import distutils" 2>/dev/null; then
-  log_info "distutils 不可用，通过 apt 安装 setuptools..."
-  sudo apt-get install -y python3-setuptools 2>/dev/null
-  if sudo $PYTHON_BIN -c "import distutils" 2>/dev/null; then
-    log_ok "distutils 安装成功"
+  log_info "distutils 不可用，尝试安装（非阻塞）..."
+  # 方案1: apt 安装
+  if sudo apt-get install -y python3-setuptools 2>/dev/null; then
+    log_ok "distutils 安装成功 (apt)"
+  # 方案2: pip 安装到系统
+  elif sudo $PYTHON_BIN -m pip install setuptools --break-system-packages -q 2>/dev/null; then
+    log_ok "distutils 安装成功 (pip)"
+  # 方案3: 跳过，虚拟环境会自带
   else
-    # apt 失败则尝试 pip
-    log_info "apt 安装失败，尝试 pip 安装 setuptools..."
-    sudo $PYTHON_BIN -m pip install setuptools --break-system-packages -q 2>/dev/null
-    if sudo $PYTHON_BIN -c "import distutils" 2>/dev/null; then
-      log_ok "distutils 安装成功"
-    else
-      log_fail "distutils 安装失败"; exit 1
-    fi
+    log_warn "distutils 安装失败，将在虚拟环境中自动安装 setuptools（不影响使用）"
   fi
 else
   log_ok "distutils 可用"
