@@ -151,6 +151,7 @@ async def batch_create_conversations(
             })
 
     # 批量添加新会话
+    monitor_conv_ids = []
     for conversation in new_conversations:
         db.add(conversation)
         await db.flush()
@@ -161,14 +162,31 @@ async def batch_create_conversations(
                 r["status"] == "created"):
                 r["id"] = conversation.id
 
-        # 如果是活动状态且启用实时监控，启动监控
+        # 收集需要启动监控的会话ID（commit后再启动）
         if conversation.status == "active" and conversation.enable_realtime:
-            try:
-                await message_monitor.start_monitor(conversation.id)
-            except Exception as e:
-                logger.error(f"启动监控失败 (conversation_id={conversation.id}): {e}")
+            monitor_conv_ids.append(conversation.id)
 
         created_count += 1
+
+    # 先commit，确保数据写入数据库后再启动监控
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        # 死锁重试一次
+        logger.warning(f"批量创建会话commit失败，重试: {e}")
+        try:
+            await db.commit()
+        except Exception as e2:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=f"创建会话失败: {e2}")
+
+    # commit后再启动监控（此时数据已持久化，其他session可查到）
+    for conv_id in monitor_conv_ids:
+        try:
+            await message_monitor.start_monitor(conv_id)
+        except Exception as e:
+            logger.error(f"启动监控失败 (conversation_id={conv_id}): {e}")
 
     # 批量更新账号的总会话数（只更新实际新增的）
     if created_count > 0:
@@ -182,8 +200,6 @@ async def batch_create_conversations(
                 .where(TelegramAccount.id == account_id)
                 .values(total_conversations=TelegramAccount.total_conversations + count)
             )
-
-    await db.commit()
 
     return {
         "message": f"批量操作完成",
