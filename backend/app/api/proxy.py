@@ -361,6 +361,40 @@ async def test_node(
         raise HTTPException(status_code=500, detail=f"测试失败: {str(e)}")
 
 
+@router.get("/latency")
+async def test_proxy_latency():
+    """测试当前代理到 Telegram API 的延迟"""
+    import subprocess
+    import time
+
+    try:
+        proxy_mgr = await get_proxy_manager()
+        status = await proxy_mgr.get_status()
+
+        if not status.get("running"):
+            return {"success": False, "latency_ms": None, "message": "代理未运行"}
+
+        proxy_port = status.get("proxy_port", 7897)
+
+        start = time.time()
+        result = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+             "-m", "10", "-x", f"http://127.0.0.1:{proxy_port}",
+             "https://api.telegram.org"],
+            capture_output=True, text=True, timeout=15
+        )
+        elapsed_ms = int((time.time() - start) * 1000)
+        http_code = result.stdout.strip()
+
+        if http_code in ("200", "301", "302", "401", "403", "404"):
+            return {"success": True, "latency_ms": elapsed_ms, "message": f"延迟: {elapsed_ms}ms"}
+        else:
+            return {"success": False, "latency_ms": None, "message": f"连接失败 (HTTP {http_code})"}
+
+    except Exception as e:
+        return {"success": False, "latency_ms": None, "message": f"测试失败: {str(e)}"}
+
+
 @router.post("/start")
 async def start_proxy():
     """启动代理"""

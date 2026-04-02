@@ -59,6 +59,7 @@ export function ProxyPage() {
   const [loading, setLoading] = useState(true);
   const [testingNodes, setTestingNodes] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [tgLatency, setTgLatency] = useState<{ ms: number | null; message: string } | null>(null);
 
   const [abortController, setAbortController] = useState<AbortController | null>(null);
 
@@ -109,9 +110,20 @@ export function ProxyPage() {
       fetchNodes();
     }, 30000);
 
+    // 每10秒测试代理到TG的延迟
+    const latencyInterval = setInterval(async () => {
+      try {
+        const data = await api.proxy.testLatency();
+        setTgLatency({ ms: data.latency_ms, message: data.message });
+      } catch {
+        // ignore
+      }
+    }, 10000);
+
     return () => {
       controller.abort();
       clearInterval(interval);
+      clearInterval(latencyInterval);
     };
   }, []);
 
@@ -359,9 +371,9 @@ export function ProxyPage() {
                 <Clock size={24} />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">延迟</p>
+                <p className="text-sm text-muted-foreground">TG 延迟</p>
                 <p className="text-lg font-bold">
-                  {status?.latency_ms ? `${status.latency_ms}ms` : "-"}
+                  {tgLatency?.ms ? `${tgLatency.ms}ms` : tgLatency?.message || "-"}
                 </p>
               </div>
             </div>

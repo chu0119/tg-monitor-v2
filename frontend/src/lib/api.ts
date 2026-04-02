@@ -483,6 +483,8 @@ export const api = {
       fetch(`${API_BASE}/proxy/nodes/${id}/test`, {
         method: "POST",
       }).then(handleResponse),
+    testLatency: () =>
+      fetch(`${API_BASE}/proxy/latency`).then(handleResponse),
     start: () =>
       fetch(`${API_BASE}/proxy/start`, {
         method: "POST",
