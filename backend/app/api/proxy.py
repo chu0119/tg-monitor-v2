@@ -31,7 +31,7 @@ async def get_proxy_manager():
 class SubscribeRequest(BaseModel):
     """订阅请求"""
     url: str = Field(..., description="订阅链接URL")
-    replace: bool = Field(default=False, description="是否替换现有节点")
+    replace: bool = Field(default=True, description="是否替换现有节点")
 
 
 class ImportNodesRequest(BaseModel):
