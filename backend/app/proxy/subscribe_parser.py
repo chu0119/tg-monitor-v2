@@ -76,7 +76,7 @@ class ProxyNode:
         # 根据类型添加特定参数
         if self.type == "ss":
             config.update({
-                "cipher": self.params.get("method", "aes-256-gcm"),
+                "cipher": self.params.get("cipher") or self.params.get("method", "aes-256-gcm"),
                 "password": self.params.get("password", ""),
             })
         elif self.type == "ssr":
