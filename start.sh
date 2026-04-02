@@ -774,6 +774,17 @@ else
   log_fail "API代理 (nginx→后端): 失败"; VERIFY_OK=false
 fi
 
+# 4. 详细API测试
+log_info "API端点测试..."
+for endpoint in "/api/v1/dashboard/stats" "/api/v1/proxy/status" "/api/v1/keywords/keyword-groups" "/api/v1/notifications" "/api/v1/accounts"; do
+  STATUS=$(curl -so /dev/null -w "%{http_code}" "http://127.0.0.1:$BACKEND_PORT$endpoint" 2>/dev/null)
+  if [ "$STATUS" = "200" ] || [ "$STATUS" = "201" ]; then
+    log_info "  $endpoint → $STATUS ✓"
+  else
+    log_info "  $endpoint → $STATUS ⚠️"
+  fi
+done
+
 if [ "$VERIFY_OK" = false ]; then
   log_fail "端到端验证未全部通过，请检查上方错误"
 fi
