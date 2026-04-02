@@ -161,8 +161,9 @@ class SubscribeParser:
             # 检测格式并解析
             content = content.strip()
 
-            # 尝试YAML格式（Clash）
-            if content.startswith("proxies:") or content.startswith("proxy-providers:"):
+            # 尝试YAML格式（Clash）- 完整Clash配置或纯proxies列表
+            # 有些机场返回完整Clash配置（含dns/rules等），proxies不一定在开头
+            if 'proxies:' in content:
                 try:
                     result = await SubscribeParser._parse_clash_yaml(content)
                     if result:
