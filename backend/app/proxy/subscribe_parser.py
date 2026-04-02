@@ -154,9 +154,9 @@ class SubscribeParser:
             curl_cmd = [
                 "curl", "-fsSL",
                 "-H", "User-Agent: clash-verge/v2.2.4",
-                "-m", "30",
+                "-m", "60",
                 "--retry", "2",
-                "--retry-delay", "3",
+                "--retry-delay", "5",
                 url
             ]
             # 如果有本地代理可用，通过代理请求
@@ -175,6 +175,7 @@ class SubscribeParser:
             if result.returncode != 0:
                 raise ValueError(f"获取订阅失败: {result.stderr.strip() or f'exit code {result.returncode}'}")
             content = result.stdout
+            logger.info(f"订阅内容获取成功，长度: {len(content)} 字符，前100字符: {content[:100]}")
 
             # 检测格式并解析
             content = content.strip()
@@ -215,7 +216,9 @@ class SubscribeParser:
         """解析Clash YAML格式"""
         nodes = []
         try:
+            logger.info(f"开始解析Clash YAML，内容长度: {len(content)} 字符")
             data = yaml.safe_load(content)
+            logger.info(f"YAML加载完成，类型: {type(data).__name__}")
 
             if not isinstance(data, dict):
                 logger.warning("YAML内容不是有效的字典格式")
@@ -223,8 +226,10 @@ class SubscribeParser:
 
             proxies = data.get("proxies", [])
             if not proxies or not isinstance(proxies, list):
-                logger.warning("YAML中未找到有效的proxies列表")
+                logger.warning(f"YAML中未找到有效的proxies列表，proxies类型: {type(proxies).__name__}")
                 return []
+
+            logger.info(f"找到 {len(proxies)} 个proxy节点，开始逐个解析...")
 
             for proxy in proxies:
                 try:
