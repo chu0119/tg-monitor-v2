@@ -103,8 +103,15 @@ export function ProxyPage() {
     fetchStatus();
     fetchNodes();
 
+    // 每30秒自动刷新状态和节点延迟
+    const interval = setInterval(() => {
+      fetchStatus();
+      fetchNodes();
+    }, 30000);
+
     return () => {
       controller.abort();
+      clearInterval(interval);
     };
   }, []);
 
