@@ -208,42 +208,17 @@ if [ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" -lt 18 ]; then
 fi
 log_ok "npm $(npm --version 2>/dev/null)"
 
-# ── MySQL 8.0 LTS（稳定版）──
-MYSQL_80_INSTALLED=false
+# ── MySQL ──
 if command -v mysql &>/dev/null; then
   MYSQL_VER=$(mysql --version 2>/dev/null | grep -oP '\d+\.\d+' | head -1)
-  log_info "已安装 MySQL $MYSQL_VER"
-  if [[ "$MYSQL_VER" == "8.0" ]]; then
-    MYSQL_80_INSTALLED=true
-    log_ok "MySQL 8.0 LTS 已安装"
-  else
-    log_info "当前 MySQL $MYSQL_VER 不兼容，将安装 MySQL 8.0"
-    # 卸载旧版本
-    sudo systemctl stop mysql 2>/dev/null
-    sudo apt-get purge -y mysql-server* mysql-client* mysql-common* 2>/dev/null
-    sudo rm -rf /var/lib/mysql /var/log/mysql /var/run/mysqld /etc/mysql
-  fi
+  log_ok "MySQL $MYSQL_VER 已安装"
+else
+  MYSQL_VER=""
 fi
 
-if [ "$MYSQL_80_INSTALLED" = false ]; then
-  log_do "安装 MySQL 8.0 LTS（稳定版）..."
-  # 添加MySQL APT仓库
-  DEB=$(mktemp) && wget -qO "$DEB" https://dev.mysql.com/get/mysql-apt-config_0.8.33-1_all.deb 2>/dev/null
-  if [ -f "$DEB" ] && [ -s "$DEB" ]; then
-    sudo DEBIAN_FRONTEND=noninteractive dpkg -i "$DEB" 2>/dev/null
-    rm -f "$DEB"
-    sudo apt-get update -qq 2>/dev/null
-    # 安装时预选mysql-8.0
-    echo "mysql-8.0 mysql-server/default-select select mysql-8.0" | sudo debconf-set-selections
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server 2>&1 | tail -3
-  else
-    rm -f "$DEB"
-    log_fail "无法下载MySQL APT配置包"
-    # 回退：用系统自带版本
-    log_info "回退使用系统自带MySQL..."
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server 2>&1 | tail -3
-  fi
-
+if [ -z "$MYSQL_VER" ]; then
+  log_do "安装 MySQL Server..."
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server 2>&1 | tail -3
   if command -v mysql &>/dev/null; then
     MYSQL_VER=$(mysql --version 2>/dev/null | grep -oP '\d+\.\d+' | head -1)
     log_ok "MySQL $MYSQL_VER 安装完成"
