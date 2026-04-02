@@ -244,6 +244,7 @@ else
 fi
 
 # ── MySQL密码配置 ──
+PYTHON_BIN=$(which python3 2>/dev/null || echo "python3")
 MYSQL_PWD_OK=false
 MYSQL_ROOT_PWD=""
 DB_USER="tgmonitor"
@@ -284,7 +285,7 @@ if [ "$MYSQL_PWD_OK" = false ]; then
         echo -e "  ${RED}不一致，不设密码${NC}"; MYSQL_ROOT_PWD=""
       fi
     fi
-    sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
+    sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
     log_ok "MySQL root 密码配置完成"
     MYSQL_PWD_OK=true
   else
@@ -317,7 +318,7 @@ if [ "$MYSQL_PWD_OK" = false ]; then
   sleep 10
 
   if sudo mysql -e "SELECT 1" &>/dev/null; then
-    sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'tg_monitor_tmp'; FLUSH PRIVILEGES;" 2>&1
+    sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'tg_monitor_tmp'; FLUSH PRIVILEGES;" 2>&1
     sudo mysqladmin -u root shutdown 2>/dev/null || sudo killall -9 mysqld 2>/dev/null
     sleep 3
     MYSQL_ROOT_PWD="tg_monitor_tmp"
@@ -376,7 +377,7 @@ log_ok "系统依赖全部安装完成 ✓"
 # ═══════════════════════════════════════════════════════════════
 log_step "3" "安装 Python 依赖"
 
-PYTHON_BIN=$(which python3)
+PYTHON_BIN=${PYTHON_BIN:-$(which python3)}
 PIP_BIN=$(which pip3 2>/dev/null)
 if [ -z "$PIP_BIN" ]; then
   # pip3命令不存在但模块可用，创建临时wrapper
