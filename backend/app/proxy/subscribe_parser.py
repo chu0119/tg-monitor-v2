@@ -154,8 +154,22 @@ class SubscribeParser:
             headers = {
                 "User-Agent": "clash-verge/v2.2.4"
             }
+
+            # 检测本地是否有mihomo代理可用
+            connector = None
+            proxy_url = None
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                if sock.connect_ex(("127.0.0.1", 7897)) == 0:
+                    proxy_url = "http://127.0.0.1:7897"
+                sock.close()
+            except Exception:
+                pass
+
             async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True) as response:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30), allow_redirects=True, proxy=proxy_url) as response:
                     content = await response.text()
 
             # 检测格式并解析
