@@ -5,7 +5,7 @@ import "./styles/globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 
 // Import the generated route tree
-import { routeTree } from "./routeTree.gen";
+import { routeTree } from "./routeTree.gen.tsx";
 
 // Create a new router instance
 const router = createRouter({ routeTree });
