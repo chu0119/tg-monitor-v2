@@ -206,63 +206,87 @@ if [ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" -lt 18 ]; then
 fi
 log_ok "npm $(npm --version 2>/dev/null)"
 
-# ── MySQL ──
+# ── MySQL 8.0 LTS（稳定版）──
+MYSQL_80_INSTALLED=false
 if command -v mysql &>/dev/null; then
-  log_ok "MySQL 已安装"
-else
-  log_do "安装 MySQL Server（可能需要1-3分钟，请耐心等待）..."
-  sudo debconf-set-selections <<< "mysql-server mysql-server/root_password password ''" 2>/dev/null || true
-  sudo debconf-set-selections <<< "mysql-server mysql-server/root_password_again password ''" 2>/dev/null || true
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server 2>&1 | tail -3
-  if command -v mysql &>/dev/null; then
-    log_ok "MySQL Server 安装完成"
+  MYSQL_VER=$(mysql --version 2>/dev/null | grep -oP '\d+\.\d+' | head -1)
+  log_info "已安装 MySQL $MYSQL_VER"
+  if [[ "$MYSQL_VER" == "8.0" ]]; then
+    MYSQL_80_INSTALLED=true
+    log_ok "MySQL 8.0 LTS 已安装"
   else
-    log_fail "MySQL Server 安装失败"; exit 1
+    log_info "当前 MySQL $MYSQL_VER 不兼容，将安装 MySQL 8.0"
+    # 卸载旧版本
+    sudo systemctl stop mysql 2>/dev/null
+    sudo apt-get purge -y mysql-server* mysql-client* mysql-common* 2>/dev/null
+    sudo rm -rf /var/lib/mysql /var/log/mysql /var/run/mysqld /etc/mysql
+  fi
+fi
+
+if [ "$MYSQL_80_INSTALLED" = false ]; then
+  log_do "安装 MySQL 8.0 LTS（稳定版）..."
+  # 添加MySQL APT仓库
+  DEB=$(mktemp) && wget -qO "$DEB" https://dev.mysql.com/get/mysql-apt-config_0.8.33-1_all.deb 2>/dev/null
+  if [ -f "$DEB" ] && [ -s "$DEB" ]; then
+    sudo DEBIAN_FRONTEND=noninteractive dpkg -i "$DEB" 2>/dev/null
+    rm -f "$DEB"
+    sudo apt-get update -qq 2>/dev/null
+    # 安装时预选mysql-8.0
+    echo "mysql-8.0 mysql-server/default-select select mysql-8.0" | sudo debconf-set-selections
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server 2>&1 | tail -3
+  else
+    rm -f "$DEB"
+    log_fail "无法下载MySQL APT配置包"
+    # 回退：用系统自带版本
+    log_info "回退使用系统自带MySQL..."
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server 2>&1 | tail -3
+  fi
+
+  if command -v mysql &>/dev/null; then
+    MYSQL_VER=$(mysql --version 2>/dev/null | grep -oP '\d+\.\d+' | head -1)
+    log_ok "MySQL $MYSQL_VER 安装完成"
+  else
+    log_fail "MySQL 安装失败"; exit 1
   fi
 fi
 
 # 启动MySQL
 log_do "启动 MySQL 服务..."
-MYSQL_RUNNING=false
-for try in 1 2 3; do
-  if systemctl is-active --quiet mysql 2>/dev/null || systemctl is-active --quiet mysqld 2>/dev/null; then
-    MYSQL_RUNNING=true; break
+sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld
+for try in 1 2 3 4 5; do
+  sudo systemctl start mysql 2>/dev/null
+  sleep 2
+  if systemctl is-active --quiet mysql 2>/dev/null; then
+    break
   fi
-  sudo systemctl start mysql 2>/dev/null || sudo systemctl start mysqld 2>/dev/null || sudo service mysql start 2>/dev/null || true
-  sleep 3
 done
-if [ "$MYSQL_RUNNING" = true ]; then
+if systemctl is-active --quiet mysql 2>/dev/null; then
   log_ok "MySQL 服务运行中"
 else
-  log_fail "MySQL 启动失败（请执行: sudo systemctl status mysql）"; exit 1
+  log_fail "MySQL 启动失败"; exit 1
 fi
 
-# 配置MySQL密码
-log_do "配置 MySQL root 密码..."
+# ── MySQL密码配置 ──
 MYSQL_PWD_OK=false
 MYSQL_ROOT_PWD=""
 DB_USER="tgmonitor"
 DB_PASS=""
 DB_NAME="tg_monitor"
 
-# 检查是否已经配置过（.env存在且数据库可连接）
+# 1. 检查已有.env配置
 if [ -f "$BACKEND_DIR/.env" ]; then
-  # 从.env读取密码
-  SAVED_DB_USER=$(grep "^MYSQL_USER=" "$BACKEND_DIR/.env" 2>/dev/null | cut -d= -f2)
-  SAVED_DB_PASS=$(grep "^MYSQL_PASSWORD=" "$BACKEND_DIR/.env" 2>/dev/null | cut -d= -f2)
-  SAVED_DB_NAME=$(grep "^MYSQL_DATABASE=" "$BACKEND_DIR/.env" 2>/dev/null | cut -d= -f2)
-
-  if [ -n "$SAVED_DB_USER" ] && [ -n "$SAVED_DB_PASS" ]; then
-    log_info "检测到已有配置，验证数据库连接..."
+  SAVED_USER=$(grep "^MYSQL_USER=" "$BACKEND_DIR/.env" | cut -d= -f2)
+  SAVED_PASS=$(grep "^MYSQL_PASSWORD=" "$BACKEND_DIR/.env" | cut -d= -f2)
+  SAVED_NAME=$(grep "^MYSQL_DATABASE=" "$BACKEND_DIR/.env" | cut -d= -f2)
+  if [ -n "$SAVED_USER" ] && [ -n "$SAVED_PASS" ]; then
+    log_info "检测到已有数据库配置，验证连接..."
     if $PYTHON_BIN -c "
 import pymysql
-conn = pymysql.connect(host='localhost', user='$SAVED_DB_USER', password='$SAVED_DB_PASS', connect_timeout=5)
+conn = pymysql.connect(host='localhost', user='$SAVED_USER', password='$SAVED_PASS', connect_timeout=5)
 conn.close()
 " 2>/dev/null; then
       log_ok "数据库连接正常，跳过密码设置"
-      DB_USER="$SAVED_DB_USER"
-      DB_PASS="$SAVED_DB_PASS"
-      DB_NAME="${SAVED_DB_NAME:-tg_monitor}"
+      DB_USER="$SAVED_USER"; DB_PASS="$SAVED_PASS"; DB_NAME="${SAVED_NAME:-tg_monitor}"
       MYSQL_PWD_OK=true
     else
       log_info "已有配置但连接失败，将重新配置"
@@ -270,110 +294,76 @@ conn.close()
   fi
 fi
 
+# 2. 尝试sudo mysql直连（auth_socket）
 if [ "$MYSQL_PWD_OK" = false ]; then
-  log_info "尝试 sudo mysql 直连..."
-  MYSQL_CONNECT_OK=false
-  for try in 1 2 3 4 5; do
-    if sudo mysql -e "SELECT 1" &>/dev/null; then
-      MYSQL_CONNECT_OK=true; break
+  if sudo mysql -e "SELECT 1" &>/dev/null; then
+    # 能免密连接，设置密码
+    echo ""
+    echo -e "  ${CYAN}请为 MySQL root 设置密码（直接回车跳过）：${NC}"
+    echo -ne "  ${YELLOW}输入密码: ${NC}"; read -s MYSQL_ROOT_PWD; echo ""
+    if [ -n "$MYSQL_ROOT_PWD" ]; then
+      echo -ne "  ${YELLOW}再次确认: ${NC}"; read -s MYSQL_ROOT_PWD2; echo ""
+      if [ "$MYSQL_ROOT_PWD" != "$MYSQL_ROOT_PWD2" ]; then
+        echo -e "  ${RED}不一致，不设密码${NC}"; MYSQL_ROOT_PWD=""
+      fi
     fi
-    sleep 2
-  done
-
-  if [ "$MYSQL_CONNECT_OK" = false ]; then
-    log_do "使用安全模式重置MySQL密码..."
-    # 确保旧进程完全停止
-    sudo systemctl stop mysql 2>/dev/null
-    sleep 2
-    sudo killall -9 mysqld 2>/dev/null
-    sleep 2
-
-    # 用init-file方式重置密码（比skip-grant-tables更可靠）
-    # 先创建临时SQL文件
-    TMP_SQL=$(mktemp)
-    echo "FLUSH PRIVILEGES;" > "$TMP_SQL"
-    echo "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'tg_monitor_init_pwd';" >> "$TMP_SQL"
-    echo "FLUSH PRIVILEGES;" >> "$TMP_SQL"
-
-    sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld
-
-    # 用init-file启动
-    sudo mysqld_safe --init-file="$TMP_SQL" --skip-networking >/dev/null 2>&1 &
-    sleep 8
-
-    # 测试连接
-    MYSQL_INIT_OK=false
-    if sudo mysql -u root -p'tg_monitor_init_pwd' -e "SELECT 1" &>/dev/null; then
-      MYSQL_INIT_OK=true
-    fi
-
-    # 清理：杀掉init-file启动的mysqld
-    sudo mysqladmin -u root -p'tg_monitor_init_pwd' shutdown 2>/dev/null || sudo killall -9 mysqld 2>/dev/null
-    sleep 3
-    rm -f "$TMP_SQL"
-
-    if [ "$MYSQL_INIT_OK" = true ]; then
-      MYSQL_ROOT_PWD="tg_monitor_init_pwd"
-      MYSQL_CONNECT_OK=true
-      log_ok "安全模式密码重置成功（临时密码: tg_monitor_init_pwd）"
+    sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
+    log_ok "MySQL root 密码配置完成"
+    MYSQL_PWD_OK=true
+  else
+    # 尝试空密码
+    if sudo mysql -u root -p'' -e "SELECT 1" &>/dev/null; then
+      log_ok "MySQL root 无密码"
+      MYSQL_PWD_OK=true
     else
-      log_fail "安全模式重置失败"
-      # 最后手段：skip-grant-tables
-      sudo mysqld_safe --skip-grant-tables --skip-networking >/dev/null 2>&1 &
-      sleep 8
-      if sudo mysql -e "SELECT 1" &>/dev/null; then
-        sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY 'tg_monitor_init_pwd'; FLUSH PRIVILEGES;" 2>&1
-        # 立即shutdown，避免后续kill卡住
-        sudo mysqladmin -u root shutdown 2>/dev/null || sudo killall -9 mysqld 2>/dev/null
-        sleep 3
-        MYSQL_ROOT_PWD="tg_monitor_init_pwd"
-        MYSQL_CONNECT_OK=true
-        log_ok "skip-grant-tables 重置成功"
-      else
-        sudo killall -9 mysqld 2>/dev/null; sleep 2
-        log_fail "所有重置方式均失败"; exit 1
+      # 用debconf获取安装时设置的密码
+      DEB_PWD=$(sudo debconf-show mysql-server 2>/dev/null | grep "mysql-server/root_password" | cut -d= -f2 | tr -d ' ')
+      if [ -n "$DEB_PWD" ]; then
+        if sudo mysql -u root -p"$DEB_PWD" -e "SELECT 1" &>/dev/null; then
+          MYSQL_ROOT_PWD="$DEB_PWD"
+          log_ok "MySQL root 密码验证通过"
+          MYSQL_PWD_OK=true
+        fi
       fi
     fi
   fi
-  # 恢复正常MySQL模式
+fi
+
+# 3. 最终手段：skip-grant-tables
+if [ "$MYSQL_PWD_OK" = false ]; then
+  log_do "使用安全模式重置密码..."
+  sudo systemctl stop mysql 2>/dev/null; sleep 2
   sudo killall -9 mysqld 2>/dev/null; sleep 2
   sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld
-  sudo systemctl start mysql 2>/dev/null
-  sleep 5
-  if ! systemctl is-active --quiet mysql 2>/dev/null; then
-    log_fail "MySQL 启动失败"; exit 1
-  fi
-  log_ok "MySQL 服务恢复正常"
 
-  # 如果通过init-file已经设了临时密码，让用户决定是否修改
-  if [ "$MYSQL_ROOT_PWD" = "tg_monitor_init_pwd" ]; then
-    echo ""
-    echo -e "  ${CYAN}MySQL root 临时密码已设置，是否修改？${NC}"
-    echo -ne "  ${YELLOW}回车跳过，或输入新密码: ${NC}"
-    read -s NEW_PWD
-    echo ""
-    if [ -n "$NEW_PWD" ]; then
-      echo -ne "  ${YELLOW}再次确认: ${NC}"
-      read -s NEW_PWD2
-      echo ""
-      if [ "$NEW_PWD" = "$NEW_PWD2" ]; then
-        sudo mysql -u root -p"$MYSQL_ROOT_PWD" -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '${NEW_PWD}'; FLUSH PRIVILEGES;" 2>/dev/null
-        MYSQL_ROOT_PWD="$NEW_PWD"
-        log_ok "密码已更新"
-      else
-        log_info "保留临时密码"
-      fi
-    fi
+  sudo mysqld_safe --skip-grant-tables --skip-networking >/dev/null 2>&1 &
+  sleep 10
+
+  if sudo mysql -e "SELECT 1" &>/dev/null; then
+    sudo mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'tg_monitor_tmp'; FLUSH PRIVILEGES;" 2>&1
+    sudo mysqladmin -u root shutdown 2>/dev/null || sudo killall -9 mysqld 2>/dev/null
+    sleep 3
+    MYSQL_ROOT_PWD="tg_monitor_tmp"
+    log_ok "安全模式密码重置成功"
+  else
+    sudo killall -9 mysqld 2>/dev/null; sleep 2
+    log_fail "MySQL 密码重置失败，请手动处理"; exit 1
+  fi
+
+  # 重启MySQL
+  sudo mkdir -p /var/run/mysqld && sudo chown mysql:mysql /var/run/mysqld
+  sudo systemctl start mysql 2>/dev/null; sleep 5
+  if ! systemctl is-active --quiet mysql 2>/dev/null; then
+    log_fail "MySQL 重启失败"; exit 1
   fi
   MYSQL_PWD_OK=true
 fi
 
-# 创建MySQL数据库和专用用户
+# ── 创建数据库和用户 ──
 log_do "创建 MySQL 数据库和用户..."
-# 生成随机密码给tgmonitor用户
-DB_USER="tgmonitor"
-DB_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
-DB_NAME="tg_monitor"
+if [ -z "$DB_PASS" ]; then
+  DB_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+fi
 
 sudo mysql -u root ${MYSQL_ROOT_PWD:+-p"$MYSQL_ROOT_PWD"} << EOSQL 2>/dev/null
 CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -383,16 +373,15 @@ FLUSH PRIVILEGES;
 EOSQL
 
 if [ $? -eq 0 ]; then
-  log_ok "数据库 ${DB_NAME} 创建完成"
-  log_ok "用户 ${DB_USER} 创建完成"
+  log_ok "数据库 ${DB_NAME} ✓ / 用户 ${DB_USER} ✓"
 else
-  log_fail "数据库/用户创建失败"; exit 1
+  log_fail "数据库创建失败"; exit 1
 fi
 
-# 生成 .env 文件
+# 生成 .env
 log_do "生成 backend/.env 配置文件..."
 cat > "$BACKEND_DIR/.env" << EOF
-# MySQL 数据库配置（自动生成，请勿手动修改）
+# MySQL（自动生成，请勿手动修改）
 DATABASE_TYPE=mysql
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
@@ -400,9 +389,7 @@ MYSQL_USER=${DB_USER}
 MYSQL_PASSWORD=${DB_PASS}
 MYSQL_DATABASE=${DB_NAME}
 EOF
-
 log_ok "配置文件已生成: $BACKEND_DIR/.env"
-log_info "数据库: ${DB_NAME} / 用户: ${DB_USER}"
 
 log_ok "系统依赖全部安装完成 ✓"
 
