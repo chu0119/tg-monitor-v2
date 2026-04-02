@@ -391,7 +391,7 @@ log_ok "pip 升级完成: $($PIP_BIN --version 2>&1 | awk '{print $2}')"
 log_do "检查 distutils..."
 if ! $PYTHON_BIN -c "import distutils" 2>/dev/null; then
   log_info "distutils 不可用，安装 setuptools..."
-  $PIP_RUN install setuptools --break-system-packages -q 2>/dev/null
+  $PIP_RUN install setuptools --break-system-packages --no-user -q 2>/dev/null
   if $PYTHON_BIN -c "import distutils" 2>/dev/null; then
     log_ok "distutils 安装成功 (通过 setuptools)"
   else
