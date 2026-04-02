@@ -421,7 +421,7 @@ if [ -f "$BACKEND_DIR/requirements.txt" ]; then
   log_info "依赖数量: ${PKG_COUNT} 个包"
   [ -n "$PIP_INDEX" ] && log_info "使用镜像: $PIP_INDEX"
 
-  PIP_ARGS="-r $BACKEND_DIR/requirements.txt --break-system-packages --ignore-installed"
+  PIP_ARGS="-r $BACKEND_DIR/requirements.txt --break-system-packages --ignore-installed --no-user"
   [ -n "$PIP_INDEX" ] && PIP_ARGS="$PIP_ARGS -i $PIP_INDEX --trusted-host $(echo $PIP_INDEX | sed 's|https://||;s|/simple.*||')"
 
   PIP_OUTPUT=$($PIP_BIN install $PIP_ARGS 2>&1)
@@ -610,12 +610,11 @@ Wants=mysql.service
 [Service]
 Type=simple
 WorkingDirectory=$BACKEND_DIR
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment="PATH=/home/$SUDO_USER/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/$SUDO_USER/.local/lib/python3.13/site-packages"
 ExecStart=$PYTHON_BIN -m uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT
 Restart=always
 RestartSec=5
-StartLimitBurst=5
-StartLimitIntervalSec=60
 StandardOutput=journal
 StandardError=journal
 
