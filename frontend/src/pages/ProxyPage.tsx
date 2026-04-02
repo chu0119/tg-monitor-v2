@@ -100,10 +100,13 @@ export function ProxyPage() {
       }
     };
 
+    fetchStatus();
+    fetchNodes();
+
     return () => {
       controller.abort();
     };
-  }, [abortController]);
+  }, []);
 
   const fetchStatus = async () => {
     try {
