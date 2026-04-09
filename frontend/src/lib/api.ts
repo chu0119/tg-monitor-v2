@@ -462,39 +462,51 @@ export const api = {
   // 代理管理
   proxy: {
     getStatus: () => fetch(`${API_BASE}/proxy/status`).then(handleResponse),
-    parseSubscribe: (url: string) =>
-      fetch(`${API_BASE}/proxy/subscribe`, {
+    saveConfig: (data: {
+      enabled: boolean;
+      protocol: "http" | "https" | "socks5";
+      host: string;
+      port: number;
+      username?: string;
+      password?: string;
+    }) =>
+      fetch(`${API_BASE}/proxy/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify(data),
       }).then(handleResponse),
-    importNodes: (nodesText: string) =>
-      fetch(`${API_BASE}/proxy/import`, {
+    testConfig: (data: {
+      protocol: "http" | "https" | "socks5";
+      host: string;
+      port: number;
+      timeout_sec?: number;
+    }) =>
+      fetch(`${API_BASE}/proxy/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodes_text: nodesText }),
+        body: JSON.stringify(data),
       }).then(handleResponse),
-    getNodes: () => fetch(`${API_BASE}/proxy/nodes`).then(handleResponse),
-    selectNode: (id: string) =>
-      fetch(`${API_BASE}/proxy/nodes/${id}/select`, {
+    enable: () =>
+      fetch(`${API_BASE}/proxy/enable`, {
         method: "POST",
       }).then(handleResponse),
-    testNode: (id: string) =>
-      fetch(`${API_BASE}/proxy/nodes/${id}/test`, {
+    disable: () =>
+      fetch(`${API_BASE}/proxy/disable`, {
         method: "POST",
       }).then(handleResponse),
     testLatency: () =>
       fetch(`${API_BASE}/proxy/latency`).then(handleResponse),
+    // 兼容旧页面调用
     start: () =>
-      fetch(`${API_BASE}/proxy/start`, {
+      fetch(`${API_BASE}/proxy/enable`, {
         method: "POST",
       }).then(handleResponse),
     stop: () =>
-      fetch(`${API_BASE}/proxy/stop`, {
+      fetch(`${API_BASE}/proxy/disable`, {
         method: "POST",
       }).then(handleResponse),
     restart: () =>
-      fetch(`${API_BASE}/proxy/restart`, {
+      fetch(`${API_BASE}/proxy/enable`, {
         method: "POST",
       }).then(handleResponse),
   },

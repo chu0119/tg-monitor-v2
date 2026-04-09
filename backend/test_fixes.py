@@ -4,17 +4,20 @@ import asyncio
 import sys
 from pathlib import Path
 
+# 该文件是手动验证脚本，不应被 pytest 自动收集执行
+if "pytest" in sys.modules:
+    import pytest
+    pytest.skip("manual verification script; skip in automated pytest runs", allow_module_level=True)
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app.core.database import AsyncSessionLocal
-from app.services.data_cleanup_service import data_cleanup_service
-from sqlalchemy import select, func
-from app.models import KeywordGroup, Keyword
-
-
 async def test_keywords_api():
     """测试关键词接口返回格式"""
+    from app.core.database import AsyncSessionLocal
+    from sqlalchemy import select, func
+    from app.models import KeywordGroup, Keyword
+
     print("\n[测试] GET /api/v1/keywords")
     async with AsyncSessionLocal() as db:
         # 模拟接口逻辑
