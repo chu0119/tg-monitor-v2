@@ -54,6 +54,14 @@ interface MySQLConfig {
   database: string;
 }
 
+interface BackupInfoItem {
+  name: string;
+  created_at?: string;
+  size_mb: number;
+  db_size: number;
+  session_count: number;
+}
+
 interface SystemSettings {
   // 数据采集设置
   default_history_days: number;
@@ -151,10 +159,14 @@ export function SettingsPage() {
   // 导入导出相关状态
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [backups, setBackups] = useState<BackupInfoItem[]>([]);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [backupName, setBackupName] = useState("");
 
   useEffect(() => {
     fetchSettings();
     fetchDatabaseInfo();
+    fetchBackups();
   }, []);
 
   const fetchSettings = async () => {
@@ -189,6 +201,58 @@ export function SettingsPage() {
       }
     } catch (error) {
       console.error("Failed to fetch database info:", error);
+    }
+  };
+
+  const fetchBackups = async () => {
+    setBackupLoading(true);
+    try {
+      const list = await api.backups.list();
+      setBackups(Array.isArray(list) ? list : []);
+    } catch (error) {
+      console.error("Failed to fetch backups:", error);
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleCreateBackup = async () => {
+    setBackupLoading(true);
+    try {
+      await api.backups.create(backupName.trim() || undefined);
+      setBackupName("");
+      await fetchBackups();
+      alert("备份创建成功");
+    } catch (error: any) {
+      alert(error.message || "创建备份失败");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleRestoreBackup = async (name: string) => {
+    if (!confirm(`恢复备份 ${name} 将覆盖当前数据库，确定继续吗？`)) return;
+    setBackupLoading(true);
+    try {
+      const result = await api.backups.restore(name);
+      alert(`恢复任务已提交：${result.status || "pending"}。建议稍后刷新并重启服务。`);
+    } catch (error: any) {
+      alert(error.message || "恢复备份失败");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleDeleteBackup = async (name: string) => {
+    if (!confirm(`确定删除备份 ${name}？`)) return;
+    setBackupLoading(true);
+    try {
+      await api.backups.delete(name);
+      await fetchBackups();
+    } catch (error: any) {
+      alert(error.message || "删除备份失败");
+    } finally {
+      setBackupLoading(false);
     }
   };
 
@@ -714,6 +778,60 @@ export function SettingsPage() {
                   <li>导入时会跳过已存在的同名配置</li>
                   <li>通知配置不包含敏感信息，需重新配置</li>
                 </ul>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 数据库备份与恢复 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <HardDrive size={20} />
+                数据库备份与恢复
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="备份名称（可选）"
+                  value={backupName}
+                  onChange={(e) => setBackupName(e.target.value)}
+                />
+                <Button variant="tech" onClick={handleCreateBackup} disabled={backupLoading}>
+                  创建备份
+                </Button>
+                <Button variant="outline" onClick={fetchBackups} disabled={backupLoading}>
+                  刷新
+                </Button>
+              </div>
+
+              <div className="space-y-2 max-h-64 overflow-auto">
+                {backupLoading ? (
+                  <p className="text-sm text-muted-foreground">备份列表加载中...</p>
+                ) : backups.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">暂无备份</p>
+                ) : (
+                  backups.map((b) => (
+                    <div key={b.name} className="p-3 rounded-lg border border-cyber-blue/10 bg-secondary/20">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="font-semibold">{b.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            时间: {b.created_at || "未知"} · 大小: {b.size_mb} MB · 会话文件: {b.session_count}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="outline" onClick={() => handleRestoreBackup(b.name)}>
+                            恢复
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleDeleteBackup(b.name)}>
+                            删除
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>

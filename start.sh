@@ -1,8 +1,11 @@
 #!/bin/bash
 # ============================================================
 #  TG Monitor v2 - 一键部署脚本
-#  用法: ./start.sh [--reset] [--no-autostart] [--mirror <tsinghua|aliyun|off>]
-#  适用: Ubuntu 20.04+ / Debian 11+ (全新系统直接跑)
+#  用法:
+#    ./start.sh [--reset] [--no-autostart] [--mirror <tsinghua|aliyun|off>]
+#               [--backend-port <port>] [--frontend-port <port>]
+#               [--skip-frontend-build] [--skip-db-init]
+#  适用: Ubuntu 20.04+ / Debian 11+（兼容 root 与 sudo 用户）
 # ============================================================
 
 # ── 颜色 ──
@@ -36,18 +39,35 @@ SERVICE_NAME="tgmonitor"
 LOG_FILE="/tmp/tg-monitor-deploy.log"
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
+SKIP_FRONTEND_BUILD=false
+SKIP_DB_INIT=false
 
 # ── 参数解析 ──
 RESET=false; NO_AUTOSTART=false; MIRROR="auto"
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --reset) RESET=true ;;
     --no-autostart) NO_AUTOSTART=true ;;
-    --mirror) shift; MIRROR="$1" ;;
-    --mirror=*) MIRROR="${arg#*=}" ;;
-    --help) echo "用法: ./start.sh [--reset] [--no-autostart] [--mirror <tsinghua|aliyun|off>]"; exit 0 ;;
+    --skip-frontend-build) SKIP_FRONTEND_BUILD=true ;;
+    --skip-db-init) SKIP_DB_INIT=true ;;
+    --mirror) shift; MIRROR="${1:-auto}" ;;
+    --mirror=*) MIRROR="${1#*=}" ;;
+    --backend-port) shift; BACKEND_PORT="${1:-8000}" ;;
+    --backend-port=*) BACKEND_PORT="${1#*=}" ;;
+    --frontend-port) shift; FRONTEND_PORT="${1:-3000}" ;;
+    --frontend-port=*) FRONTEND_PORT="${1#*=}" ;;
+    --help)
+      echo "用法: ./start.sh [--reset] [--no-autostart] [--mirror <tsinghua|aliyun|off>] [--backend-port <port>] [--frontend-port <port>] [--skip-frontend-build] [--skip-db-init]"
+      exit 0
+      ;;
   esac
+  shift
 done
+
+# root 场景兼容：若以 root 运行，屏蔽 sudo 调用
+if [ "$(id -u)" -eq 0 ]; then
+  sudo() { "$@"; }
+fi
 
 # ── 镜像 ──
 if [ "$MIRROR" = "auto" ]; then
@@ -59,6 +79,14 @@ case "$MIRROR" in
   aliyun)  PIP_INDEX="https://mirrors.aliyun.com/pypi/simple/"; NPM_REGISTRY="https://registry.npmmirror.com"; MIRROR_LABEL="阿里云镜像" ;;
   *)       PIP_INDEX=""; NPM_REGISTRY=""; MIRROR_LABEL="官方源" ;;
 esac
+
+# ── 参数校验 ──
+if ! [[ "$BACKEND_PORT" =~ ^[0-9]+$ ]] || [ "$BACKEND_PORT" -lt 1 ] || [ "$BACKEND_PORT" -gt 65535 ]; then
+  log_fail "无效的后端端口: $BACKEND_PORT"; exit 1
+fi
+if ! [[ "$FRONTEND_PORT" =~ ^[0-9]+$ ]] || [ "$FRONTEND_PORT" -lt 1 ] || [ "$FRONTEND_PORT" -gt 65535 ]; then
+  log_fail "无效的前端端口: $FRONTEND_PORT"; exit 1
+fi
 
 # ── 端口检测 ──
 check_port() { ss -tlnp 2>/dev/null | grep -q ":$1 " || { command -v lsof &>/dev/null && lsof -i ":$1" &>/dev/null; }; return $?; }
@@ -465,11 +493,16 @@ log_step "5" "构建前端"
 cd "$FRONTEND_DIR"
 
 BUILD_OK=false
-# 跳过tsc类型检查（不影响构建产物），直接vite build
-log_do "执行 vite build..."
-log_info "（跳过tsc类型检查以加速构建）"
-if timeout 180 npx vite build 2>&1 | tail -8; then
+if $SKIP_FRONTEND_BUILD; then
+  log_do "按参数跳过前端构建 (--skip-frontend-build)"
   BUILD_OK=true
+else
+  # 跳过tsc类型检查（不影响构建产物），直接vite build
+  log_do "执行 vite build..."
+  log_info "（跳过tsc类型检查以加速构建）"
+  if timeout 180 npx vite build 2>&1 | tail -8; then
+    BUILD_OK=true
+  fi
 fi
 
 if [ "$BUILD_OK" = false ]; then
@@ -506,7 +539,9 @@ except Exception as e:
 fi
 log_ok "MySQL 连接成功"
 
-if [ -f "$BACKEND_DIR/init_db.py" ]; then
+if $SKIP_DB_INIT; then
+  log_do "按参数跳过数据库初始化 (--skip-db-init)"
+elif [ -f "$BACKEND_DIR/init_db.py" ]; then
   log_do "执行数据库初始化脚本..."
   log_info "脚本: $BACKEND_DIR/init_db.py"
   if $PYTHON_BIN "$BACKEND_DIR/init_db.py" 2>&1; then
@@ -519,52 +554,23 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════
-#  [7/9] 下载代理内核
+#  [7/9] 部署前健壮性检查
 # ═══════════════════════════════════════════════════════════════
-log_step "7" "下载代理内核 (mihomo)"
-PROXY_DIR="$BACKEND_DIR/proxy"
-MIHOMO_PATH="$PROXY_DIR/mihomo"
+log_step "7" "部署前健壮性检查"
+log_do "检查关键命令可用性..."
+MISSING_CMDS=()
+for cmd in curl systemctl ss; do
+  command -v "$cmd" >/dev/null 2>&1 || MISSING_CMDS+=("$cmd")
+done
+if [ ${#MISSING_CMDS[@]} -gt 0 ]; then
+  log_fail "缺少关键命令: ${MISSING_CMDS[*]}"
+  exit 1
+fi
+log_ok "关键命令检查通过"
 
-if [ -f "$MIHOMO_PATH" ] && [ -x "$MIHOMO_PATH" ]; then
-  log_ok "mihomo 内核已存在 ($(du -h "$MIHOMO_PATH" | cut -f1))"
-else
-  case $ARCH in
-    x86_64) DL_ARCH="amd64" ;;
-    aarch64|arm64) DL_ARCH="arm64" ;;
-    *) log_fail "不支持的架构: $ARCH"; DL_ARCH="" ;;
-  esac
-
-  if [ -n "$DL_ARCH" ]; then
-    MIHOMO_VER="v1.19.21"
-    DL_URLS=(
-      "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-${DL_ARCH}-${MIHOMO_VER}.gz"
-      "https://bgithub.xyz/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-${DL_ARCH}-${MIHOMO_VER}.gz"
-      "https://mirror.ghproxy.com/https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-${DL_ARCH}-${MIHOMO_VER}.gz"
-      "https://gh-proxy.com/https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-${DL_ARCH}-${MIHOMO_VER}.gz"
-    )
-    mkdir -p "$PROXY_DIR"
-
-    DL_OK=false
-    for i in "${!DL_URLS[@]}"; do
-      log_do "尝试下载源 $((i+1))/$((${#DL_URLS[@]}))..."
-      log_info "${DL_URLS[$i]}"
-      if curl -fsSL --connect-timeout 15 "${DL_URLS[$i]}" -o /tmp/mihomo.gz 2>/dev/null; then
-        if gunzip -f /tmp/mihomo.gz 2>/dev/null && [ -f /tmp/mihomo ] && [ -s /tmp/mihomo ]; then
-          mv /tmp/mihomo "$MIHOMO_PATH" && chmod +x "$MIHOMO_PATH"
-          log_ok "mihomo 下载成功 ($(du -h "$MIHOMO_PATH" | cut -f1)) ✓"
-          DL_OK=true; break
-        fi
-        rm -f /tmp/mihomo /tmp/mihomo.gz
-      fi
-      log_info "此源下载失败，尝试下一个..."
-    done
-
-    if [ "$DL_OK" = false ]; then
-      log_fail "mihomo 下载失败（所有4个源均失败）"
-      log_fail "代理功能暂不可用，不影响核心监控功能"
-      log_info "可稍后手动下载: curl -L ${DL_URLS[0]} | gunzip > $MIHOMO_PATH"
-    fi
-  fi
+if [ -f "$BACKEND_DIR/.env" ]; then
+  cp "$BACKEND_DIR/.env" "$BACKEND_DIR/.env.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+  log_ok "已备份现有 .env（如存在）"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -775,7 +781,7 @@ fi
 
 # 4. 详细API测试
 log_info "API端点测试..."
-for endpoint in "/api/v1/dashboard/stats" "/api/v1/proxy/status" "/api/v1/keywords/keyword-groups" "/api/v1/notifications" "/api/v1/accounts"; do
+for endpoint in "/api/v1/dashboard/stats" "/api/v1/proxy/status" "/api/v1/keywords/groups" "/api/v1/notifications" "/api/v1/accounts"; do
   STATUS=$(curl -so /dev/null -w "%{http_code}" "http://127.0.0.1:$BACKEND_PORT$endpoint" 2>/dev/null)
   if [ "$STATUS" = "200" ] || [ "$STATUS" = "201" ]; then
     log_info "  $endpoint → $STATUS ✓"

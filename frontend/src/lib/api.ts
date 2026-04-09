@@ -516,6 +516,24 @@ export const api = {
     getStatus: () => fetch(`${API_BASE}/system/status`).then(handleResponse),
   },
 
+  // 备份管理
+  backups: {
+    list: () => fetch(`${API_BASE}/backups/list`).then(handleResponse),
+    create: (name?: string) =>
+      fetch(`${API_BASE}/backups/create${name ? `?name=${encodeURIComponent(name)}` : ""}`, {
+        method: "POST",
+      }).then(handleResponse),
+    restore: (name: string) =>
+      fetch(`${API_BASE}/backups/restore/${encodeURIComponent(name)}`, {
+        method: "POST",
+      }).then(handleResponse),
+    delete: (name: string) =>
+      fetch(`${API_BASE}/backups/delete/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      }).then(handleResponse),
+    status: () => fetch(`${API_BASE}/backups/status`).then(handleResponse),
+  },
+
   // 数据分析
   analysis: {
     getTopWords: (conversationId?: number, senderId?: number, days?: number, limit?: number) => {
