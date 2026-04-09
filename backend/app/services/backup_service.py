@@ -2,6 +2,7 @@
 import asyncio
 import aiofiles
 import shutil
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
@@ -73,21 +74,47 @@ class BackupService:
     async def _backup_database(self, backup_path: Path):
         """使用 mysqldump 备份 MySQL 数据库并压缩"""
         db_backup = backup_path / "tg_monitor.sql.gz"
+        dump_cmd = [
+            "mysqldump",
+            f"-u{settings.MYSQL_USER}",
+            "-h", str(settings.MYSQL_HOST),
+            "-P", str(settings.MYSQL_PORT),
+            str(settings.MYSQL_DATABASE),
+            "--single-transaction",
+            "--quick",
+            "--lock-tables=false",
+        ]
+        gzip_cmd = ["gzip", "-c"]
 
-        # 使用 shell 管道方式压缩：mysqldump | gzip > file
-        shell_cmd = f"mysqldump -u{settings.MYSQL_USER} -p{settings.MYSQL_PASSWORD} -h {settings.MYSQL_HOST} -P {settings.MYSQL_PORT} {settings.MYSQL_DATABASE} --single-transaction --quick --lock-tables=false | gzip > {db_backup}"
+        env = dict(**os.environ)
+        env["MYSQL_PWD"] = settings.MYSQL_PASSWORD or ""
 
-        process = await asyncio.create_subprocess_shell(
-            shell_cmd,
+        dump_process = await asyncio.create_subprocess_exec(
+            *dump_cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
+        gzip_process = await asyncio.create_subprocess_exec(
+            *gzip_cmd,
+            stdin=dump_process.stdout,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        dump_process.stdout.close()
 
-        stdout, stderr = await process.communicate()
+        gz_data, gzip_stderr = await gzip_process.communicate()
+        dump_stdout, dump_stderr = await dump_process.communicate()
 
-        if process.returncode != 0:
-            error_msg = stderr.decode() if stderr else "未知错误"
+        if dump_process.returncode != 0:
+            error_msg = dump_stderr.decode() if dump_stderr else "未知错误"
             raise Exception(f"数据库备份失败: {error_msg}")
+        if gzip_process.returncode != 0:
+            error_msg = gzip_stderr.decode() if gzip_stderr else "未知错误"
+            raise Exception(f"备份压缩失败: {error_msg}")
+
+        async with aiofiles.open(db_backup, "wb") as f:
+            await f.write(gz_data)
 
         if not db_backup.exists():
             raise Exception("备份文件未创建")
