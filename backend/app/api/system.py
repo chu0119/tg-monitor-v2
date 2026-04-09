@@ -12,6 +12,7 @@ import subprocess
 from app.api.deps import get_db
 from app.models.settings import Settings
 from app.core.database import check_database_connection, init_db
+from app.services.runtime_proxy_service import get_proxy_config, apply_proxy_config
 
 router = APIRouter(prefix="/system", tags=["system"])
 
@@ -45,10 +46,16 @@ async def system_status(db: AsyncSession = Depends(get_db)):
         result = await db.execute(select(TelegramAccount))
         account_count = len(result.scalars().all())
 
-        # 检查代理状态
-        from app.proxy.manager import ProxyManager
-        proxy_manager = ProxyManager()
-        proxy_status = await proxy_manager.get_status()
+        # 检查代理状态（简化代理配置）
+        proxy_config = await get_proxy_config(db)
+        runtime_result = apply_proxy_config(proxy_config)
+        proxy_status = {
+            "enabled": proxy_config.get("enabled"),
+            "protocol": proxy_config.get("protocol"),
+            "host": proxy_config.get("host"),
+            "port": proxy_config.get("port"),
+            "applied": runtime_result.get("applied", False),
+        }
 
         # 获取系统信息
         system_info = {

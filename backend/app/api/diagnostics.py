@@ -400,20 +400,19 @@ async def check_internet_status():
     if client_manager.clients:
         return {"online": True, "checked_url": "telegram_client"}
     
-    # 检测代理端口是否可达
-    socks5_url = getattr(settings, 'SOCKS5_PROXY', None)
-    if socks5_url and socks5_url.startswith('socks5://'):
-        import re
+    # 检测代理端口是否可达（支持 socks5/http/https）
+    proxy_url = getattr(settings, "SOCKS5_PROXY", None) or getattr(settings, "HTTP_PROXY", None) or getattr(settings, "HTTPS_PROXY", None)
+    if proxy_url:
         import socket
-        m = re.match(r'socks5://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)', socks5_url)
-        if m:
-            host, port = m.group(3), int(m.group(4))
+        from urllib.parse import urlparse
+        parsed = urlparse(proxy_url)
+        if parsed.hostname and parsed.port:
             try:
                 import asyncio
                 loop = asyncio.get_event_loop()
                 def check_in_thread():
                     try:
-                        sock = socket.create_connection((host, port), timeout=3)
+                        sock = socket.create_connection((parsed.hostname, parsed.port), timeout=3)
                         sock.close()
                         return True
                     except:

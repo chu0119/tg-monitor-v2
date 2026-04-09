@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models import TelegramAccount, Conversation, Sender, Message as MessageModel
 from sqlalchemy import select, update
+from urllib.parse import urlparse
 
 
 class TelegramClientManager:
@@ -27,34 +28,38 @@ class TelegramClientManager:
 
     def _get_default_proxy(self) -> Optional[tuple]:
         """从配置获取默认代理，返回 Telethon 可用的元组"""
-        socks5_url = getattr(settings, 'SOCKS5_PROXY', None)
-        logger.info(f"_get_default_proxy called: SOCKS5_PROXY={socks5_url}")
+        proxy_url = (
+            getattr(settings, "SOCKS5_PROXY", None)
+            or getattr(settings, "HTTP_PROXY", None)
+            or getattr(settings, "HTTPS_PROXY", None)
+        )
+        logger.info(f"_get_default_proxy called: proxy_url={proxy_url}")
+        if not proxy_url:
+            return None
 
-        # 如果没有配置SOCKS5_PROXY，尝试检测mihomo代理
-        if not socks5_url:
-            try:
-                from app.proxy.manager import ProxyManager
-                import asyncio
-                proxy_mgr = ProxyManager()
-                config = proxy_mgr.generator.read_config()
-                if config and config.get("mixed-port"):
-                    port = config["mixed-port"]
-                    logger.info(f"_get_default_proxy: detected mihomo on port {port}, using as SOCKS5 proxy")
-                    import socks as socklib
-                    return (socklib.SOCKS5, "127.0.0.1", port, None, None)
-            except Exception as e:
-                logger.warning(f"_get_default_proxy: failed to detect mihomo: {e}")
+        try:
+            parsed = urlparse(proxy_url)
+            host = parsed.hostname
+            port = parsed.port
+            if not host or not port:
+                return None
 
-        if socks5_url and socks5_url.startswith('socks5://'):
-            # socks5://user:pass@host:port
-            import re
             import socks as socklib
-            m = re.match(r'socks5://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)', socks5_url)
-            if m:
-                result = (socklib.SOCKS5, m.group(3), int(m.group(4)), m.group(1) or None, m.group(2) or None)
-                logger.info(f"_get_default_proxy returning: {result}")
-                return result
-        logger.warning(f"_get_default_proxy returning None")
+
+            scheme = (parsed.scheme or "").lower()
+            if scheme == "socks5":
+                proxy_type = socklib.SOCKS5
+            elif scheme in {"http", "https"}:
+                proxy_type = socklib.HTTP
+            else:
+                logger.warning(f"不支持的代理协议: {scheme}")
+                return None
+
+            result = (proxy_type, host, int(port), parsed.username, parsed.password)
+            logger.info(f"_get_default_proxy returning: {result}")
+            return result
+        except Exception as e:
+            logger.warning(f"_get_default_proxy parse failed: {e}")
         return None
 
     def _cache_account_info(self, account_id: int, phone: str, api_id: int, api_hash: str, proxy_config):
