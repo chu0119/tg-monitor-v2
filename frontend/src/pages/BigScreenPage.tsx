@@ -495,7 +495,7 @@ export function BigScreenPage() {
                     fontSize: 13,
                     fontWeight: "bold",
                   }}
-                  formatter={((value: any, name: any) => [<span style={{ color: "#fff" }}>{value}</span>, <span style={{ color: "#fff" }}>{name}</span>]}
+                  formatter={(value: any, name: any) => [<span style={{ color: "#fff" }}>{value}</span>, <span style={{ color: "#fff" }}>{name}</span>]}
                 />
               </PieChart>
             </ResponsiveContainer>
