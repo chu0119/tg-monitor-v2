@@ -442,7 +442,7 @@ export function BigScreenPage() {
                     color: "#fff",
                     fontSize: 12,
                   }}
-                  formatter={((value: any, name: any) => [value, name === "count" ? "消息数" : name === "hour" ? "时间" : name]}
+                  formatter={(value: any, name: any) => [value, name === "count" ? "消息数" : name === "hour" ? "时间" : name]}
                   labelFormatter={(label) => `时间: ${label}`}
                 />
                 <Area
