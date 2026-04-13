@@ -17,6 +17,13 @@ from app.services.runtime_proxy_service import get_proxy_config, apply_proxy_con
 router = APIRouter(prefix="/system", tags=["system"])
 
 
+def _mask_password(pwd: str) -> str:
+    """密码脱敏：保留前2后2，中间星号"""
+    if len(pwd) <= 4:
+        return "****"
+    return pwd[:2] + "****" + pwd[-2:]
+
+
 @router.get("/status")
 async def system_status(db: AsyncSession = Depends(get_db)):
     """
@@ -201,6 +208,26 @@ async def get_version():
     }
 
 
+@router.get("/info")
+async def get_system_info():
+    """获取系统基本信息"""
+    import time
+    import psutil
+    process = psutil.Process()
+    uptime = int(time.time() - process.create_time())
+    hours, remainder = divmod(uptime, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return {
+        "version": settings.VERSION,
+        "project_name": settings.PROJECT_NAME,
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "uptime_seconds": uptime,
+        "uptime_human": f"{hours}h {minutes}m {seconds}s",
+        "pid": process.pid,
+    }
+
+
 @router.post("/test-db-connection")
 async def test_database_connection():
     """
@@ -242,5 +269,5 @@ async def get_db_config():
         "port": cfg.MYSQL_PORT or 3306,
         "user": cfg.MYSQL_USER or "",
         "database": cfg.MYSQL_DATABASE or "tg_monitor",
-        "password": cfg.MYSQL_PASSWORD or "",
+        "password": _mask_password(cfg.MYSQL_PASSWORD or ""),
     }

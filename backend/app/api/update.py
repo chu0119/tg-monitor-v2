@@ -51,16 +51,22 @@ class CheckUpdateResponse(BaseModel):
 
 def _get_git_output(args: list[str]) -> str:
     """执行 git 命令并返回输出"""
-    result = subprocess.run(
-        ["/usr/bin/git"] + args,
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout.strip()
+    try:
+        result = subprocess.run(
+            ["/usr/bin/git"] + args,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            logger.error(f"git {' '.join(args)} failed (rc={result.returncode}): {result.stderr.strip()}")
+            raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+        if not result.stdout.strip():
+            logger.warning(f"git {' '.join(args)} returned empty output")
+        return result.stdout.strip()
+    except FileNotFoundError:
+        raise RuntimeError("git 命令未找到，请确保已安装 git")
 
 
 def _get_local_commit() -> str:
@@ -137,8 +143,7 @@ async def check_update():
             )
     except Exception as e:
         logger.error(f"检查更新失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=f"检查更新失败: {type(e).__name__}")
 
 @router.post("/perform-update")
 async def perform_update():

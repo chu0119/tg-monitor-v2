@@ -50,7 +50,7 @@ async def list_alerts(
     where_clauses = []
     params = {}
     if has_phone:
-        where_clauses.append("s.phone IS NOT NULL AND s.phone != ''")
+        where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE phone IS NOT NULL AND phone != '')")
     if status:
         where_clauses.append("a.status = :status")
         params["status"] = status

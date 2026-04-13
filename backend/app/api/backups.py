@@ -168,7 +168,15 @@ async def upload_merge_backup(file: UploadFile = File(...), db: AsyncSession = D
 
     try:
         # 保存上传文件到临时目录
-        suffix = os.path.splitext(file.filename or "backup.sql")[1] or ".sql"
+        filename = file.filename or "backup.sql"
+        suffix = os.path.splitext(filename)[1] or ".sql"
+        if filename.endswith(".sql.gz"):
+            suffix = ".sql.gz"
+        # 文件类型白名单校验
+        allowed_extensions = ('.sql', '.gz')
+        base_suffix = os.path.splitext(filename)[1].lower() if not filename.endswith('.sql.gz') else '.sql.gz'
+        if base_suffix not in ('.sql', '.sql.gz'):
+            raise HTTPException(status_code=400, detail="仅支持 .sql 和 .sql.gz 格式的备份文件")
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
