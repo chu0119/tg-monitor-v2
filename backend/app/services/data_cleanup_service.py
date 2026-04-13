@@ -113,13 +113,15 @@ class DataCleanupService:
                     status_deleted = 0
                     while iteration < max_iterations:
                         iteration += 1
-                        delete_query = delete(Alert).where(
+                        batch_ids_query = select(Alert.id).where(
                             Alert.status == status,
                             Alert.created_at < resolved_cutoff
                         ).limit(batch_size)
-
-                        result = await db.execute(delete_query)
-                        batch_deleted = result.rowcount
+                        batch_ids = (await db.execute(batch_ids_query)).scalars().all()
+                        if not batch_ids:
+                            break
+                        await db.execute(delete(Alert).where(Alert.id.in_(batch_ids)))
+                        batch_deleted = len(batch_ids)
                         total_deleted += batch_deleted
                         status_deleted += batch_deleted
 
@@ -135,13 +137,15 @@ class DataCleanupService:
                 pending_deleted = 0
                 while iteration < max_iterations:
                     iteration += 1
-                    delete_query = delete(Alert).where(
+                    batch_ids_query = select(Alert.id).where(
                         Alert.status == 'pending',
                         Alert.created_at < pending_cutoff
                     ).limit(batch_size)
-
-                    result = await db.execute(delete_query)
-                    batch_deleted = result.rowcount
+                    batch_ids = (await db.execute(batch_ids_query)).scalars().all()
+                    if not batch_ids:
+                        break
+                    await db.execute(delete(Alert).where(Alert.id.in_(batch_ids)))
+                    batch_deleted = len(batch_ids)
                     total_deleted += batch_deleted
                     pending_deleted += batch_deleted
 
@@ -248,13 +252,20 @@ class DataCleanupService:
 
                 while iteration < max_iterations:
                     iteration += 1
-                    delete_query = delete(MessageModel).where(
+                    # SQLAlchemy 2.x: use subquery for batch delete
+                    batch_ids_query = select(MessageModel.id).where(
                         MessageModel.date < cutoff_time,
                         MessageModel.alert_id == None
                     ).limit(batch_size)
+                    batch_ids = (await db.execute(batch_ids_query)).scalars().all()
 
-                    result = await db.execute(delete_query)
-                    batch_deleted = result.rowcount
+                    if not batch_ids:
+                        break
+
+                    await db.execute(
+                        delete(MessageModel).where(MessageModel.id.in_(batch_ids))
+                    )
+                    batch_deleted = len(batch_ids)
                     total_deleted += batch_deleted
 
                     await db.commit()
