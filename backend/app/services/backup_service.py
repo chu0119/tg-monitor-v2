@@ -95,16 +95,20 @@ class BackupService:
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
+        dump_stdout, dump_stderr = await dump_process.communicate()
+
+        if dump_process.returncode != 0:
+            error_msg = dump_stderr.decode() if dump_stderr else "未知错误"
+            raise Exception(f"数据库备份失败: {error_msg}")
+
+        # 用gzip压缩dump输出
         gzip_process = await asyncio.create_subprocess_exec(
             *gzip_cmd,
-            stdin=dump_process.stdout,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        dump_process.stdout.close()
-
-        gz_data, gzip_stderr = await gzip_process.communicate()
-        dump_stdout, dump_stderr = await dump_process.communicate()
+        gz_data, gzip_stderr = await gzip_process.communicate(input=dump_stdout)
 
         if dump_process.returncode != 0:
             error_msg = dump_stderr.decode() if dump_stderr else "未知错误"
