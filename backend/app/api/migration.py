@@ -113,10 +113,10 @@ async def _do_export():
 
         # 4. 关键数据 JSON 备份
         _migration_state["progress"] = "正在导出关键数据..."
-        from app.core.database import async_session
+        from app.core.database import AsyncSessionLocal
         from sqlalchemy import text
 
-        async with async_session() as db:
+        async with AsyncSessionLocal() as db:
             tables = ["keywords", "keyword_groups", "alert_rules"]
             json_data = {}
             for table in tables:
@@ -212,10 +212,10 @@ async def _do_import(file_path: str):
             with open(json_backup, "r", encoding="utf-8") as f:
                 json_data = json.load(f)
 
-            from app.core.database import async_session
+            from app.core.database import AsyncSessionLocal
             from sqlalchemy import text
 
-            async with async_session() as db:
+            async with AsyncSessionLocal() as db:
                 for table, rows in json_data.items():
                     if not rows:
                         continue
