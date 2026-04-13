@@ -1,72 +1,51 @@
-<div align="center">
+# 听风追影 – 群组数据预警分析系统 V2
 
-# TG Monitor V2
-### Telegram 群组/频道智能监控与告警平台
+> Telegram 群组实时监控、关键词告警、数据分析平台
 
-**FastAPI · Telethon · React · MySQL · WebSocket 实时推送**
+## ✨ 功能特性
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
-![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
+### 🔍 实时监控
+- 多账号同时监控数百个 Telegram 群组/频道
+- 实时消息采集，支持历史消息回溯
+- 自动采集发送者信息（ID、用户名、昵称、手机号）
 
-</div>
+### 🚨 关键词告警
+- 多级告警（低/中/高/严重）
+- 关键词分组管理，支持正则匹配
+- 告警处理工作流（待处理→处理中→已解决/忽略/误报）
+- 告警消息高亮显示
 
----
+### 📊 数据分析
+- Dashboard 实时统计（消息量、活跃度、告警趋势）
+- 大屏可视化展示
+- 情感分析、词云分析
+- 发送者手机号筛选与导出
 
-## 1. 项目定位
+### 🔔 多渠道通知
+- 邮件、钉钉、企业微信、Server酱、Webhook、Telegram Bot
+- 自定义通知模板
+- 按关键词组/会话过滤通知
 
-TG Monitor V2 是一套面向 **Telegram 消息采集、关键词告警、趋势分析与运维可观测** 的全栈系统。
+### ⚙️ 系统管理
+- Web 端账号管理（添加/删除/授权）
+- 代理配置（SOCKS5/HTTP）
+- 数据库自动备份与恢复
+- **一键检查更新**（设置页 → 系统更新 → 检查更新）
+- 自动清理过期数据
 
-核心目标：
-- ✅ 多账号并发接入 Telegram（Telethon）
-- ✅ 群组/频道/私聊消息统一采集
-- ✅ 关键词匹配 + 告警分级 + 通知分发
-- ✅ Web 端统一管理（账号、会话、代理、数据库、备份）
-- ✅ 可运维、可回溯、可导出
+## 🛠️ 技术栈
 
----
+| 组件 | 技术 |
+|------|------|
+| 后端 | Python 3.11+ / FastAPI / SQLAlchemy / Telethon |
+| 前端 | React 18 / TypeScript / TailwindCSS / Recharts |
+| 数据库 | MySQL 8.0 |
+| 代理 | SOCKS5 / HTTP Proxy |
+| 部署 | systemd / Docker Compose |
 
-## 2. 技术架构
+## 📦 快速部署
 
-```text
-Browser (React SPA)
-        │
-        ▼
-Nginx (:3000)  ── 静态资源 + /api 反向代理 + /ws
-        │
-        ▼
-FastAPI (:8000)
-  ├─ Accounts / Conversations / Messages / Alerts / Settings API
-  ├─ Telegram Client Manager (Telethon)
-  ├─ Monitoring Pipeline + Keyword Matching
-  ├─ Backup / Restore / Diagnostics
-  └─ WebSocket Broadcast
-        │
-        ▼
-MySQL 8.0
-```
-
----
-
-## 3. 代理能力（已简化）
-
-> 本项目已移除内置 Clash/Mihomo 节点管理逻辑。
-
-当前代理模型为 **运行时全局代理配置**：
-- 协议：`socks5` / `http` / `https`
-- 地址：`host`
-- 端口：`port`
-- 可选鉴权：`username` / `password`
-
-配置后会同步到运行时环境变量（`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `SOCKS5_PROXY`）并应用到主要模块。
-
----
-
-## 4. 一键部署（推荐）
-
-### 4.1 最简单安装
+### 一键安装（推荐）
 
 ```bash
 git clone https://github.com/chu0119/tg-monitor-v2.git
@@ -75,137 +54,153 @@ chmod +x start.sh
 ./start.sh
 ```
 
-### 4.2 常用参数
+脚本会自动：安装依赖 → 初始化数据库 → 配置 systemd 服务 → 启动服务
+
+### 手动部署
 
 ```bash
-# 重置部署标记后重装
-./start.sh --reset
+# 1. 克隆项目
+git clone https://github.com/chu0119/tg-monitor-v2.git
+cd tg-monitor-v2
 
-# 不启用开机自启
-./start.sh --no-autostart
-
-# 指定镜像
-./start.sh --mirror tsinghua
-./start.sh --mirror aliyun
-./start.sh --mirror off
-
-# 自定义端口
-./start.sh --backend-port 18000 --frontend-port 13000
-
-# 仅部署服务，不重建前端/不重建数据库
-./start.sh --skip-frontend-build --skip-db-init
-```
-
-### 4.3 支持场景
-
-- Ubuntu 20.04+ / Debian 11+
-- root 用户直接执行 或 sudo 用户执行
-- 首次全新部署 / 二次升级部署
-
----
-
-## 5. 初始化流程（Web）
-
-首次打开 `http://<server-ip>:3000`：
-1. 配置代理（协议/IP/端口）并测试连通
-2. 配置 Telegram API 与账号
-3. 可选通知配置
-4. 系统标记初始化完成
-
----
-
-## 6. 数据与运维能力
-
-### 6.1 数据导入导出
-- 导出全部配置（系统设置、关键词、通知结构）
-- 导出关键词独立备份
-- 导入 JSON 配置（增量跳过同名项）
-
-### 6.2 数据库备份与恢复
-- 创建备份（可命名）
-- 查看备份列表（大小、时间、会话文件数）
-- 恢复指定备份（覆盖当前数据库）
-- 删除旧备份
-
-### 6.3 诊断与健康检查
-- 服务健康探测（`/health`）
-- 代理可达性检测
-- 数据库连接状态检查
-
----
-
-## 7. 目录结构
-
-```text
-tg-monitor-v2/
-├─ backend/
-│  ├─ app/
-│  │  ├─ api/
-│  │  ├─ models/
-│  │  ├─ services/
-│  │  ├─ telegram/
-│  │  └─ main.py
-│  ├─ init_db.py
-│  └─ requirements.txt
-├─ frontend/
-│  ├─ src/
-│  │  ├─ pages/
-│  │  ├─ components/
-│  │  └─ lib/api.ts
-│  └─ package.json
-├─ start.sh
-└─ README.md
-```
-
----
-
-## 8. 常用运维命令
-
-```bash
-# 后端状态
-sudo systemctl status tgmonitor-backend
-
-# 后端日志
-journalctl -u tgmonitor-backend -f
-
-# 重启服务
-sudo systemctl restart tgmonitor-backend nginx
-
-# 前端可用性
-curl -I http://127.0.0.1:3000/
-
-# 后端健康
-curl http://127.0.0.1:8000/health
-```
-
----
-
-## 9. 安全建议（生产环境）
-
-- 使用强 MySQL 密码，并限制数据库远程访问
-- Nginx 前置 HTTPS（建议 Let’s Encrypt）
-- 设置严格 CORS 白名单（不要长期使用 `*`）
-- 定期执行备份并做异机存储
-- 对高敏感通知渠道使用最小权限 Token
-
----
-
-## 10. 开发与构建
-
-```bash
-# Backend
+# 2. 后端配置
 cd backend
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+cp .env.example .env
+# 编辑 .env 填写数据库和 Telegram API 配置
+python init_db.py
 
-# Frontend
-cd frontend
+# 3. 前端配置
+cd ../frontend
 npm install
-npm run dev
+
+# 4. 启动服务
+# 后端（端口 8000）
+cd backend && source venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 前端（端口 5173）
+cd frontend
+npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
----
+### 环境变量（.env）
 
-## 11. License
+```env
+# MySQL
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=tgmonitor
+MYSQL_PASSWORD=your_password
+MYSQL_DATABASE=tg_monitor_v2
 
-MIT
+# Telegram API（从 https://my.telegram.org 获取）
+TELEGRAM_API_ID=your_api_id
+TELEGRAM_API_HASH=your_api_hash
+
+# 代理（可选）
+SOCKS5_PROXY=socks5://127.0.0.1:7897
+```
+
+## 🔧 配置向导
+
+首次访问 `http://IP:5173` 会进入配置向导：
+1. 配置数据库连接
+2. 填写 Telegram API 凭证
+3. 配置代理（如需要）
+4. 添加监控账号（扫码或输入手机号）
+
+## 📱 使用流程
+
+1. **添加账号** — 设置页添加 Telegram 账号，完成授权
+2. **添加会话** — 输入群组/频道链接或用户名，开始监控
+3. **配置关键词** — 创建关键词组，添加关键词，设置告警级别
+4. **查看告警** — 监控页实时查看触发记录，告警页处理告警
+5. **数据分析** — Dashboard 查看整体统计，大屏展示
+
+## 🔄 检查更新
+
+系统内置一键更新功能：
+
+1. 进入 **设置** → **系统更新**
+2. 点击 **检查更新**
+3. 如有新版本，查看更新日志后点击 **立即更新**
+4. 系统自动完成：备份数据库 → 拉取代码 → 安装依赖 → 重启服务
+
+也可手动更新：
+```bash
+cd /path/to/tg-monitor-v2
+git pull origin main
+cd backend && source venv/bin/activate && pip install -r requirements.txt
+cd ../frontend && npm install
+sudo systemctl restart tg-monitor-v2-backend tg-monitor-v2-frontend
+```
+
+## 📂 项目结构
+
+```
+tg-monitor-v2/
+├── backend/
+│   ├── app/
+│   │   ├── api/          # API路由
+│   │   ├── core/         # 核心配置
+│   │   ├── models/       # 数据模型
+│   │   ├── schemas/      # 请求/响应模型
+│   │   ├── services/     # 业务逻辑
+│   │   ├── telegram/     # Telegram客户端
+│   │   └── utils/        # 工具函数
+│   ├── sessions/         # Telegram session文件
+│   ├── .env              # 环境配置
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── pages/        # 页面组件
+│   │   ├── components/   # 通用组件
+│   │   ├── hooks/        # 自定义hooks
+│   │   ├── lib/          # API/工具库
+│   │   └── routes/       # 路由配置
+│   └── package.json
+├── docker/               # Docker配置
+├── start.sh              # 一键启动脚本
+└── README.md
+```
+
+## 🔒 安全建议
+
+- 修改默认数据库密码
+- 不要将 `.env` 文件提交到版本库
+- 定期备份数据库（系统已内置自动备份）
+- 使用 HTTPS 反向代理（生产环境推荐 Nginx）
+- 限制前端端口的外网访问
+
+## 📋 从 V1 迁移数据
+
+如果你之前使用 V1 版本，可以完整迁移数据：
+
+```bash
+# 1. 导出V1数据库
+mysqldump -u tgmonitor -p tg_monitor > v1_backup.sql
+
+# 2. 部署V2后初始化数据库
+cd backend && source venv/bin/activate && python init_db.py
+
+# 3. 导入V1数据
+mysql -u tgmonitor -p tg_monitor_v2 < v1_backup.sql
+
+# 4. 重启V2服务
+sudo systemctl restart tg-monitor-v2-backend
+```
+
+V2 会自动创建新增的用户认证表（users/roles/audit_logs），与 V1 数据完全兼容。
+
+## 📄 许可证
+
+MIT License
+
+## 🙏 致谢
+
+- [Telethon](https://github.com/LonamiWebs/Telethon) — Telegram MTProto 客户端
+- [FastAPI](https://fastapi.tiangolo.com/) — 高性能 Python Web 框架
+- [React](https://react.dev/) — 前端框架
