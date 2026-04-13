@@ -143,13 +143,21 @@ async def download_backup(name: str):
         if not target:
             raise HTTPException(status_code=404, detail="备份不存在")
 
-        file_path = target.get("path")
-        if not file_path or not os.path.exists(file_path):
+        from app.services.backup_service import backup_service
+        backup_dir = backup_service.backup_dir / name
+        if not backup_dir.exists():
+            raise HTTPException(status_code=404, detail="备份不存在")
+        # 查找 sql 或 sql.gz 文件
+        sql_file = backup_dir / "tg_monitor.sql"
+        gz_file = backup_dir / "tg_monitor.sql.gz"
+        file_path = gz_file if gz_file.exists() else sql_file
+        if not file_path.exists():
             raise HTTPException(status_code=404, detail="备份文件不存在")
+        filename = file_path.name
 
         return FileResponse(
             path=file_path,
-            filename=name,
+            filename=filename,
             media_type="application/octet-stream",
         )
     except HTTPException:
