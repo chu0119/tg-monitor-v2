@@ -1056,22 +1056,11 @@ export function SettingsPage() {
 
           {/* 版本信息 */}
           <div className="lg:col-span-2 text-center text-sm text-muted-foreground py-4 space-y-1">
-            <p>
-              TG Monitor v{updateInfo.current_version} · 分支: {updateInfo.branch} ·{" "}
-              <span className="font-mono">{updateInfo.current_commit?.slice(0, 7)}</span>
+            <p className="font-medium">
+              听风追影–群组数据预警分析系统 v{updateInfo.current_version}
             </p>
             <p>
-              <a
-                href="https://github.com/chu0119/tg-monitor-v2"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
-              >
-                <ExternalLink size={12} />
-                GitHub
-              </a>
-              {" · "}
-              Python (FastAPI) + TypeScript (React) + MySQL
+              Python (FastAPI) · TypeScript (React) · TailwindCSS · MySQL · Telethon
             </p>
           </div>
         </div>
