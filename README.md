@@ -137,7 +137,6 @@
 | **ORM** | SQLAlchemy 2.0 + aiomysql | 异步数据库操作 |
 | **Telegram** | Telethon | MTProto 客户端，实时消息采集 |
 | **数据库** | MySQL 8.0 | 消息存储 + 索引优化 |
-| **部署** | systemd + Docker Compose | 双模式部署 |
 | **代理** | SOCKS5 / HTTP Proxy | 突破网络限制 |
 
 ---
@@ -338,8 +337,6 @@ tg-monitor-v2/
 │   │   │   └── utils.ts          # 工具（手机号格式化等）
 │   │   └── routes/               # TanStack Router 路由
 │   └── package.json
-├── docker/                       # Docker 配置
-│   ├── docker-compose.yml
 │   └── nginx.conf
 ├── install.sh                    # 一键部署脚本
 ├── start.sh                      # 快速启动脚本
