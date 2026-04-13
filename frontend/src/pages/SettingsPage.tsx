@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -23,6 +23,7 @@ import {
   EyeOff,
   Info,
   ExternalLink,
+  ArrowDown,
 } from "lucide-react";
 
 interface DatabaseStatus {
@@ -86,6 +87,72 @@ export function SettingsPage() {
   const [cleanupStats, setCleanupStats] = useState<any>(null);
   const [cleanupMessage, setCleanupMessage] = useState("");
   const [cleanupLoading, setCleanupLoading] = useState(false);
+
+  // 数据迁移
+  const [migrationStatus, setMigrationStatus] = useState<any>(null);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchMigrationStatus = async () => {
+    try {
+      const res = await fetch("/api/v1/migration/status");
+      const data = await res.json();
+      setMigrationStatus(data);
+      if (data.result && data.status === "idle") {
+        if (data.result.error) {
+          setImportResult(`❌ ${data.result.error}`);
+        } else if (data.result.stats) {
+          const s = data.result.stats;
+          setImportResult(`✅ 导入完成 - 表: ${s.tables_imported || 0}, 会话: ${s.sessions_restored || 0}, 配置: ${s.env_merged ? "已合并" : "跳过"}`);
+        }
+      }
+    } catch {}
+  };
+  useEffect(() => {
+    if (migrationStatus?.status !== "idle") {
+      const t = setTimeout(fetchMigrationStatus, 2000);
+      return () => clearTimeout(t);
+    }
+  }, [migrationStatus]);
+
+  const handleExport = async () => {
+    setExportLoading(true);
+    try {
+      const res = await fetch("/api/v1/migration/export", { method: "POST" });
+      const data = await res.json();
+      if (data.error) { setImportResult(`❌ ${data.message}`); return; }
+      // 轮询等待完成
+      const poll = setInterval(async () => {
+        const st = await (await fetch("/api/v1/migration/status")).json();
+        setMigrationStatus(st);
+        if (st.status === "idle") {
+          clearInterval(poll);
+          setExportLoading(false);
+          if (st.result?.file) {
+            window.location.href = "/api/v1/migration/export/download";
+          }
+        }
+      }, 2000);
+    } catch { setExportLoading(false); setImportResult("❌ 导出请求失败"); }
+  };
+
+  const handleMigrationImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportLoading(true);
+    setImportResult("正在上传...");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/v1/migration/import", { method: "POST", body: form });
+      const data = await res.json();
+      if (data.error) { setImportResult(`❌ ${data.message}`); setImportLoading(false); return; }
+      setMigrationStatus({ status: "importing", progress: "导入中..." });
+    } catch { setImportResult("❌ 上传失败"); setImportLoading(false); }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   const handleCleanupStats = async () => {
     setCleanupLoading(true);
@@ -915,12 +982,74 @@ export function SettingsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled
-                  title="即将推出"
+                  onClick={() => document.getElementById('migration-section')?.scrollIntoView({ behavior: 'smooth' })}
                 >
-                  迁移数据
-                  <span className="ml-1 text-xs px-1 py-0.5 rounded bg-muted">即将推出</span>
+                  <ArrowDown size={14} className="mr-1" />
+                  数据迁移
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 数据迁移 */}
+          <Card id="migration-section" className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Download size={18} />
+                数据迁移
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                一键导出系统所有数据（配置、历史记录、Telegram会话），可在新服务器上导入恢复。
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExport}
+                  disabled={exportLoading || migrationStatus?.status === "exporting"}
+                >
+                  {exportLoading || migrationStatus?.status === "exporting" ? (
+                    <><Loader2 size={14} className="mr-1 animate-spin" />导出中...</>
+                  ) : (
+                    <><Download size={14} className="mr-1" />导出数据</>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={importLoading || migrationStatus?.status === "importing"}
+                >
+                  {importLoading || migrationStatus?.status === "importing" ? (
+                    <><Loader2 size={14} className="mr-1 animate-spin" />导入中...</>
+                  ) : (
+                    <><Upload size={14} className="mr-1" />导入数据</>
+                  )}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".tar.gz"
+                  className="hidden"
+                  onChange={handleMigrationImport}
+                />
+              </div>
+              {(migrationStatus?.status !== "idle" || importResult) && (
+                <div className="text-sm space-y-1">
+                  {migrationStatus?.progress && migrationStatus.status !== "idle" && (
+                    <p className="text-muted-foreground">⏳ {migrationStatus.progress}</p>
+                  )}
+                  {importResult && (
+                    <p className={importResult.startsWith("✅") ? "text-cyber-green" : importResult.startsWith("❌") ? "text-cyber-pink" : "text-muted-foreground"}>
+                      {importResult}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="rounded-md bg-yellow-500/10 border border-yellow-500/20 p-3 text-xs text-yellow-200">
+                ⚠️ 导入将合并数据，不会删除现有记录。导入前请确保目标服务器已部署完成。
               </div>
             </CardContent>
           </Card>

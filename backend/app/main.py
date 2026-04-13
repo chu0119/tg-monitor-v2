@@ -13,7 +13,7 @@ import os
 from app.core.config import settings as config_settings
 from app.core.database import init_db
 from app.api import accounts, conversations, messages, keywords, alerts, notifications, dashboard, analysis, settings as settings_api, database, backups, diagnostics, monitoring, senders
-from app.api import proxy, system, update
+from app.api import proxy, system, update, migration
 from app.api.deps import get_db
 
 
@@ -388,6 +388,7 @@ app.include_router(senders.router, prefix=api_prefix)
 app.include_router(proxy.router, prefix=api_prefix)
 app.include_router(system.router, prefix=api_prefix)
 app.include_router(update.router, prefix=api_prefix)
+app.include_router(migration.router, prefix=api_prefix)
 
 
 # ==================== 兼容旧 API 路径 ====================
