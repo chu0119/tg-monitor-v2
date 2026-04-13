@@ -355,7 +355,7 @@ app = FastAPI(
     title=config_settings.PROJECT_NAME,
     version=config_settings.VERSION,
     lifespan=lifespan,
-    redirect_slashes=False
+    redirect_slashes=True
 )
 
 # 配置 CORS
