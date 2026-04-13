@@ -72,6 +72,7 @@ export function MonitoringPage() {
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<number | null>(null);
   const [filter, setFilter] = useState("");
+  const [phoneFilter, setPhoneFilter] = useState(false);
   const [messageTypeFilter, setMessageTypeFilter] = useState<string>("all");
   const [alertFilter, setAlertFilter] = useState<string>("all");
   const [autoScroll, setAutoScroll] = useState(true);
@@ -533,7 +534,9 @@ export function MonitoringPage() {
     }
   };
 
-  const filteredMessages = messages; // 搜索现在在服务器端进行
+  const filteredMessages = phoneFilter
+    ? messages.filter((m) => m.sender_phone)
+    : messages;
 
   const handlePauseMonitoring = async (conversationId: number) => {
     try {
@@ -850,6 +853,18 @@ export function MonitoringPage() {
                   <option value="alerted">有告警</option>
                   <option value="normal">无告警</option>
                 </select>
+                <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyber-blue/10 border border-cyber-blue/20 cursor-pointer min-h-[44px] text-xs sm:text-sm">
+                  <input
+                    type="checkbox"
+                    checked={phoneFilter}
+                    onChange={(e) => {
+                      setPhoneFilter(e.target.checked);
+                      setCurrentPage(1);
+                    }}
+                    className="rounded w-4 h-4"
+                  />
+                  <span>📱 有手机号</span>
+                </label>
                 <select
                   value={pageSize}
                   onChange={(e) => {
