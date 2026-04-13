@@ -90,6 +90,28 @@ async def insert_default_settings():
         raise
 
 
+async def run_migrations():
+    """运行数据库迁移（修改列类型等）"""
+    try:
+        from sqlalchemy import text, inspect
+        from app.core.database import engine
+
+        async with engine.begin() as conn:
+            # 检查 senders 表 user_id 列是否为 BIGINT
+            inspector = inspect(conn.sync_connection)
+            columns = inspector.get_columns('senders')
+            for col in columns:
+                if col['name'] == 'user_id' and 'bigint' not in str(col['type']).lower():
+                    logger.info("迁移: senders.user_id 从 INT 修改为 BIGINT UNSIGNED")
+                    await conn.execute(text(
+                        "ALTER TABLE senders MODIFY COLUMN user_id BIGINT UNSIGNED NOT NULL"
+                    ))
+                    logger.info("迁移完成: senders.user_id → BIGINT UNSIGNED")
+                    break
+    except Exception as e:
+        logger.warning(f"数据库迁移检查失败（可忽略）: {e}")
+
+
 async def main():
     """主函数"""
     logger.info("=" * 60)
@@ -104,6 +126,10 @@ async def main():
         # Step 2: 创建表
         logger.info("\n[2/3] 创建数据库表...")
         await create_tables()
+
+        # Step 2.5: 数据库迁移检查
+        logger.info("\n[2.5/3] 检查数据库迁移...")
+        await run_migrations()
 
         # Step 3: 插入默认配置
         logger.info("\n[3/3] 插入默认配置...")

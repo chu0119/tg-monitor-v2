@@ -442,7 +442,7 @@ export function BigScreenPage() {
                     color: "#fff",
                     fontSize: 12,
                   }}
-                  formatter={(value: number, name: string) => [value, name === "count" ? "消息数" : name === "hour" ? "时间" : name]}
+                  formatter={((value: any, name: any) => [value, name === "count" ? "消息数" : name === "hour" ? "时间" : name]}
                   labelFormatter={(label) => `时间: ${label}`}
                 />
                 <Area
@@ -495,7 +495,7 @@ export function BigScreenPage() {
                     fontSize: 13,
                     fontWeight: "bold",
                   }}
-                  formatter={(value: number, name: string) => [<span style={{ color: "#fff" }}>{value}</span>, <span style={{ color: "#fff" }}>{name}</span>]}
+                  formatter={((value: any, name: any) => [<span style={{ color: "#fff" }}>{value}</span>, <span style={{ color: "#fff" }}>{name}</span>]}
                 />
               </PieChart>
             </ResponsiveContainer>

@@ -2,6 +2,14 @@
 
 > Telegram 群组实时监控、关键词告警、数据分析平台
 
+## 🚀 一键部署
+
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/chu0119/tg-monitor-v2/main/install.sh)
+```
+
+> 需要预先安装：Python 3、Node.js、npm、MySQL Server
+
 ## ✨ 功能特性
 
 ### 🔍 实时监控

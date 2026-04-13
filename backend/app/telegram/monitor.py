@@ -363,12 +363,34 @@ class MessageMonitor:
         self.active_monitors.discard(conversation_id)
         logger.info(f"停止监控会话: {conversation_id}")
 
+    # 需要排除的自身账号 user_id 集合（不存储自己的消息）
+    _self_user_ids: Set[int] = set()
+
+    async def _load_self_user_ids(self):
+        """加载所有监控账号的 user_id，用于排除自身消息"""
+        if self._self_user_ids:
+            return
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(TelegramAccount.user_id).where(TelegramAccount.is_active == True)
+                )
+                self._self_user_ids = {row[0] for row in result.fetchall() if row[0]}
+                logger.info(f"已加载 {len(self._self_user_ids)} 个自身账号 user_id，将排除其消息")
+        except Exception as e:
+            logger.warning(f"加载自身账号 user_id 失败: {e}")
+
     async def process_message(self, message: Message, conversation_id: int) -> bool:
         """处理新消息(带重试机制,处理数据库锁)
 
         Returns:
             bool: 如果是新消息返回 True,如果是重复消息返回 False
         """
+        # 排除自身账号的消息
+        await self._load_self_user_ids()
+        if message.sender_id and message.sender_id in self._self_user_ids:
+            return False
+
         max_retries = 5
         base_delay = 0.5  # 基础延迟 500ms
 
@@ -1051,7 +1073,12 @@ class MessageMonitor:
             # 批内去重：记录已处理的消息ID
             processed_ids = set()
 
-            for message in messages:
+            # 排除自身账号的消息
+                await self._load_self_user_ids()
+                if message.sender_id and message.sender_id in self._self_user_ids:
+                    skipped_count += 1
+                    continue
+
                 # 批内去重检查
                 if message.id in processed_ids:
                     skipped_count += 1

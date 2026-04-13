@@ -259,7 +259,7 @@ export function DashboardPage() {
             </span>
           </div>
           <ResponsiveContainer width="100%" height={240} className="sm:h-[280px]">
-            <AreaChart data={messagesTrend} animationDuration={300}>
+            <AreaChart data={messagesTrend} >
               <defs>
                 <linearGradient id="msgGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#00f0ff" stopOpacity={0.4} />
@@ -299,7 +299,7 @@ export function DashboardPage() {
             告警级别分布
           </h3>
           <ResponsiveContainer width="100%" height={240} className="sm:h-[280px]">
-            <PieChart animationDuration={300}>
+            <PieChart >
               <Pie
                 data={alertsPieData}
                 cx="50%"
