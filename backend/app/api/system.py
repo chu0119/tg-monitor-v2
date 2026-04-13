@@ -11,6 +11,7 @@ import subprocess
 
 from app.api.deps import get_db
 from app.models.settings import Settings
+from app.core.config import settings
 from app.core.database import check_database_connection, init_db
 from app.services.runtime_proxy_service import get_proxy_config, apply_proxy_config
 

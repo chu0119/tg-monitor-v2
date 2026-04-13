@@ -177,8 +177,9 @@ async def upload_merge_backup(file: UploadFile = File(...), db: AsyncSession = D
         base_suffix = os.path.splitext(filename)[1].lower() if not filename.endswith('.sql.gz') else '.sql.gz'
         if base_suffix not in ('.sql', '.sql.gz'):
             raise HTTPException(status_code=400, detail="仅支持 .sql 和 .sql.gz 格式的备份文件")
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            shutil.copyfileobj(file.file, tmp)
+        content_bytes = await file.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, delete_on_close=False) as tmp:
+            tmp.write(content_bytes)
             tmp_path = tmp.name
 
         logger.info(f"上传备份文件: {file.filename}, 大小: {os.path.getsize(tmp_path)} bytes")

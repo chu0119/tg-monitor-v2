@@ -110,7 +110,12 @@ async def check_update():
             if resp.status_code != 200:
                 raise RuntimeError(f"GitHub API 返回 {resp.status_code}: {resp.text[:200]}")
 
-            commits = resp.json()
+            data = resp.json()
+            # GitHub API /commits/{sha} 返回单个对象，/commits?sha={branch} 返回列表
+            if isinstance(data, dict):
+                commits = [data]
+            else:
+                commits = data
             if not commits:
                 return CheckUpdateResponse(
                     has_update=False,
@@ -130,7 +135,7 @@ async def check_update():
                 if c["sha"] == local_commit:
                     break
                 commits_behind += 1
-                msg = c["commit"]["message"].split("\n")[0]
+                msg = c.get("commit", {}).get("message", "").split("\n")[0]
                 changelog.append(f"[{c['sha'][:7]}] {msg}")
 
             return CheckUpdateResponse(
