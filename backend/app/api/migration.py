@@ -237,7 +237,7 @@ async def _do_import(file_path: str):
                         except Exception as e:
                             logger.warning(f"导入 {table} 行失败: {e}")
                 await db.commit()
-                    stats["tables_imported"] += 1
+                stats["tables_imported"] += 1
 
         # 4. 恢复 session 文件
         import_dir = os.path.join(tmpdir, "sessions")
