@@ -781,7 +781,7 @@ function AlertDetailModal({ alert, onClose, onHandle }: AlertDetailModalProps) {
             {alert.sender_tg_id && (
               <p className="text-xs text-muted-foreground mt-0.5">TG ID: {alert.sender_tg_id}</p>
             )}
-            <p className="text-xs text-muted-foreground mt-0.5">📱 {formatPhone(alert.sender_phone) || "无"}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">📱 {formatPhone(alert.sender_phone || "") || "无"}</p>
           </div>
           <div>
             <label className="text-xs sm:text-sm text-muted-foreground">会话</label>

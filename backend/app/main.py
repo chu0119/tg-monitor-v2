@@ -354,7 +354,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=config_settings.PROJECT_NAME,
     version=config_settings.VERSION,
-    lifespan=lifespan
+    lifespan=lifespan,
+    redirect_slashes=False
 )
 
 # 配置 CORS
