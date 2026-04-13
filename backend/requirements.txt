@@ -19,7 +19,7 @@ python-dotenv==1.0.1
 
 # HTTP 客户端
 httpx==0.28.1
-aiohttp==3.11.11
+aiohttp==3.13.4
 
 # YAML 解析（代理配置需要）
 pyyaml>=6.0
