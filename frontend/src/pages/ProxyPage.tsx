@@ -118,9 +118,7 @@ export function ProxyPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold neon-text">代理管理</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          已移除内置 Clash/Mihomo，仅保留基础代理参数配置（协议/IP/端口）。
-        </p>
+
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

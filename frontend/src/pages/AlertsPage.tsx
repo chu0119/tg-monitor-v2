@@ -38,6 +38,7 @@ interface Alert {
   message_preview: string;
   highlighted_message?: string;  // 带关键词高亮的消息内容
   created_at: string;
+  message_time?: string;  // 消息原始发送时间
   sender_username?: string;
   sender_tg_id?: number;
   sender_phone?: string;
@@ -139,7 +140,7 @@ export function AlertsPage() {
       if (filter.status) params.status = filter.status;
       if (filter.level) params.alert_level = filter.level;
       if (filter.keyword) params.keyword = filter.keyword;
-      // has_phone 在前端过滤，因为后端 alerts 接口不直接支持
+      if (filter.has_phone) params.has_phone = true;
       if (selectedKeywordGroups.length > 0) {
         // 多个关键词组使用 OR 查询
         params.keyword_group_id = selectedKeywordGroups[0]; // API只支持单个，后续可以扩展
@@ -582,10 +583,7 @@ export function AlertsPage() {
               </div>
             )}
             {(() => {
-              const filteredAlerts = filter.has_phone
-                ? alerts.filter((a) => a.sender_phone)
-                : alerts;
-              return filteredAlerts.map((alert) => (
+              return alerts.map((alert) => (
               <AlertRow
                 key={alert.id}
                 alert={alert}
@@ -727,7 +725,9 @@ function AlertRow({ alert, onClick, levelColor, levelLabel, isSelected, onToggle
                 <Badge variant="outline" className="text-xs flex items-center gap-1">
                   {statusLabels[alert.status as keyof typeof statusLabels]}
                 </Badge>
-                <span className="text-xs text-muted-foreground">{formatDate(alert.created_at)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {alert.message_time ? `${formatDate(alert.message_time)} (消息时间)` : formatDate(alert.created_at)}
+                </span>
               </div>
             </div>
           </div>
@@ -736,7 +736,9 @@ function AlertRow({ alert, onClick, levelColor, levelLabel, isSelected, onToggle
             <Badge variant="outline" className="flex items-center gap-1">
               {statusLabels[alert.status as keyof typeof statusLabels]}
             </Badge>
-            <span className="text-xs text-muted-foreground">{formatDate(alert.created_at)}</span>
+            <span className="text-xs text-muted-foreground">
+                {alert.message_time ? `${formatDate(alert.message_time)} (消息时间)` : formatDate(alert.created_at)}
+              </span>
           </div>
         </div>
       </CardContent>
@@ -779,9 +781,7 @@ function AlertDetailModal({ alert, onClose, onHandle }: AlertDetailModalProps) {
             {alert.sender_tg_id && (
               <p className="text-xs text-muted-foreground mt-0.5">TG ID: {alert.sender_tg_id}</p>
             )}
-            {alert.sender_phone && (
-              <p className="text-xs text-muted-foreground mt-0.5">📱 {alert.sender_phone}</p>
-            )}
+            <p className="text-xs text-muted-foreground mt-0.5">📱 {alert.sender_phone || "无"}</p>
           </div>
           <div>
             <label className="text-xs sm:text-sm text-muted-foreground">会话</label>

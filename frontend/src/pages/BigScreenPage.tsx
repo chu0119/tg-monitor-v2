@@ -303,7 +303,7 @@ export function BigScreenPage() {
             </div>
             <div className="text-center md:text-left">
               <h1 className="text-lg md:text-2xl font-bold tracking-wide">
-                群组信息监测预警系统
+                听风追影–群组数据预警分析系统
               </h1>
               <p className="hidden md:block text-xs text-gray-500 mt-0.5">
                 TELEGRAM MONITORING & ALERT SYSTEM

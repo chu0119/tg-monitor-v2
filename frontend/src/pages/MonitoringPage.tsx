@@ -1026,9 +1026,7 @@ function MessageCard({ message }: MessageCardProps) {
               {message.sender_telegram_id && (
                 <p className="text-xs text-muted-foreground mt-0.5">ID: {message.sender_telegram_id}</p>
               )}
-              {message.sender_phone && (
-                <p className="text-xs text-muted-foreground mt-0.5">📱 {message.sender_phone}</p>
-              )}
+              <p className="text-xs text-muted-foreground mt-0.5">📱 {message.sender_phone || "无"}</p>
             </div>
             <div>
               <label className="text-xs sm:text-sm text-muted-foreground">会话</label>

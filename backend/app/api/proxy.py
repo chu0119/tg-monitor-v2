@@ -1,7 +1,7 @@
 """代理管理 API（简化版，不依赖内置 Clash/Mihomo）。"""
 from __future__ import annotations
 
-import socket
+
 import time
 from typing import Literal, Optional
 
@@ -92,20 +92,33 @@ async def enable_proxy(db: AsyncSession = Depends(get_db)):
 
 @router.post("/test")
 async def test_proxy_connectivity(request: ProxyTestRequest):
+    import urllib.request
+    import urllib.error
+
+    target = "https://www.google.com"
+    proxy_url = f"{request.protocol}://{request.host}:{request.port}"
+    proxy_handler = urllib.request.ProxyHandler({"https": proxy_url, "http": proxy_url})
+    opener = urllib.request.build_opener(proxy_handler)
+
     start = time.perf_counter()
     try:
-        with socket.create_connection((request.host, request.port), timeout=request.timeout_sec):
-            elapsed_ms = int((time.perf_counter() - start) * 1000)
-            return {
-                "success": True,
-                "latency_ms": elapsed_ms,
-                "message": f"代理端口连通 ({elapsed_ms}ms)",
-            }
+        req = urllib.request.Request(target, headers={"User-Agent": "Mozilla/5.0"})
+        resp = opener.open(req, timeout=request.timeout_sec)
+        resp.read()
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        return {
+            "success": True,
+            "latency_ms": elapsed_ms,
+            "message": f"通过代理访问 {target} 成功 ({elapsed_ms}ms)",
+            "target": target,
+        }
     except Exception as e:
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
         return {
             "success": False,
-            "latency_ms": None,
-            "message": f"连通性测试失败: {e}",
+            "latency_ms": elapsed_ms,
+            "message": f"通过代理访问 {target} 失败: {e}",
+            "target": target,
         }
 
 

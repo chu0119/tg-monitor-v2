@@ -62,11 +62,11 @@ export function MainLayout({ children }: { children?: React.ReactNode }) {
                 <MessageSquare size={20} className="text-white" />
               </div>
               <h1 className="text-xl font-bold neon-text hidden sm:block">
-                群组信息监测预警系统
+                听风追影
               </h1>
               {/* 手机端显示简短标题 */}
               <h1 className="text-base font-bold neon-text sm:hidden">
-                监控系统
+                追影预警
               </h1>
             </div>
           </div>

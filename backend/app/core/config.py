@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     """应用配置"""
 
     # 项目信息
-    PROJECT_NAME: str = "Telegram 监控告警系统"
+    PROJECT_NAME: str = "听风追影–群组数据预警分析系统"
     VERSION: str = "1.1.0"
     API_PREFIX: str = "/api/v1"
 

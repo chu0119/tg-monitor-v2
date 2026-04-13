@@ -40,6 +40,7 @@ async def list_alerts(
     conversation_id: int = Query(None),
     sender_id: int = Query(None),
     keyword: str = Query(None),
+    has_phone: bool = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -48,6 +49,8 @@ async def list_alerts(
     # 用原生 SQL 查询，避免 ORM selectinload 对大表的性能问题
     where_clauses = []
     params = {}
+    if has_phone:
+        where_clauses.append("s.phone IS NOT NULL AND s.phone != ''")
     if status:
         where_clauses.append("a.status = :status")
         params["status"] = status
@@ -103,10 +106,12 @@ async def list_alerts(
                COALESCE(s.username, COALESCE(s.first_name, CONCAT('User_', s.user_id))) AS sender_username,
                s.first_name AS sender_first_name,
                s.phone AS sender_phone,
-               c.title AS conversation_title
+               c.title AS conversation_title,
+               m.date AS message_time
         FROM alerts a
         LEFT JOIN senders s ON a.sender_id = s.id
         LEFT JOIN conversations c ON a.conversation_id = c.id
+        LEFT JOIN messages m ON a.message_id = m.id
         {where_sql}
         ORDER BY a.created_at DESC
         LIMIT :lim OFFSET :off
@@ -122,8 +127,9 @@ async def list_alerts(
         if alert_dict.get("created_at"):
             if isinstance(alert_dict["created_at"], datetime):
                 alert_dict["created_at"] = datetime_to_iso(alert_dict["created_at"])
-            else:
-                alert_dict["message_date"] = str(alert_dict["created_at"])
+        if alert_dict.get("message_time"):
+            if isinstance(alert_dict["message_time"], datetime):
+                alert_dict["message_time"] = datetime_to_iso(alert_dict["message_time"])
         response_alerts.append(alert_dict)
 
     # 返回分页格式
@@ -325,6 +331,7 @@ async def export_alerts_csv(
     # 写入表头
     headers = [
         "告警ID",
+        "消息时间",
         "创建时间",
         "告警级别",
         "状态",
@@ -355,10 +362,12 @@ async def export_alerts_csv(
                    COALESCE(s.username, COALESCE(s.first_name, CONCAT('User_', s.user_id))) AS sender_username,
                    s.first_name AS sender_first_name,
                    s.phone AS sender_phone,
-                   c.title AS conversation_title
+                   c.title AS conversation_title,
+                   m.date AS message_time
             FROM alerts a
             LEFT JOIN senders s ON a.sender_id = s.id
             LEFT JOIN conversations c ON a.conversation_id = c.id
+            LEFT JOIN messages m ON a.message_id = m.id
             {where_sql_export}
             ORDER BY a.created_at DESC
             LIMIT :batch_size OFFSET :batch_offset
@@ -373,6 +382,7 @@ async def export_alerts_csv(
             d = dict(row._mapping)
             writer.writerow([
                 d.get("id", ""),
+                format_datetime(d.get("message_time")) if d.get("message_time") else "",
                 format_datetime(d.get("created_at")) if d.get("created_at") else "",
                 d.get("alert_level", ""),
                 d.get("status", ""),
