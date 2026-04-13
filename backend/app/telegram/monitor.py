@@ -590,6 +590,7 @@ class MessageMonitor:
                     await asyncio.sleep(0.1 * (attempt + 1))
                     continue
                 logger.error(f"回退方法失败(user_id={sender_id}): {e}")
+                await db.rollback()
                 return None
 
     async def _save_message(
