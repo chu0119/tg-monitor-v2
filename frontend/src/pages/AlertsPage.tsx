@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
-import { formatDate, truncateText } from "@/lib/utils";
+import { formatDate, truncateText, formatPhone } from "@/lib/utils";
 
 function sanitizeHtml(html: string): string {
   const div = document.createElement("div");
@@ -781,7 +781,7 @@ function AlertDetailModal({ alert, onClose, onHandle }: AlertDetailModalProps) {
             {alert.sender_tg_id && (
               <p className="text-xs text-muted-foreground mt-0.5">TG ID: {alert.sender_tg_id}</p>
             )}
-            <p className="text-xs text-muted-foreground mt-0.5">📱 {alert.sender_phone || "无"}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">📱 {formatPhone(alert.sender_phone) || "无"}</p>
           </div>
           <div>
             <label className="text-xs sm:text-sm text-muted-foreground">会话</label>

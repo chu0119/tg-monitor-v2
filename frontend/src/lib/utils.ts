@@ -75,6 +75,62 @@ export function formatMessageTime(date: string | Date): string {
   return formatDate(date);
 }
 
+/**
+ * 格式化手机号：+国家码 电话号码
+ * 8613991539939 → +86 13991539939
+ * 13991539939 → +86 13991539939
+ * +8613991539939 → +86 13991539939
+ * 989169525691 → +989 169525691
+ */
+export function formatPhone(phone: string): string {
+  if (!phone) return '';
+  
+  // 去+号
+  const digits = phone.replace(/\+/g, '');
+  
+  // 中国号码
+  if (digits.startsWith('86') && digits.length === 13) {
+    return `+86 ${digits.slice(2)}`;
+  }
+  if (digits.startsWith('1') && digits.length === 11) {
+    return `+86 ${digits}`;
+  }
+  
+  // 阿富汗 +93 (10位)
+  // 伊朗 +98 (10位, 98开头)
+  if (digits.startsWith('98') && digits.length >= 10 && digits.length <= 12) {
+    return `+98 ${digits.slice(2)}`;
+  }
+  
+  // 俄罗斯 +7 (11位, 7开头)
+  if (digits.startsWith('7') && digits.length === 11) {
+    return `+7 ${digits.slice(1)}`;
+  }
+  
+  // 美国/加拿大 +1 (10位, 1开头)
+  if (digits.startsWith('1') && digits.length === 10) {
+    return `+1 ${digits.slice(1)}`;
+  }
+  
+  // 印度 +91 (10-12位, 91开头)
+  if (digits.startsWith('91') && digits.length >= 10 && digits.length <= 12) {
+    return `+91 ${digits.slice(2)}`;
+  }
+  
+  // 巴基斯坦 +92 (10位, 92开头)
+  if (digits.startsWith('92') && digits.length >= 10 && digits.length <= 12) {
+    return `+92 ${digits.slice(2)}`;
+  }
+  
+  // 通用：如果>=10位，前2-3位作为国家码
+  if (digits.length >= 10) {
+    return `+${digits.slice(0, digits.length - 10)} ${digits.slice(-10)}`;
+  }
+  
+  // 短号码直接返回
+  return `+${digits}`;
+}
+
 export function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.substring(0, maxLength) + "...";

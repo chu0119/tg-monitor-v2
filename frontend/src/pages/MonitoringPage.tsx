@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime, formatPhone } from "@/lib/utils";
 import {
   Activity,
   Pause,
@@ -994,7 +994,7 @@ function MessageCard({ message }: MessageCardProps) {
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 {message.sender_telegram_id && <span>ID: {message.sender_telegram_id}</span>}
-                {message.sender_phone && <span>📱 {message.sender_phone}</span>}
+                {message.sender_phone && <span>📱 {formatPhone(message.sender_phone)}</span>}
                 <Clock size={14} />
                 {formatRelativeTime(message.date)}
               </div>
@@ -1026,7 +1026,7 @@ function MessageCard({ message }: MessageCardProps) {
               {message.sender_telegram_id && (
                 <p className="text-xs text-muted-foreground mt-0.5">ID: {message.sender_telegram_id}</p>
               )}
-              <p className="text-xs text-muted-foreground mt-0.5">📱 {message.sender_phone || "无"}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">📱 {formatPhone(message.sender_phone) || "无"}</p>
             </div>
             <div>
               <label className="text-xs sm:text-sm text-muted-foreground">会话</label>
