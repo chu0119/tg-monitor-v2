@@ -40,6 +40,7 @@ interface Alert {
   created_at: string;
   sender_username?: string;
   sender_tg_id?: number;
+  sender_phone?: string;
   conversation_title?: string;
   handler?: string;
   handler_note?: string;
@@ -55,7 +56,7 @@ export function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
-  const [filter, setFilter] = useState({ status: "", level: "", keyword: "" });
+  const [filter, setFilter] = useState({ status: "", level: "", keyword: "", has_phone: false });
   const [search, setSearch] = useState("");
   const [showKeywordGroupFilter, setShowKeywordGroupFilter] = useState(false);
   const [selectedKeywordGroups, setSelectedKeywordGroups] = useState<number[]>([]);
@@ -138,6 +139,7 @@ export function AlertsPage() {
       if (filter.status) params.status = filter.status;
       if (filter.level) params.alert_level = filter.level;
       if (filter.keyword) params.keyword = filter.keyword;
+      // has_phone 在前端过滤，因为后端 alerts 接口不直接支持
       if (selectedKeywordGroups.length > 0) {
         // 多个关键词组使用 OR 查询
         params.keyword_group_id = selectedKeywordGroups[0]; // API只支持单个，后续可以扩展
@@ -332,6 +334,15 @@ export function AlertsPage() {
                 <option value="high">高</option>
                 <option value="critical">严重</option>
               </select>
+              <label className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary/50 border border-border cursor-pointer min-h-[44px] whitespace-nowrap">
+                <input
+                  type="checkbox"
+                  checked={filter.has_phone}
+                  onChange={(e) => setFilter({ ...filter, has_phone: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm">仅显示有手机号</span>
+              </label>
               <div className="relative" ref={keywordGroupDropdownRef}>
                 <Button
                   variant="outline"
@@ -407,7 +418,7 @@ export function AlertsPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  setFilter({ status: "", level: "", keyword: "" });
+                  setFilter({ status: "", level: "", keyword: "", has_phone: false });
                   setSearch("");
                   setSelectedKeywordGroups([]);
                 }}
@@ -503,7 +514,7 @@ export function AlertsPage() {
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setFilter({ status: "", level: "", keyword: "" });
+                    setFilter({ status: "", level: "", keyword: "", has_phone: false });
                     setSearch("");
                     setSelectedKeywordGroups([]);
                   }}
@@ -570,7 +581,11 @@ export function AlertsPage() {
                 </button>
               </div>
             )}
-            {alerts.map((alert) => (
+            {(() => {
+              const filteredAlerts = filter.has_phone
+                ? alerts.filter((a) => a.sender_phone)
+                : alerts;
+              return filteredAlerts.map((alert) => (
               <AlertRow
                 key={alert.id}
                 alert={alert}
@@ -580,7 +595,8 @@ export function AlertsPage() {
                 isSelected={selectedAlerts.has(alert.id)}
                 onToggleSelect={() => toggleSelectAlert(alert.id)}
               />
-            ))}
+            ));
+            })()}
           </>
         )}
       </div>
@@ -762,6 +778,9 @@ function AlertDetailModal({ alert, onClose, onHandle }: AlertDetailModalProps) {
             <p className="text-sm sm:text-base">{alert.sender_username || "未知会话"}</p>
             {alert.sender_tg_id && (
               <p className="text-xs text-muted-foreground mt-0.5">TG ID: {alert.sender_tg_id}</p>
+            )}
+            {alert.sender_phone && (
+              <p className="text-xs text-muted-foreground mt-0.5">📱 {alert.sender_phone}</p>
             )}
           </div>
           <div>

@@ -102,6 +102,7 @@ async def list_alerts(
                s.user_id AS sender_tg_id,
                COALESCE(s.username, COALESCE(s.first_name, CONCAT('User_', s.user_id))) AS sender_username,
                s.first_name AS sender_first_name,
+               s.phone AS sender_phone,
                c.title AS conversation_title
         FROM alerts a
         LEFT JOIN senders s ON a.sender_id = s.id
@@ -336,6 +337,7 @@ async def export_alerts_csv(
         "发送者ID",
         "发送者用户名",
         "发送者名称",
+        "发送者手机号",
         "处理人",
         "处理时间",
         "处理备注",
@@ -352,6 +354,7 @@ async def export_alerts_csv(
                    a.handler, a.handled_at, a.handler_note, a.notification_sent,
                    COALESCE(s.username, COALESCE(s.first_name, CONCAT('User_', s.user_id))) AS sender_username,
                    s.first_name AS sender_first_name,
+                   s.phone AS sender_phone,
                    c.title AS conversation_title
             FROM alerts a
             LEFT JOIN senders s ON a.sender_id = s.id
@@ -382,6 +385,7 @@ async def export_alerts_csv(
                 d.get("sender_id") or "",
                 d.get("sender_username") or "",
                 d.get("sender_first_name") or "",
+                d.get("sender_phone") or "",
                 d.get("handler") or "",
                 format_datetime(d.get("handled_at")) if d.get("handled_at") else "",
                 d.get("handler_note") or "",

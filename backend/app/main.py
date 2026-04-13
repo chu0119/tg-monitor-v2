@@ -12,7 +12,7 @@ import os
 
 from app.core.config import settings as config_settings
 from app.core.database import init_db
-from app.api import accounts, conversations, messages, keywords, alerts, notifications, dashboard, analysis, settings as settings_api, database, backups, diagnostics, monitoring
+from app.api import accounts, conversations, messages, keywords, alerts, notifications, dashboard, analysis, settings as settings_api, database, backups, diagnostics, monitoring, senders
 from app.api import proxy, system
 from app.api.deps import get_db
 
@@ -383,6 +383,7 @@ app.include_router(database.router, prefix=api_prefix)
 app.include_router(backups.router, prefix=api_prefix)
 app.include_router(diagnostics.router, prefix=api_prefix)
 app.include_router(monitoring.router, prefix=api_prefix)
+app.include_router(senders.router, prefix=api_prefix)
 app.include_router(proxy.router, prefix=api_prefix)
 app.include_router(system.router, prefix=api_prefix)
 

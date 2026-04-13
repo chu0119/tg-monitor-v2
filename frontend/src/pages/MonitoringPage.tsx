@@ -36,6 +36,7 @@ interface Message {
   id: number;
   conversation_id: number;
   sender_telegram_id?: number;
+  sender_phone?: string;
   message_type: string;
   text: string;
   date: string;
@@ -992,6 +993,8 @@ function MessageCard({ message }: MessageCardProps) {
                 )}
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {message.sender_telegram_id && <span>ID: {message.sender_telegram_id}</span>}
+                {message.sender_phone && <span>📱 {message.sender_phone}</span>}
                 <Clock size={14} />
                 {formatRelativeTime(message.date)}
               </div>
@@ -1022,6 +1025,9 @@ function MessageCard({ message }: MessageCardProps) {
               <p className="text-sm sm:text-base font-medium">{message.sender_username || "未知会话"}</p>
               {message.sender_telegram_id && (
                 <p className="text-xs text-muted-foreground mt-0.5">ID: {message.sender_telegram_id}</p>
+              )}
+              {message.sender_phone && (
+                <p className="text-xs text-muted-foreground mt-0.5">📱 {message.sender_phone}</p>
               )}
             </div>
             <div>

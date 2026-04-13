@@ -115,6 +115,7 @@ async def advanced_search_messages(
             msg_dict["sender_username"] = msg.sender.username or msg.sender.first_name or f"User_{msg.sender.user_id}"
             msg_dict["sender_first_name"] = msg.sender.first_name
             msg_dict["sender_telegram_id"] = msg.sender.user_id
+            msg_dict["sender_phone"] = msg.sender.phone
         if msg.conversation:
             msg_dict["conversation_title"] = msg.conversation.title
         response_messages.append(msg_dict)
@@ -238,6 +239,7 @@ async def list_messages(
                 msg_dict["sender_username"] = f"User_{msg.sender.user_id}"
             msg_dict["sender_first_name"] = msg.sender.first_name
             msg_dict["sender_telegram_id"] = msg.sender.user_id
+            msg_dict["sender_phone"] = msg.sender.phone
         elif msg.sender_id:
             logger.warning(f"Sender not found for sender_id={msg.sender_id}, message_id={msg.id}")
             msg_dict["sender_username"] = f"Unknown (ID: {msg.sender_id})"
