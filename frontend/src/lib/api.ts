@@ -514,6 +514,11 @@ export const api = {
   // 系统状态
   system: {
     getStatus: () => fetch(`${API_BASE}/system/status`).then(handleResponse),
+    getUpdateStatus: () => fetch(`${API_BASE}/system/update-status`).then(handleResponse),
+    checkUpdate: () => fetch(`${API_BASE}/system/check-update`).then(handleResponse),
+    performUpdate: () =>
+      fetch(`${API_BASE}/system/perform-update`, { method: "POST" }).then(handleResponse),
+    getUpdateProgress: () => fetch(`${API_BASE}/system/update-progress`).then(handleResponse),
   },
 
   // 备份管理

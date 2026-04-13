@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # 项目信息
     PROJECT_NAME: str = "Telegram 监控告警系统"
-    VERSION: str = "1.0.0"
+    VERSION: str = "1.1.0"
     API_PREFIX: str = "/api/v1"
 
     # 服务器配置

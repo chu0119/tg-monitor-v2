@@ -19,6 +19,10 @@ import {
   FileJson,
   Trash2,
   BarChart3,
+  RefreshCw,
+  Rocket,
+  Loader2,
+  GitBranch,
 } from "lucide-react";
 
 interface DatabaseStatus {
@@ -163,10 +167,21 @@ export function SettingsPage() {
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupName, setBackupName] = useState("");
 
+  // 更新相关状态
+  const [updateInfo, setUpdateInfo] = useState<{ current_version: string; current_commit: string; branch: string }>({ current_version: "-", current_commit: "-", branch: "-" });
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateResult, setUpdateResult] = useState<any>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<any>(null);
+  const [updateDone, setUpdateDone] = useState<{ success: boolean; error?: string } | null>(null);
+  const [progressTimer, setProgressTimer] = useState<any>(null);
+
   useEffect(() => {
     fetchSettings();
     fetchDatabaseInfo();
     fetchBackups();
+    fetchUpdateInfo();
+    return () => { if (progressTimer) clearInterval(progressTimer); };
   }, []);
 
   const fetchSettings = async () => {
@@ -213,6 +228,60 @@ export function SettingsPage() {
       console.error("Failed to fetch backups:", error);
     } finally {
       setBackupLoading(false);
+    }
+  };
+
+  const fetchUpdateInfo = async () => {
+    try {
+      const data = await api.system.getUpdateStatus();
+      setUpdateInfo(data);
+    } catch { /* ignore */ }
+  };
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdateResult(null);
+    setUpdateDone(null);
+    try {
+      const data = await api.system.checkUpdate();
+      setUpdateResult(data);
+    } catch (error: any) {
+      setUpdateResult(null);
+      alert("检查更新失败: " + (error.message || "未知错误"));
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handlePerformUpdate = async () => {
+    if (!confirm("确定要执行系统更新吗？更新期间服务将暂时不可用。")) return;
+    setUpdating(true);
+    setUpdateDone(null);
+    setUpdateProgress({ progress: "开始更新...", log: [] });
+
+    // 启动进度轮询
+    const timer = setInterval(async () => {
+      try {
+        const p = await api.system.getUpdateProgress();
+        setUpdateProgress(p);
+      } catch { /* ignore */ }
+    }, 2000);
+    setProgressTimer(timer);
+
+    try {
+      const data = await api.system.performUpdate();
+      setUpdateDone({ success: true });
+    } catch (error: any) {
+      setUpdateDone({ success: false, error: error.message || "未知错误" });
+    } finally {
+      clearInterval(timer);
+      setProgressTimer(null);
+      setUpdating(false);
+      // 最终获取一次进度
+      try {
+        const p = await api.system.getUpdateProgress();
+        setUpdateProgress(p);
+      } catch { /* ignore */ }
     }
   };
 
@@ -833,6 +902,87 @@ export function SettingsPage() {
                   ))
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          {/* 系统更新 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Rocket size={20} />
+                系统更新
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">当前版本</p>
+                  <p className="text-lg font-bold">v{updateInfo.current_version}</p>
+                  <p className="text-xs text-muted-foreground font-mono">{updateInfo.current_commit?.slice(0, 7)}</p>
+                </div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <GitBranch size={12} />
+                  {updateInfo.branch}
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleCheckUpdate}
+                  disabled={checkingUpdate || updating}
+                  className="flex-1 min-h-[44px]"
+                >
+                  {checkingUpdate ? <Loader2 size={16} className="mr-2 animate-spin" /> : <RefreshCw size={16} className="mr-2" />}
+                  {checkingUpdate ? "检查中..." : "检查更新"}
+                </Button>
+                {updateResult?.has_update && (
+                  <Button
+                    variant="tech"
+                    onClick={handlePerformUpdate}
+                    disabled={updating}
+                    className="flex-1 min-h-[44px]"
+                  >
+                    {updating ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Rocket size={16} className="mr-2" />}
+                    {updating ? "更新中..." : "立即更新"}
+                  </Button>
+                )}
+              </div>
+
+              {updateResult && !updateResult.has_update && (
+                <p className="text-sm text-cyber-green flex items-center gap-1">
+                  <CheckCircle size={14} /> 已是最新版本
+                </p>
+              )}
+
+              {updateResult?.has_update && updateResult.changelog.length > 0 && (
+                <div className="bg-cyber-blue/5 border border-cyber-blue/20 rounded-lg p-3">
+                  <p className="text-sm font-semibold mb-2">更新日志（{updateResult.commits_behind} 个提交）</p>
+                  <div className="space-y-1 max-h-40 overflow-auto text-xs text-muted-foreground">
+                    {updateResult.changelog.map((c, i) => (
+                      <p key={i} className="font-mono">{c}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {updating && updateProgress && (
+                <div className="bg-cyber-blue/5 border border-cyber-blue/20 rounded-lg p-3 space-y-1">
+                  <p className="text-sm font-semibold">更新进度</p>
+                  <p className="text-xs text-muted-foreground">{updateProgress.progress}</p>
+                  <div className="max-h-32 overflow-auto text-xs text-muted-foreground space-y-0.5">
+                    {updateProgress.log.map((l, i) => (
+                      <p key={i} className="font-mono">• {l}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {updateDone && (
+                <p className={`text-sm ${updateDone.success ? "text-cyber-green" : "text-cyber-pink"}`}>
+                  {updateDone.success ? "✓ 更新完成，服务正在重启..." : `✗ 更新失败: ${updateDone.error || "未知错误"}`}
+                </p>
+              )}
             </CardContent>
           </Card>
 
