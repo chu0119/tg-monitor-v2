@@ -154,6 +154,7 @@ async def list_messages(
     keyword: Optional[str] = Query(None),
     message_type: Optional[str] = Query(None),
     has_alert: Optional[bool] = Query(None),
+    has_phone: Optional[bool] = Query(None, description="筛选有手机号的发送者"),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
@@ -175,6 +176,10 @@ async def list_messages(
             conditions.append(Message.alert_id.isnot(None))
         else:
             conditions.append(Message.alert_id.is_(None))
+    if has_phone:
+        conditions.append(Message.sender_id.in_(
+            select(Sender.id).where(Sender.phone.isnot(None), Sender.phone != '')
+        ))
     if keyword:
         conditions.append(or_(
             Message.text.ilike(f"%{keyword}%"),

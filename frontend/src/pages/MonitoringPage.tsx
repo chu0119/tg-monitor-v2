@@ -186,7 +186,7 @@ export function MonitoringPage() {
     if (selectedConversation) {
       fetchMessages();
     }
-  }, [selectedConversation, currentPage, pageSize, filter, messageTypeFilter, alertFilter]);
+  }, [selectedConversation, currentPage, pageSize, filter, messageTypeFilter, alertFilter, phoneFilter]);
 
   // 监听 WebSocket 消息，实时更新消息列表
   useEffect(() => {
@@ -520,6 +520,7 @@ export function MonitoringPage() {
       if (messageTypeFilter !== "all") params.message_type = messageTypeFilter;
       if (alertFilter === "alerted") params.has_alert = true;
       if (alertFilter === "normal") params.has_alert = false;
+      if (phoneFilter) params.has_phone = true;
 
       const response = await api.messages.list(params);
 
@@ -534,9 +535,7 @@ export function MonitoringPage() {
     }
   };
 
-  const filteredMessages = phoneFilter
-    ? messages.filter((m) => m.sender_phone)
-    : messages;
+  const filteredMessages = messages;
 
   const handlePauseMonitoring = async (conversationId: number) => {
     try {
