@@ -1073,8 +1073,11 @@ class MessageMonitor:
             # 批内去重：记录已处理的消息ID
             processed_ids = set()
 
-            # 排除自身账号的消息
-                await self._load_self_user_ids()
+            # 加载自身账号ID用于过滤
+            await self._load_self_user_ids()
+
+            for message in messages:
+                # 排除自身账号的消息
                 if message.sender_id and message.sender_id in self._self_user_ids:
                     skipped_count += 1
                     continue
