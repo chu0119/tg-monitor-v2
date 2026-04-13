@@ -349,34 +349,54 @@ async def import_keywords(
                 existing = await db.execute(
                     select(KeywordGroup).where(KeywordGroup.name == kg_data["name"])
                 )
-                if existing.scalar_one_or_none():
-                    skipped += 1
-                    continue
+                existing_group = existing.scalar_one_or_none()
 
-                # 创建关键词组
-                new_group = KeywordGroup(
-                    name=kg_data["name"],
-                    description=kg_data.get("description"),
-                    match_type=kg_data.get("match_type", "contains"),
-                    case_sensitive=kg_data.get("case_sensitive", False),
-                    alert_level=kg_data.get("alert_level", "medium"),
-                    is_active=kg_data.get("is_active", True),
-                )
-                db.add(new_group)
-                await db.flush()
-
-                # 创建关键词
-                for word in kg_data.get("keywords", []):
-                    keyword = Keyword(
-                        group_id=new_group.id,
-                        word=word,
+                if existing_group:
+                    # 合并：向已有组添加新关键词
+                    target_group_id = existing_group.id
+                    merged = True
+                else:
+                    # 创建新关键词组
+                    new_group = KeywordGroup(
+                        name=kg_data["name"],
+                        description=kg_data.get("description"),
                         match_type=kg_data.get("match_type", "contains"),
                         case_sensitive=kg_data.get("case_sensitive", False),
                         alert_level=kg_data.get("alert_level", "medium"),
+                        is_active=kg_data.get("is_active", True),
                     )
-                    db.add(keyword)
+                    db.add(new_group)
+                    await db.flush()
+                    target_group_id = new_group.id
+                    merged = False
 
-                imported += 1
+                # 添加关键词（跳过已存在的）
+                added_count = 0
+                for word in kg_data.get("keywords", []):
+                    word = word.strip()
+                    if not word:
+                        continue
+                    dup = await db.execute(
+                        select(Keyword).where(
+                            Keyword.group_id == target_group_id,
+                            Keyword.word == word
+                        )
+                    )
+                    if not dup.scalar_one_or_none():
+                        keyword = Keyword(
+                            group_id=target_group_id,
+                            word=word,
+                            match_type=kg_data.get("match_type", "contains"),
+                            case_sensitive=kg_data.get("case_sensitive", False),
+                            alert_level=kg_data.get("alert_level", "medium"),
+                        )
+                        db.add(keyword)
+                        added_count += 1
+
+                if merged:
+                    skipped += 1  # 组已存在（但关键词已合并）
+                else:
+                    imported += 1
 
             except Exception as e:
                 errors.append(f"{kg_data.get('name', 'Unknown')}: {str(e)}")

@@ -11,6 +11,7 @@ import {
   Edit,
   Trash2,
   Upload,
+  Download,
   Search,
   FolderOpen,
   Tag,
@@ -44,6 +45,7 @@ export function KeywordsPage() {
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [showKeywordModal, setShowKeywordModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showFileImportModal, setShowFileImportModal] = useState(false);
   const [editingKeyword, setEditingKeyword] = useState<Keyword | null>(null);
   const [editingGroup, setEditingGroup] = useState<KeywordGroup | null>(null);
 
@@ -194,6 +196,22 @@ export function KeywordsPage() {
     }
   };
 
+  const handleExportAll = async () => {
+    try {
+      const data = await api.settings.exportKeywords();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `keywords_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Failed to export:", error);
+      alert("导出失败");
+    }
+  };
+
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* 标题 */}
@@ -215,6 +233,16 @@ export function KeywordsPage() {
             <CardTitle className="text-lg flex items-center gap-2">
               <FolderOpen size={20} />
               关键词组
+              <span className="ml-auto flex gap-1">
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowFileImportModal(true)}>
+                  <Upload size={14} className="mr-1" />
+                  导入
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={handleExportAll}>
+                  <Download size={14} className="mr-1" />
+                  导出
+                </Button>
+              </span>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -429,6 +457,14 @@ export function KeywordsPage() {
       {showImportModal && (
         <BatchImportModal onClose={() => setShowImportModal(false)} onSubmit={handleBatchImport} />
       )}
+
+      {/* 文件导入导出弹窗 */}
+      {showFileImportModal && (
+        <FileImportModal
+          onClose={() => setShowFileImportModal(false)}
+          onImported={() => { fetchGroups(); if (selectedGroup) fetchKeywords(selectedGroup.id); }}
+        />
+      )}
     </div>
   );
 }
@@ -589,6 +625,94 @@ function BatchImportModal({ onClose, onSubmit }: { onClose: () => void; onSubmit
         <div className="flex gap-3 pt-4">
           <Button variant="tech" className="flex-1" onClick={handleSubmit}>
             导入 {keywords.split("\n").filter(k => k.trim()).length} 个关键词
+          </Button>
+          <Button variant="ghost" className="flex-1" onClick={onClose}>
+            取消
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface FileImportModalProps {
+  onClose: () => void;
+  onImported: () => void;
+}
+
+function FileImportModal({ onClose, onImported }: FileImportModalProps) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<{ groups: number; keywords: number; data: any } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    setError("");
+    setPreview(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const json = JSON.parse(ev.target?.result as string);
+        const data = json.data || json;
+        if (!Array.isArray(data)) throw new Error("格式错误");
+        const totalKeywords = data.reduce((sum: number, g: any) => sum + (g.keywords?.length || 0), 0);
+        setPreview({ groups: data.length, keywords: totalKeywords, data });
+      } catch {
+        setError("无法解析JSON文件");
+      }
+    };
+    reader.readAsText(f);
+  };
+
+  const handleImport = async () => {
+    if (!preview) return;
+    setLoading(true);
+    try {
+      const result = await api.settings.importKeywords({ data: preview.data });
+      alert(`导入完成！新增 ${result.imported} 个关键词组，${result.skipped} 个已合并。`);
+      onImported();
+      onClose();
+    } catch (err: any) {
+      alert("导入失败：" + (err.message || "未知错误"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={true} onClose={onClose} title="导入关键词配置">
+      <div className="space-y-4">
+        <div>
+          <label className="text-sm text-muted-foreground">选择JSON文件</label>
+          <input
+            type="file"
+            accept=".json"
+            onChange={handleFileChange}
+            className="block w-full mt-1 text-sm"
+          />
+        </div>
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        {preview && (
+          <div className="p-3 rounded-lg bg-secondary/30 text-sm space-y-1">
+            <p>📋 预览：</p>
+            <p>• {preview.groups} 个关键词组</p>
+            <p>• {preview.keywords} 个关键词</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              已有同名组将合并关键词，新组将创建
+            </p>
+          </div>
+        )}
+        <div className="flex gap-3 pt-4">
+          <Button
+            variant="tech"
+            className="flex-1"
+            disabled={!preview || loading}
+            onClick={handleImport}
+          >
+            {loading ? "导入中..." : "确认导入"}
           </Button>
           <Button variant="ghost" className="flex-1" onClick={onClose}>
             取消

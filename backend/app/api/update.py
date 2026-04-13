@@ -52,7 +52,7 @@ class CheckUpdateResponse(BaseModel):
 def _get_git_output(args: list[str]) -> str:
     """执行 git 命令并返回输出"""
     result = subprocess.run(
-        ["git"] + args,
+        ["/usr/bin/git"] + args,
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
@@ -162,7 +162,7 @@ async def perform_update():
             # 1. 检查本地修改
             _log("检查本地修改...")
             status_out = subprocess.run(
-                ["git", "status", "--porcelain"],
+                ["/usr/bin/git", "status", "--porcelain"],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
                 text=True,
@@ -171,12 +171,12 @@ async def perform_update():
             if status_out.stdout.strip():
                 # 检查是否有未暂存的修改（排除新文件）
                 has_staged = subprocess.run(
-                    ["git", "diff", "--cached", "--quiet"],
+                    ["/usr/bin/git", "diff", "--cached", "--quiet"],
                     cwd=PROJECT_ROOT,
                     capture_output=True,
                 ).returncode != 0
                 has_unstaged = subprocess.run(
-                    ["git", "diff", "--quiet"],
+                    ["/usr/bin/git", "diff", "--quiet"],
                     cwd=PROJECT_ROOT,
                     capture_output=True,
                 ).returncode != 0
@@ -184,7 +184,7 @@ async def perform_update():
                 if has_staged or has_unstaged:
                     _log("发现本地修改，暂存到 stash...")
                     subprocess.run(
-                        ["git", "stash", "push", "-m", "auto-update-stash"],
+                        ["/usr/bin/git", "stash", "push", "-m", "auto-update-stash"],
                         cwd=PROJECT_ROOT,
                         capture_output=True,
                         text=True,
@@ -234,7 +234,7 @@ async def perform_update():
             # 3. 拉取代码
             _log("拉取最新代码...")
             pull_result = subprocess.run(
-                ["git", "pull", "origin", "main"],
+                ["/usr/bin/git", "pull", "origin", "main"],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
                 text=True,
@@ -244,7 +244,7 @@ async def perform_update():
                 _log(f"git pull 失败: {pull_result.stderr.strip()}")
                 # 回滚
                 _log("回滚到更新前版本...")
-                subprocess.run(["git", "reset", "--hard", old_commit], cwd=PROJECT_ROOT, capture_output=True, timeout=30)
+                subprocess.run(["/usr/bin/git", "reset", "--hard", old_commit], cwd=PROJECT_ROOT, capture_output=True, timeout=30)
                 raise HTTPException(status_code=500, detail=f"git pull 失败: {pull_result.stderr.strip()}")
             _log(pull_result.stdout.strip() or "代码已是最新")
 

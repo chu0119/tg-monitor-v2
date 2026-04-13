@@ -6,14 +6,10 @@ import { Input } from "@/components/ui/Input";
 import {
   Database,
   Bell,
-  Shield,
-  Server,
   Save,
   CheckCircle,
   RotateCcw,
   HardDrive,
-  TestTube,
-  Info,
   Download,
   Upload,
   FileJson,
@@ -23,6 +19,10 @@ import {
   Rocket,
   Loader2,
   GitBranch,
+  Eye,
+  EyeOff,
+  Info,
+  ExternalLink,
 } from "lucide-react";
 
 interface DatabaseStatus {
@@ -50,14 +50,6 @@ interface DatabaseStats {
   total_keywords: number;
 }
 
-interface MySQLConfig {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  database: string;
-}
-
 interface BackupInfoItem {
   name: string;
   created_at?: string;
@@ -67,39 +59,26 @@ interface BackupInfoItem {
 }
 
 interface SystemSettings {
-  // 数据采集设置
-  default_history_days: number;
-  default_message_limit: number;
-  batch_size: number;
   enable_realtime_monitoring: boolean;
-
-  // 通知设置
   enable_browser_notifications: boolean;
   enable_sound_alerts: boolean;
   minimum_alert_level: string;
-
-  // 代理设置
-  http_proxy: string | null;
-  socks5_proxy: string | null;
-
-  // 安全设置
-  data_retention_days: number;
-  auto_cleanup_expired_data: boolean;
 }
 
 const DEFAULT_SETTINGS: SystemSettings = {
-  default_history_days: 7,
-  default_message_limit: 1000,
-  batch_size: 100,
   enable_realtime_monitoring: true,
   enable_browser_notifications: true,
   enable_sound_alerts: true,
   minimum_alert_level: "low",
-  http_proxy: null,
-  socks5_proxy: null,
-  data_retention_days: 90,
-  auto_cleanup_expired_data: false,
 };
+
+interface DbConfigInfo {
+  host: string;
+  port: number;
+  user: string;
+  database: string;
+  password: string;
+}
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SETTINGS);
@@ -133,7 +112,6 @@ export function SettingsPage() {
       });
       const data = await res.json();
       setCleanupMessage(data.message || "清理完成");
-      // 刷新统计
       handleCleanupStats();
     } catch {
       setCleanupMessage("清理失败");
@@ -141,33 +119,24 @@ export function SettingsPage() {
       setCleanupLoading(false);
     }
   };
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // 数据库相关状态
   const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
   const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
-  const [mysqlConfig, setMysqlConfig] = useState<MySQLConfig>({
-    host: "localhost",
-    port: 3306,
-    user: "",
-    password: "",
-    database: "tg_monitor",
-  });
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [configuring, setConfiguring] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [dbConfig, setDbConfig] = useState<DbConfigInfo | null>(null);
+  const [showDbPassword, setShowDbPassword] = useState(false);
 
-  // 导入导出相关状态
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [backups, setBackups] = useState<BackupInfoItem[]>([]);
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupName, setBackupName] = useState("");
+  const [mergeResult, setMergeResult] = useState<any>(null);
 
-  // 更新相关状态
   const [updateInfo, setUpdateInfo] = useState<{ current_version: string; current_commit: string; branch: string }>({ current_version: "-", current_commit: "-", branch: "-" });
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateResult, setUpdateResult] = useState<any>(null);
@@ -179,6 +148,7 @@ export function SettingsPage() {
   useEffect(() => {
     fetchSettings();
     fetchDatabaseInfo();
+    fetchDbConfig();
     fetchBackups();
     fetchUpdateInfo();
     return () => { if (progressTimer) clearInterval(progressTimer); };
@@ -188,7 +158,13 @@ export function SettingsPage() {
     setLoading(true);
     try {
       const data = await api.settings.get();
-      setSettings(data);
+      setSettings((prev) => ({
+        ...prev,
+        enable_realtime_monitoring: data.enable_realtime_monitoring ?? prev.enable_realtime_monitoring,
+        enable_browser_notifications: data.enable_browser_notifications ?? prev.enable_browser_notifications,
+        enable_sound_alerts: data.enable_sound_alerts ?? prev.enable_sound_alerts,
+        minimum_alert_level: data.minimum_alert_level ?? prev.minimum_alert_level,
+      }));
     } catch (error) {
       console.error("Failed to fetch settings:", error);
     } finally {
@@ -204,19 +180,17 @@ export function SettingsPage() {
       ]);
       setDbStatus(status);
       setDbStats(stats);
-      // 更新配置表单为当前配置
-      if (status.host) {
-        setMysqlConfig({
-          host: status.host,
-          port: status.port || 3306,
-          user: "",
-          password: "",
-          database: status.database || "tg_monitor",
-        });
-      }
     } catch (error) {
       console.error("Failed to fetch database info:", error);
     }
+  };
+
+  const fetchDbConfig = async () => {
+    try {
+      const res = await fetch("/api/v1/system/db-config");
+      const data = await res.json();
+      if (data.success) setDbConfig(data);
+    } catch { /* ignore */ }
   };
 
   const fetchBackups = async () => {
@@ -259,7 +233,6 @@ export function SettingsPage() {
     setUpdateDone(null);
     setUpdateProgress({ progress: "开始更新...", log: [] });
 
-    // 启动进度轮询
     const timer = setInterval(async () => {
       try {
         const p = await api.system.getUpdateProgress();
@@ -269,7 +242,7 @@ export function SettingsPage() {
     setProgressTimer(timer);
 
     try {
-      const data = await api.system.performUpdate();
+      await api.system.performUpdate();
       setUpdateDone({ success: true });
     } catch (error: any) {
       setUpdateDone({ success: false, error: error.message || "未知错误" });
@@ -277,7 +250,6 @@ export function SettingsPage() {
       clearInterval(timer);
       setProgressTimer(null);
       setUpdating(false);
-      // 最终获取一次进度
       try {
         const p = await api.system.getUpdateProgress();
         setUpdateProgress(p);
@@ -312,6 +284,24 @@ export function SettingsPage() {
     }
   };
 
+  const handleDownloadBackup = async (name: string) => {
+    try {
+      const res = await fetch(`/api/v1/backups/download/${encodeURIComponent(name)}`);
+      if (!res.ok) throw new Error("下载失败");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      alert(error.message || "下载失败");
+    }
+  };
+
   const handleDeleteBackup = async (name: string) => {
     if (!confirm(`确定删除备份 ${name}？`)) return;
     setBackupLoading(true);
@@ -320,6 +310,30 @@ export function SettingsPage() {
       await fetchBackups();
     } catch (error: any) {
       alert(error.message || "删除备份失败");
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleUploadMergeBackup = async (file: File) => {
+    if (!confirm(`上传备份文件 "${file.name}" 将与现有数据合并（不会覆盖），确定继续吗？`)) return;
+    setBackupLoading(true);
+    setMergeResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/v1/backups/upload-merge", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMergeResult(data);
+      } else {
+        alert("合并失败: " + (data.detail || "未知错误"));
+      }
+    } catch (error: any) {
+      alert("上传合并失败: " + (error.message || "未知错误"));
     } finally {
       setBackupLoading(false);
     }
@@ -345,7 +359,12 @@ export function SettingsPage() {
     if (!confirm("确定要重置所有设置为默认值吗？")) return;
     try {
       const data = await api.settings.reset();
-      setSettings(data);
+      setSettings({
+        enable_realtime_monitoring: data.enable_realtime_monitoring ?? true,
+        enable_browser_notifications: data.enable_browser_notifications ?? true,
+        enable_sound_alerts: data.enable_sound_alerts ?? true,
+        minimum_alert_level: data.minimum_alert_level ?? "low",
+      });
       setHasChanges(true);
     } catch (error) {
       console.error("Failed to reset settings:", error);
@@ -353,7 +372,6 @@ export function SettingsPage() {
     }
   };
 
-  // 导出所有配置
   const handleExportAll = async () => {
     setExporting(true);
     try {
@@ -362,12 +380,12 @@ export function SettingsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `tg-monitor-backup-${new Date().toISOString().split("T")[0]}.json`;
+      a.download = `tg-monitor-config-${new Date().toISOString().split("T")[0]}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      alert("导出成功！");
+      alert("配置导出成功！");
     } catch (error) {
       console.error("Export failed:", error);
       alert("导出失败");
@@ -376,65 +394,25 @@ export function SettingsPage() {
     }
   };
 
-  // 导出关键词
-  const handleExportKeywords = async () => {
-    setExporting(true);
-    try {
-      const data = await api.settings.exportKeywords();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `keywords-backup-${new Date().toISOString().split("T")[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      alert("关键词导出成功！");
-    } catch (error) {
-      console.error("Export keywords failed:", error);
-      alert("导出失败");
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  // 导入配置
   const handleImport = async (file: File) => {
-    if (!confirm("导入配置将覆盖现有设置，确定要继续吗？")) return;
-
+    if (!confirm("导入配置将覆盖现有系统设置，确定要继续吗？")) return;
     setImporting(true);
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-
-      if (data.keyword_groups && !data.data) {
-        // 是完整备份格式
-        const result = await api.settings.importAll(data);
-        let message = "导入完成！\n\n";
-        message += `系统设置: ${result.details.system_settings.success ? "✓" : "✗"}\n`;
-        message += `关键词组: 导入 ${result.details.keyword_groups.imported} 个，跳过 ${result.details.keyword_groups.skipped} 个\n`;
-        if (result.details.keyword_groups.errors.length > 0) {
-          message += `错误: ${result.details.keyword_groups.errors.join(", ")}\n`;
-        }
-        message += `通知配置: 导入 ${result.details.notification_configs.imported} 个，跳过 ${result.details.notification_configs.skipped} 个`;
-        alert(message);
-      } else if (data.data) {
-        // 是关键词格式
-        const result = await api.settings.importKeywords(data);
-        let message = `导入完成！\n\n`;
-        message += `导入: ${result.imported} 个\n`;
-        message += `跳过: ${result.skipped} 个`;
-        if (result.errors.length > 0) {
-          message += `\n错误: ${result.errors.join(", ")}`;
-        }
-        alert(message);
+      const result = await api.settings.importAll(data);
+      let message = "导入完成！\n\n";
+      if (result.details) {
+        message += `系统设置: ${result.details.system_settings?.success ? "✓" : "✗"}\n`;
+        const kg = result.details.keyword_groups;
+        if (kg) message += `关键词组: 导入 ${kg.imported} 个，跳过 ${kg.skipped} 个\n`;
+        const nc = result.details.notification_configs;
+        if (nc) message += `通知配置: 导入 ${nc.imported} 个，跳过 ${nc.skipped} 个`;
       } else {
-        alert("无效的导入文件格式");
+        message += "导入成功";
       }
-
+      alert(message);
       fetchSettings();
-      fetchDatabaseInfo();
     } catch (error) {
       console.error("Import failed:", error);
       alert("导入失败：" + (error instanceof Error ? error.message : "未知错误"));
@@ -448,7 +426,6 @@ export function SettingsPage() {
     setHasChanges(true);
   };
 
-  // Toggle switch component
   const ToggleSwitch = ({
     enabled,
     onChange,
@@ -515,7 +492,7 @@ export function SettingsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 数据采集设置 */}
+          {/* 数据采集设置 - 简化 */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -523,65 +500,11 @@ export function SettingsPage() {
                 数据采集
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="text-sm text-muted-foreground">默认历史回溯天数</label>
-                <Input
-                  type="number"
-                  value={settings.default_history_days}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val >= 1 && val <= 365) {
-                      updateSetting("default_history_days", val);
-                    }
-                  }}
-                  min={1}
-                  max={365}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  批量同步时默认回溯的天数
-                </p>
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground">默认历史消息限制</label>
-                <Input
-                  type="number"
-                  value={settings.default_message_limit}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val >= 1 && val <= 100000) {
-                      updateSetting("default_message_limit", val);
-                    }
-                  }}
-                  min={1}
-                  max={100000}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  每个对话最多拉取的历史消息数
-                </p>
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground">批量处理大小</label>
-                <Input
-                  type="number"
-                  value={settings.batch_size}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val >= 1 && val <= 1000) {
-                      updateSetting("batch_size", val);
-                    }
-                  }}
-                  min={1}
-                  max={1000}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  批量操作时每批处理的数量
-                </p>
-              </div>
+            <CardContent>
               <div className="flex items-center justify-between py-2">
                 <div>
-                  <p>启用实时监控</p>
-                  <p className="text-xs text-muted-foreground">自动监听新消息</p>
+                  <p>启用数据采集</p>
+                  <p className="text-xs text-muted-foreground">开启后将自动监听和采集 Telegram 消息</p>
                 </div>
                 <ToggleSwitch
                   enabled={settings.enable_realtime_monitoring}
@@ -591,7 +514,7 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* 通知设置 */}
+          {/* 通知设置 - 保持原样 */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -639,78 +562,7 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* 代理设置 */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Server size={20} />
-                代理配置
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="text-sm text-muted-foreground">HTTP 代理</label>
-                <Input
-                  placeholder="http://127.0.0.1:7890"
-                  value={settings.http_proxy || ""}
-                  onChange={(e) => updateSetting("http_proxy", e.target.value || null)}
-                />
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground">SOCKS5 代理</label>
-                <Input
-                  placeholder="socks5://127.0.0.1:7891"
-                  value={settings.socks5_proxy || ""}
-                  onChange={(e) => updateSetting("socks5_proxy", e.target.value || null)}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                代理设置将用于所有 Telegram 账号连接。修改后需要重新连接账号才能生效。
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* 安全设置 */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Shield size={20} />
-                安全设置
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="text-sm text-muted-foreground">数据保留天数</label>
-                <Input
-                  type="number"
-                  value={settings.data_retention_days}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val >= 1 && val <= 365) {
-                      updateSetting("data_retention_days", val);
-                    }
-                  }}
-                  min={1}
-                  max={365}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  超过此天数的数据将被自动清理
-                </p>
-              </div>
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <p>自动清理过期数据</p>
-                  <p className="text-xs text-muted-foreground">定期清理历史数据</p>
-                </div>
-                <ToggleSwitch
-                  enabled={settings.auto_cleanup_expired_data}
-                  onChange={(value) => updateSetting("auto_cleanup_expired_data", value)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* 数据清理 */}
+          {/* 数据清理 - 保持原样 */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -769,46 +621,30 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* 导入导出设置 */}
+          {/* 数据导入导出 - 简化 */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <FileJson size={20} />
-                数据导入导出
+                配置导入导出
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <p className="text-sm font-semibold mb-3">导出配置</p>
-                <div className="space-y-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-start"
-                    onClick={handleExportAll}
-                    disabled={exporting || importing}
-                  >
-                    <Download size={16} className="mr-2" />
-                    {exporting ? "导出中..." : "导出全部配置"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-start"
-                    onClick={handleExportKeywords}
-                    disabled={exporting || importing}
-                  >
-                    <Download size={16} className="mr-2" />
-                    {exporting ? "导出中..." : "仅导出关键词"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  导出配置可备份系统设置、关键词组和通知配置
-                </p>
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start"
+                onClick={handleExportAll}
+                disabled={exporting || importing}
+              >
+                <Download size={16} className="mr-2" />
+                {exporting ? "导出中..." : "导出所有配置"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                将系统设置、关键词组、通知配置等导出为 JSON 文件
+              </p>
 
               <div className="border-t border-cyber-blue/10 pt-4">
-                <p className="text-sm font-semibold mb-3">导入配置</p>
                 <label className="block">
                   <input
                     type="file"
@@ -835,28 +671,18 @@ export function SettingsPage() {
                   </Button>
                 </label>
                 <p className="text-xs text-muted-foreground mt-2">
-                  支持导入之前导出的配置文件（JSON 格式）
+                  上传 JSON 配置文件，合并覆盖现有设置
                 </p>
-              </div>
-
-              <div className="p-3 rounded bg-cyber-blue/10 border border-cyber-blue/20 text-xs">
-                <p className="text-cyber-blue font-semibold mb-1">说明：</p>
-                <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                  <li>导出全部配置包含：系统设置、关键词组、通知配置结构</li>
-                  <li>导出关键词仅包含关键词组和关键词数据</li>
-                  <li>导入时会跳过已存在的同名配置</li>
-                  <li>通知配置不包含敏感信息，需重新配置</li>
-                </ul>
               </div>
             </CardContent>
           </Card>
 
-          {/* 数据库备份与恢复 */}
-          <Card>
+          {/* 数据备份与恢复 - 增强 */}
+          <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <HardDrive size={20} />
-                数据库备份与恢复
+                数据备份与恢复
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -865,17 +691,48 @@ export function SettingsPage() {
                   placeholder="备份名称（可选）"
                   value={backupName}
                   onChange={(e) => setBackupName(e.target.value)}
+                  className="flex-1"
                 />
                 <Button variant="tech" onClick={handleCreateBackup} disabled={backupLoading}>
                   创建备份
                 </Button>
                 <Button variant="outline" onClick={fetchBackups} disabled={backupLoading}>
+                  <RefreshCw size={16} className="mr-1" />
                   刷新
                 </Button>
+                <label>
+                  <input
+                    type="file"
+                    accept=".sql,.sql.gz,.bak"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        handleUploadMergeBackup(file);
+                        e.target.value = "";
+                      }
+                    }}
+                    disabled={backupLoading}
+                  />
+                  <Button variant="outline" onClick={() => (document.querySelectorAll('input[type="file"]')[1] as HTMLInputElement)?.click()} disabled={backupLoading}>
+                    <Upload size={16} className="mr-1" />
+                    上传合并
+                  </Button>
+                </label>
               </div>
 
+              {mergeResult && (
+                <div className="bg-cyber-green/10 border border-cyber-green/30 rounded-lg p-3 text-sm">
+                  <p className="font-semibold text-cyber-green mb-1">✓ 合并完成</p>
+                  <p>新增: {mergeResult.stats?.inserted || 0} 条</p>
+                  <p>更新: {mergeResult.stats?.updated || 0} 条</p>
+                  <p>跳过: {mergeResult.stats?.skipped || 0} 条</p>
+                  {mergeResult.message && <p className="text-xs text-muted-foreground mt-1">{mergeResult.message}</p>}
+                </div>
+              )}
+
               <div className="space-y-2 max-h-64 overflow-auto">
-                {backupLoading ? (
+                {backupLoading && !backups.length ? (
                   <p className="text-sm text-muted-foreground">备份列表加载中...</p>
                 ) : backups.length === 0 ? (
                   <p className="text-sm text-muted-foreground">暂无备份</p>
@@ -886,15 +743,18 @@ export function SettingsPage() {
                         <div>
                           <p className="font-semibold">{b.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            时间: {b.created_at || "未知"} · 大小: {b.size_mb} MB · 会话文件: {b.session_count}
+                            时间: {b.created_at || "未知"} · 大小: {b.size_mb} MB
                           </p>
                         </div>
                         <div className="flex gap-2">
                           <Button size="sm" variant="outline" onClick={() => handleRestoreBackup(b.name)}>
                             恢复
                           </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleDownloadBackup(b.name)}>
+                            <Download size={14} />
+                          </Button>
                           <Button size="sm" variant="outline" onClick={() => handleDeleteBackup(b.name)}>
-                            删除
+                            <Trash2 size={14} />
                           </Button>
                         </div>
                       </div>
@@ -905,7 +765,7 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* 系统更新 */}
+          {/* 系统更新 - 修复 */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -955,11 +815,11 @@ export function SettingsPage() {
                 </p>
               )}
 
-              {updateResult?.has_update && updateResult.changelog.length > 0 && (
+              {updateResult?.has_update && updateResult.changelog?.length > 0 && (
                 <div className="bg-cyber-blue/5 border border-cyber-blue/20 rounded-lg p-3">
                   <p className="text-sm font-semibold mb-2">更新日志（{updateResult.commits_behind} 个提交）</p>
                   <div className="space-y-1 max-h-40 overflow-auto text-xs text-muted-foreground">
-                    {updateResult.changelog.map((c, i) => (
+                    {updateResult.changelog.map((c: string, i: number) => (
                       <p key={i} className="font-mono">{c}</p>
                     ))}
                   </div>
@@ -971,7 +831,7 @@ export function SettingsPage() {
                   <p className="text-sm font-semibold">更新进度</p>
                   <p className="text-xs text-muted-foreground">{updateProgress.progress}</p>
                   <div className="max-h-32 overflow-auto text-xs text-muted-foreground space-y-0.5">
-                    {updateProgress.log.map((l, i) => (
+                    {updateProgress.log.map((l: string, i: number) => (
                       <p key={i} className="font-mono">• {l}</p>
                     ))}
                   </div>
@@ -986,235 +846,105 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* 数据库配置 */}
-          <Card className="lg:col-span-2">
+          {/* 数据库配置 - 新增 */}
+          <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
-                <HardDrive size={20} />
-                数据库配置 (MySQL)
+                <Database size={20} />
+                数据库配置
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {/* 当前数据库状态 */}
-              <div className="p-4 rounded-lg bg-secondary/30">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">连接状态</p>
-                    <div className="flex items-center gap-2">
-                      <p className={`text-2xl font-bold ${dbStatus?.connected ? "text-cyber-green" : "text-cyber-pink"}`}>
-                        {dbStatus?.connected ? "已连接" : "未连接"}
-                      </p>
-                      {dbStatus?.connection_info?.version && (
-                        <span className="text-xs text-muted-foreground">MySQL {dbStatus.connection_info.version}</span>
-                      )}
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={fetchDatabaseInfo}
-                  >
-                    <RotateCcw size={14} className="mr-1" />
-                    刷新
-                  </Button>
-                </div>
-
-                {dbStatus?.configured && (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm mb-4">
+            <CardContent className="space-y-4">
+              {dbConfig ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-muted-foreground">主机</p>
-                      <p className="font-semibold">{dbStatus.host}:{dbStatus.port}</p>
+                      <p className="font-semibold font-mono">{dbConfig.host}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">端口</p>
+                      <p className="font-semibold font-mono">{dbConfig.port}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">用户名</p>
+                      <p className="font-semibold font-mono">{dbConfig.user}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">数据库</p>
-                      <p className="font-semibold">{dbStatus.database}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">表数量</p>
-                      <p className="font-semibold">{dbStatus.connection_info?.table_count || 0}</p>
+                      <p className="font-semibold font-mono">{dbConfig.database}</p>
                     </div>
                   </div>
-                )}
+                  <div className="text-sm">
+                    <p className="text-muted-foreground">密码</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold font-mono">
+                        {showDbPassword ? dbConfig.password : "••••••••"}
+                      </p>
+                      <button
+                        onClick={() => setShowDbPassword(!showDbPassword)}
+                        className="text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {showDbPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">加载中...</p>
+              )}
 
-                {dbStats && (
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm pt-4 border-t border-border">
-                    <div>
-                      <p className="text-muted-foreground">账号数</p>
-                      <p className="font-semibold">{dbStats.tables?.telegram_accounts || 0}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">会话数</p>
-                      <p className="font-semibold">{dbStats.total_conversations || 0}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">消息数</p>
-                      <p className="font-semibold">{dbStats.total_messages || 0}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">发送者</p>
-                      <p className="font-semibold">{dbStats.total_senders || 0}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">告警数</p>
-                      <p className="font-semibold">{dbStats.total_alerts || 0}</p>
-                    </div>
-                  </div>
-                )}
-
-                {!dbStatus?.configured && (
-                  <div className="text-center py-4">
-                    <p className="text-cyber-pink">数据库未配置</p>
-                    <p className="text-sm text-muted-foreground mt-1">请在下方配置 MySQL 连接信息</p>
-                  </div>
-                )}
+              <div className="p-3 rounded bg-cyber-blue/10 border border-cyber-blue/20 text-xs text-muted-foreground">
+                <p className="flex items-center gap-1 text-cyber-blue font-semibold mb-1">
+                  <Info size={14} />
+                  说明
+                </p>
+                <p>数据库配置在 .env 文件中修改，修改后重启服务生效。</p>
               </div>
 
-              {/* MySQL 配置表单 */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <Server size={18} />
-                  <h3 className="font-semibold">MySQL 连接配置</h3>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm text-muted-foreground">主机地址</label>
-                    <Input
-                      placeholder="localhost"
-                      value={mysqlConfig.host}
-                      onChange={(e) => setMysqlConfig({ ...mysqlConfig, host: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-muted-foreground">端口</label>
-                    <Input
-                      type="number"
-                      value={mysqlConfig.port}
-                      onChange={(e) => setMysqlConfig({ ...mysqlConfig, port: parseInt(e.target.value) || 3306 })}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-muted-foreground">用户名</label>
-                    <Input
-                      placeholder="tgmonitor"
-                      value={mysqlConfig.user}
-                      onChange={(e) => setMysqlConfig({ ...mysqlConfig, user: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm text-muted-foreground">数据库名</label>
-                    <Input
-                      placeholder="tg_monitor"
-                      value={mysqlConfig.database}
-                      onChange={(e) => setMysqlConfig({ ...mysqlConfig, database: e.target.value })}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="text-sm text-muted-foreground">密码</label>
-                    <Input
-                      type="password"
-                      placeholder="MySQL 密码"
-                      value={mysqlConfig.password}
-                      onChange={(e) => setMysqlConfig({ ...mysqlConfig, password: e.target.value })}
-                    />
+              <div className="flex gap-2">
+                <div className="flex-1 flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-block w-2 h-2 rounded-full ${dbStatus?.connected ? "bg-cyber-green" : "bg-cyber-pink"}`} />
+                    <span>{dbStatus?.connected ? "已连接" : "未连接"}</span>
+                    {dbStatus?.connection_info?.version && (
+                      <span className="text-muted-foreground">MySQL {dbStatus.connection_info.version}</span>
+                    )}
                   </div>
                 </div>
-
-                {/* 操作按钮 */}
-                <div className="flex items-center gap-3 pt-2 flex-wrap">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={testingConnection || !mysqlConfig.host || !mysqlConfig.user}
-                    onClick={async () => {
-                      setTestingConnection(true);
-                      setTestResult(null);
-                      try {
-                        const result = await api.database.testConnection(mysqlConfig);
-                        setTestResult(result.success ? "连接测试成功！" : result.message);
-                      } catch (error: any) {
-                        setTestResult("连接测试失败: " + error.message);
-                      } finally {
-                        setTestingConnection(false);
-                      }
-                    }}
-                  >
-                    <TestTube size={14} className="mr-1" />
-                    {testingConnection ? "测试中..." : "测试连接"}
-                  </Button>
-
-                  <Button
-                    variant="tech"
-                    size="sm"
-                    disabled={configuring || !mysqlConfig.host || !mysqlConfig.user || !mysqlConfig.password}
-                    onClick={async () => {
-                      setConfiguring(true);
-                      setTestResult(null);
-                      try {
-                        const result = await api.database.configure({
-                          ...mysqlConfig,
-                          save_config: true,
-                        });
-                        if (result.success) {
-                          setTestResult("配置已保存，请重启服务以应用新配置。");
-                          await fetchDatabaseInfo();
-                        } else {
-                          setTestResult("配置失败: " + result.message);
-                        }
-                      } catch (error: any) {
-                        setTestResult("配置失败: " + error.message);
-                      } finally {
-                        setConfiguring(false);
-                      }
-                    }}
-                  >
-                    <Save size={14} className="mr-1" />
-                    {configuring ? "保存中..." : "保存配置"}
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      if (!confirm("确定要初始化数据库吗？这将创建所有必要的表结构。")) return;
-                      try {
-                        const result = await api.database.init();
-                        if (result.success) {
-                          setTestResult("数据库初始化成功！");
-                          await fetchDatabaseInfo();
-                        } else {
-                          setTestResult("初始化失败: " + result.message);
-                        }
-                      } catch (error: any) {
-                        setTestResult("初始化失败: " + error.message);
-                      }
-                    }}
-                  >
-                    <Database size={14} className="mr-1" />
-                    初始化数据库
-                  </Button>
-
-                  {testResult && (
-                    <div className={`text-sm ${testResult.includes("成功") ? "text-cyber-green" : "text-cyber-pink"}`}>
-                      <Info size={14} className="inline mr-1" />
-                      {testResult}
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-3 rounded bg-cyber-blue/10 border border-cyber-blue/20 text-sm">
-                  <p className="text-cyber-blue font-semibold mb-1">使用说明：</p>
-                  <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
-                    <li>填写 MySQL 连接信息（需要已创建数据库用户）</li>
-                    <li>点击"测试连接"验证配置是否正确</li>
-                    <li>点击"保存配置"将配置写入 .env 文件</li>
-                    <li>点击"初始化数据库"创建表结构（首次使用）</li>
-                    <li>保存配置后需重启服务才能生效</li>
-                  </ol>
-                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled
+                  title="即将推出"
+                >
+                  迁移数据
+                  <span className="ml-1 text-xs px-1 py-0.5 rounded bg-muted">即将推出</span>
+                </Button>
               </div>
             </CardContent>
           </Card>
+
+          {/* 版本信息 */}
+          <div className="lg:col-span-2 text-center text-sm text-muted-foreground py-4 space-y-1">
+            <p>
+              TG Monitor v{updateInfo.current_version} · 分支: {updateInfo.branch} ·{" "}
+              <span className="font-mono">{updateInfo.current_commit?.slice(0, 7)}</span>
+            </p>
+            <p>
+              <a
+                href="https://github.com/chu0119/tg-monitor-v2"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+              >
+                <ExternalLink size={12} />
+                GitHub
+              </a>
+              {" · "}
+              Python (FastAPI) + TypeScript (React) + MySQL
+            </p>
+          </div>
         </div>
       )}
     </div>

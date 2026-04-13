@@ -230,3 +230,17 @@ async def test_database_connection():
             "success": False,
             "error": str(e)
         }
+
+
+@router.get("/db-config")
+async def get_db_config():
+    """获取数据库配置信息（密码脱敏）"""
+    from app.core.config import settings as cfg
+    return {
+        "success": True,
+        "host": cfg.MYSQL_HOST or "localhost",
+        "port": cfg.MYSQL_PORT or 3306,
+        "user": cfg.MYSQL_USER or "",
+        "database": cfg.MYSQL_DATABASE or "tg_monitor",
+        "password": cfg.MYSQL_PASSWORD or "",
+    }
