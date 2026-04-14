@@ -415,12 +415,12 @@ async def check_internet_status():
                         sock = socket.create_connection((parsed.hostname, parsed.port), timeout=3)
                         sock.close()
                         return True
-                    except:
+                    except Exception:
                         return False
                 proxy_ok = await loop.run_in_executor(None, check_in_thread)
                 if proxy_ok:
                     return {"online": True, "checked_url": "proxy_reachable"}
-            except:
+            except Exception:
                 pass
     
     return {"online": False, "checked_url": None}
