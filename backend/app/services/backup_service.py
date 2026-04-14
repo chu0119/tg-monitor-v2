@@ -274,7 +274,7 @@ class BackupService:
             )
             stdout, stderr = await process.communicate(input=sql_content.encode())
 
-        if process2.returncode if use_gzip else process.returncode != 0:
+        if (process2.returncode if use_gzip else process.returncode) != 0:
             error_msg = stderr.decode() if stderr else "未知错误"
             raise Exception(f"数据库恢复失败: {error_msg}")
 

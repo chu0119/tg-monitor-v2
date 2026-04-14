@@ -52,7 +52,7 @@ class Conversation(Base):
     # 统计信息
     total_messages = Column(Integer, default=0)
     total_alerts = Column(Integer, default=0)
-    last_message_id = Column(Integer)
+    last_message_id = Column(BigInteger)
     last_message_at = Column(DateTime)
 
     # 元数据

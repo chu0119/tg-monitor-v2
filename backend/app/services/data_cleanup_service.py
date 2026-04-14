@@ -111,7 +111,9 @@ class DataCleanupService:
                 # 1. 删除已解决/忽略/误报超过30天的
                 for status in ['resolved', 'ignored', 'false_positive']:
                     status_deleted = 0
-                    while iteration < max_iterations:
+                    status_iteration = 0
+                    while status_iteration < max_iterations:
+                        status_iteration += 1
                         iteration += 1
                         batch_ids_query = select(Alert.id).where(
                             Alert.status == status,
@@ -135,7 +137,9 @@ class DataCleanupService:
 
                 # 2. 删除待处理超过90天的
                 pending_deleted = 0
-                while iteration < max_iterations:
+                pending_iteration = 0
+                while pending_iteration < max_iterations:
+                    pending_iteration += 1
                     iteration += 1
                     batch_ids_query = select(Alert.id).where(
                         Alert.status == 'pending',

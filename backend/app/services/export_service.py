@@ -207,7 +207,7 @@ class ExportService:
                     ws.cell(row=row_idx, column=col + 1, value=sender.first_name or "")
                     col += 2
 
-            if export_data.include_conversation:
+            if export_data.include_conversation and msg.conversation_id:
                 conv_result = await db.execute(
                     select(Conversation).where(Conversation.id == msg.conversation_id)
                 )

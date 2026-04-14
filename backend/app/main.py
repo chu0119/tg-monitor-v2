@@ -92,7 +92,7 @@ class ConnectionManager:
         for conn in disconnected:
             try:
                 await conn.close()
-            except:
+            except Exception:
                 pass
             self.disconnect(conn)
 
@@ -142,7 +142,7 @@ class ConnectionManager:
             for ws in stale_connections:
                 try:
                     await ws.close()
-                except:
+                except Exception:
                     pass
                 self.disconnect(ws)
 
@@ -516,9 +516,9 @@ async def websocket_endpoint(
     # 验证令牌（如果配置了的话）
     from app.core.config import settings
 
-    # 只有在配置了WS_TOKEN时才验证
-    if hasattr(settings, 'WS_TOKEN') and settings.WS_TOKEN and token:
-        if token != settings.WS_TOKEN:
+    # 只有在配置了WS_TOKEN时才验证，且配置后必须提供有效令牌
+    if hasattr(settings, 'WS_TOKEN') and settings.WS_TOKEN:
+        if not token or token != settings.WS_TOKEN:
             await websocket.close(code=1008, reason="Invalid token")
             logger.warning(f"WebSocket 连接被拒绝: 无效的令牌")
             return

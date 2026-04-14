@@ -13,6 +13,28 @@ function sanitizeHtml(html: string): string {
   div.textContent = html;
   return div.innerHTML;
 }
+
+/**
+ * 安全地处理高亮消息内容，只允许 <mark> 标签用于关键词高亮，
+ * 其他所有 HTML 标签和属性都会被转义，防止 XSS 攻击。
+ */
+function sanitizeHighlightedHtml(html: string): string {
+  // 先将 <mark> 和 </mark> 替换为占位符
+  const MARK_OPEN = "\u0000MARK_OPEN\u0000";
+  const MARK_CLOSE = "\u0000MARK_CLOSE\u0000";
+  let safe = html
+    .replace(/<mark>/gi, MARK_OPEN)
+    .replace(/<\/mark>/gi, MARK_CLOSE);
+  // 对剩余内容进行 HTML 转义
+  const div = document.createElement("div");
+  div.textContent = safe;
+  safe = div.innerHTML;
+  // 还原 <mark> 标签
+  safe = safe
+    .replaceAll(MARK_OPEN, "<mark>")
+    .replaceAll(MARK_CLOSE, "</mark>");
+  return safe;
+}
 import {
   AlertTriangle,
   CheckCircle,
@@ -717,7 +739,7 @@ function AlertRow({ alert, onClick, levelColor, levelLabel, isSelected, onToggle
               <p
                 className="text-xs sm:text-sm text-gray-300 line-clamp-2 sm:line-clamp-3"
                 dangerouslySetInnerHTML={{
-                  __html: alert.highlighted_message || sanitizeHtml(alert.message_preview)
+                  __html: alert.highlighted_message ? sanitizeHighlightedHtml(alert.highlighted_message) : sanitizeHtml(alert.message_preview)
                 }}
               />
               {/* 手机端显示时间和状态 */}
@@ -769,7 +791,7 @@ function AlertDetailModal({ alert, onClose, onHandle }: AlertDetailModalProps) {
           <div
             className="text-xs sm:text-sm bg-secondary/50 p-2 sm:p-3 rounded mt-1 whitespace-pre-wrap break-words max-h-48 sm:max-h-96 overflow-y-auto"
             dangerouslySetInnerHTML={{
-              __html: alert.highlighted_message || sanitizeHtml(alert.message_preview)
+              __html: alert.highlighted_message ? sanitizeHighlightedHtml(alert.highlighted_message) : sanitizeHtml(alert.message_preview)
             }}
           />
         </div>

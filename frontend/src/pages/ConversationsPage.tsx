@@ -217,16 +217,19 @@ export function ConversationsPage() {
       }
 
       // 使用批量创建API（自动跳过已存在的会话）
-      const conversationsToCreate = Array.from(selectedDialogs).map(chatId => {
-        const dialog = availableDialogs.find(d => d.chat_id === chatId);
-        return {
-          account_id: selectedAccountId,
-          chat_id: dialog!.chat_id,
-          chat_type: dialog!.type,
-          title: dialog!.title,
-          username: dialog!.username,
-        };
-      });
+      const conversationsToCreate = Array.from(selectedDialogs)
+        .map(chatId => {
+          const dialog = availableDialogs.find(d => d.chat_id === chatId);
+          if (!dialog) return null;
+          return {
+            account_id: selectedAccountId,
+            chat_id: dialog.chat_id,
+            chat_type: dialog.type,
+            title: dialog.title,
+            username: dialog.username,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null);
 
       const result = await api.conversations.batchCreate(conversationsToCreate);
 

@@ -87,7 +87,7 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     # 今日消息（本地时间今天 00:00 开始到现在）
     today_messages = await db.execute(
         select(func.count(Message.id))
-        .where(Message.created_at >= today_local_start_utc)
+        .where(Message.date >= today_local_start_utc)
     )
     today_messages = today_messages.scalar()
 

@@ -74,7 +74,12 @@ async function handleResponse(res: Response): Promise<any> {
     }
     throw new Error(errorMessage);
   }
-  return res.json();
+  // 安全地解析 JSON 响应，处理非 JSON 响应体（如空响应或 HTML 错误页面）
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 export const api = {

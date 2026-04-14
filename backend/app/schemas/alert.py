@@ -8,7 +8,7 @@ from app.utils.json_encoder import datetime_to_local_iso
 
 class AlertResponse(BaseModel):
     """告警响应"""
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')
 
     id: int
     message_id: int
@@ -38,8 +38,6 @@ class AlertResponse(BaseModel):
     def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
         """序列化datetime为ISO格式（使用本地时区 Asia/Shanghai）"""
         return datetime_to_local_iso(dt)
-
-    model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')
 
 
 class AlertFilter(BaseModel):
