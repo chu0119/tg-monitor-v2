@@ -117,22 +117,29 @@ export function SettingsPage() {
     }
   }, [migrationStatus]);
 
+  const exportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const handleExport = async () => {
     setExportLoading(true);
     try {
       const res = await fetch("/api/v1/migration/export", { method: "POST" });
       const data = await res.json();
-      if (data.error) { setImportResult(`❌ ${data.message}`); return; }
+      if (data.error) { setImportResult(`❌ ${data.message}`); setExportLoading(false); return; }
       // 轮询等待完成
-      const poll = setInterval(async () => {
-        const st = await (await fetch("/api/v1/migration/status")).json();
-        setMigrationStatus(st);
-        if (st.status === "idle") {
-          clearInterval(poll);
-          setExportLoading(false);
-          if (st.result?.file) {
-            window.location.href = "/api/v1/migration/export/download";
+      if (exportPollRef.current) clearInterval(exportPollRef.current);
+      exportPollRef.current = setInterval(async () => {
+        try {
+          const st = await (await fetch("/api/v1/migration/status")).json();
+          setMigrationStatus(st);
+          if (st.status === "idle") {
+            if (exportPollRef.current) { clearInterval(exportPollRef.current); exportPollRef.current = null; }
+            setExportLoading(false);
+            if (st.result?.file) {
+              window.location.href = "/api/v1/migration/export/download";
+            }
           }
+        } catch {
+          // 忽略单次轮询失败
         }
       }, 2000);
     } catch { setExportLoading(false); setImportResult("❌ 导出请求失败"); }
@@ -175,7 +182,7 @@ export function SettingsPage() {
       const res = await fetch("/api/v1/settings/cleanup/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ retention_days: cleanupDays, dry_run: false }),
+        body: JSON.stringify({ retention_days: cleanupDays, dry_run: dryRun }),
       });
       const data = await res.json();
       setCleanupMessage(data.message || "清理完成");
@@ -218,7 +225,10 @@ export function SettingsPage() {
     fetchDbConfig();
     fetchBackups();
     fetchUpdateInfo();
-    return () => { if (progressTimer) clearInterval(progressTimer); };
+    return () => {
+      if (progressTimer) clearInterval(progressTimer);
+      if (exportPollRef.current) { clearInterval(exportPollRef.current); exportPollRef.current = null; }
+    };
   }, []);
 
   const fetchSettings = async () => {
