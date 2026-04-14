@@ -53,8 +53,6 @@ class TelegramAccountResponse(BaseModel):
     last_name: Optional[str]
     is_premium: Optional[bool] = False
     is_bot: Optional[bool] = False
-    is_active: Optional[bool] = True
-    is_authorized: Optional[bool] = False
     is_active: bool
     is_authorized: bool
     last_used_at: Optional[datetime]
