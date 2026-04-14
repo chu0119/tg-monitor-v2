@@ -50,21 +50,26 @@ class Settings(BaseSettings):
     # Token 有效期：4小时 (240分钟) - 生产环境建议使用 refresh token 机制
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 240
 
+    # 缓存自动生成的密钥，避免每次访问都生成新密钥导致 JWT 令牌失效
+    _auto_generated_secret: Optional[str] = Field(default=None, exclude=True)
+
     @property
     def SECRET_KEY(self) -> str:
-        """获取 JWT 密钥，优先使用环境变量，否则自动生成"""
+        """获取 JWT 密钥，优先使用环境变量，否则自动生成并缓存"""
         if self.JWT_SECRET_KEY:
             return self.JWT_SECRET_KEY
-        # 自动生成一个安全的随机密钥
-        warnings.warn(
-            "JWT_SECRET_KEY 未设置，使用自动生成的临时密钥。"
-            "请在生产环境中设置环境变量 JWT_SECRET_KEY！"
-        )
-        logger.warning(
-            "JWT_SECRET_KEY 未设置，使用自动生成的临时密钥。"
-            "请在生产环境中设置环境变量 JWT_SECRET_KEY！"
-        )
-        return secrets.token_urlsafe(32)
+        # 自动生成一个安全的随机密钥并缓存，确保同一进程生命周期内密钥一致
+        if self._auto_generated_secret is None:
+            warnings.warn(
+                "JWT_SECRET_KEY 未设置，使用自动生成的临时密钥。"
+                "请在生产环境中设置环境变量 JWT_SECRET_KEY！"
+            )
+            logger.warning(
+                "JWT_SECRET_KEY 未设置，使用自动生成的临时密钥。"
+                "请在生产环境中设置环境变量 JWT_SECRET_KEY！"
+            )
+            object.__setattr__(self, '_auto_generated_secret', secrets.token_urlsafe(32))
+        return self._auto_generated_secret
 
     # Telegram 配置
     TELEGRAM_API_ID: Optional[int] = None

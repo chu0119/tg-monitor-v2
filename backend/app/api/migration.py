@@ -3,6 +3,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -169,6 +170,11 @@ async def _do_import(file_path: str):
         _migration_state["progress"] = "正在解压..."
         tmpdir = tempfile.mkdtemp(prefix="tg_import_")
         with tarfile.open(file_path, "r:gz") as tar:
+            # 安全提取：检查路径遍历攻击（Zip Slip）
+            for member in tar.getmembers():
+                member_path = os.path.normpath(os.path.join(tmpdir, member.name))
+                if not member_path.startswith(os.path.normpath(tmpdir) + os.sep) and member_path != os.path.normpath(tmpdir):
+                    raise RuntimeError(f"检测到不安全的 tar 成员路径: {member.name}")
             tar.extractall(tmpdir)
 
         stats = {"tables_imported": 0, "sessions_restored": 0, "env_merged": False}
@@ -219,21 +225,20 @@ async def _do_import(file_path: str):
                 for table, rows in json_data.items():
                     if not rows:
                         continue
+                    # 验证表名只包含安全字符，防止 SQL 注入
+                    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table):
+                        logger.warning(f"跳过不安全的表名: {table}")
+                        continue
                     for row in rows:
                         columns = list(row.keys())
-                        values = []
-                        placeholders = []
-                        for col in columns:
-                            val = row[col]
-                            if val is None:
-                                placeholders.append("NULL")
-                            elif isinstance(val, str):
-                                placeholders.append(f"'{val.replace(chr(39), chr(39)+chr(39))}'")
-                            else:
-                                placeholders.append(str(val))
+                        # 验证列名只包含安全字符
+                        if not all(re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', col) for col in columns):
+                            logger.warning(f"跳过包含不安全列名的行: {table}")
+                            continue
+                        placeholders = [f":{col}" for col in columns]
                         sql = f"INSERT IGNORE INTO {table} ({','.join(columns)}) VALUES ({','.join(placeholders)})"
                         try:
-                            await db.execute(text(sql))
+                            await db.execute(text(sql), row)
                         except Exception as e:
                             logger.warning(f"导入 {table} 行失败: {e}")
                 await db.commit()

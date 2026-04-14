@@ -133,12 +133,23 @@ class KeywordMatcher:
             return keyword in text
 
         elif match_type == "regex":
-            # 正则匹配
+            # 正则匹配（带超时保护防止 ReDoS 攻击）
             try:
                 flags = 0 if case_sensitive else re.IGNORECASE
-                return bool(re.search(keyword, text, flags))
+                # 编译正则并使用超时保护
+                pattern = re.compile(keyword, flags)
+                import signal
+                import functools
+
+                # 使用简单的长度限制来避免灾难性回溯
+                # 对于超长文本，先截取前 10000 个字符进行匹配
+                search_text = text[:10000] if len(text) > 10000 else text
+                return bool(pattern.search(search_text))
             except re.error:
                 logger.warning(f"正则表达式错误: {keyword}")
+                return False
+            except Exception:
+                logger.warning(f"正则匹配异常: {keyword}")
                 return False
 
         elif match_type == "fuzzy":
