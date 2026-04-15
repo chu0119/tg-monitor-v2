@@ -2,7 +2,7 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 websockets==14.1
-python-multipart==0.0.20
+python-multipart==0.0.26
 
 # Telegram MTProto
 Telethon==1.40.0
