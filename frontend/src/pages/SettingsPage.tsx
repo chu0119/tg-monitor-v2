@@ -2,28 +2,22 @@ import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import {
   Database,
   Bell,
   Save,
   CheckCircle,
   RotateCcw,
-  HardDrive,
   Download,
   Upload,
   FileJson,
   Trash2,
   BarChart3,
-  RefreshCw,
-  Rocket,
   Loader2,
-  GitBranch,
   Eye,
   EyeOff,
   Info,
-  ExternalLink,
-  ArrowDown,
+  HardDrive,
 } from "lucide-react";
 
 interface DatabaseStatus {
@@ -51,19 +45,18 @@ interface DatabaseStats {
   total_keywords: number;
 }
 
-interface BackupInfoItem {
-  name: string;
-  created_at?: string;
-  size_mb: number;
-  db_size: number;
-  session_count: number;
-}
-
 interface SystemSettings {
   enable_realtime_monitoring: boolean;
   enable_browser_notifications: boolean;
   enable_sound_alerts: boolean;
   minimum_alert_level: string;
+  enable_alert_notification_dedup?: boolean;
+  alert_dedup_window_minutes?: number;
+  notification_queue_workers?: number;
+  notification_max_retries?: number;
+  max_message_records?: number;
+  max_alert_records?: number;
+  max_database_size_gb?: number;
 }
 
 const DEFAULT_SETTINGS: SystemSettings = {
@@ -71,6 +64,13 @@ const DEFAULT_SETTINGS: SystemSettings = {
   enable_browser_notifications: true,
   enable_sound_alerts: true,
   minimum_alert_level: "low",
+  enable_alert_notification_dedup: true,
+  alert_dedup_window_minutes: 10,
+  notification_queue_workers: 2,
+  notification_max_retries: 3,
+  max_message_records: 200_000_000,
+  max_alert_records: 100_000_000,
+  max_database_size_gb: 900,
 };
 
 interface DbConfigInfo {
@@ -83,18 +83,45 @@ interface DbConfigInfo {
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SETTINGS);
-  const [cleanupDays, setCleanupDays] = useState(30);
+  const [maxMessages, setMaxMessages] = useState(200_000_000);
+  const [maxAlerts, setMaxAlerts] = useState(100_000_000);
   const [cleanupStats, setCleanupStats] = useState<any>(null);
   const [cleanupMessage, setCleanupMessage] = useState("");
   const [cleanupLoading, setCleanupLoading] = useState(false);
 
-  // 数据迁移
+  // 全量数据迁移
   const [migrationStatus, setMigrationStatus] = useState<any>(null);
-  const [exportLoading, setExportLoading] = useState(false);
-  const [importLoading, setImportLoading] = useState(false);
+  const [fullExportLoading, setFullExportLoading] = useState(false);
+  const [fullImportLoading, setFullImportLoading] = useState(false);
   const [importResult, setImportResult] = useState<string>("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fullFileInputRef = useRef<HTMLInputElement>(null);
 
+  // 配置文件导入导出
+  const [configExporting, setConfigExporting] = useState(false);
+  const [configImporting, setConfigImporting] = useState(false);
+  const configFileInputRef = useRef<HTMLInputElement>(null);
+
+  // 通用
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
+  const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
+  const [dbConfig, setDbConfig] = useState<DbConfigInfo | null>(null);
+  const [showDbPassword, setShowDbPassword] = useState(false);
+
+  const [updateInfo, setUpdateInfo] = useState<{ current_version: string; current_commit: string; branch: string }>({ current_version: "-", current_commit: "-", branch: "-" });
+
+  useEffect(() => {
+    fetchSettings();
+    fetchDatabaseInfo();
+    fetchDbConfig();
+    fetchUpdateInfo();
+  }, []);
+
+  // 轮询迁移状态
   const fetchMigrationStatus = async () => {
     try {
       const res = await fetch("/api/v1/migration/status");
@@ -110,126 +137,15 @@ export function SettingsPage() {
       }
     } catch {}
   };
+
   useEffect(() => {
-    if (migrationStatus?.status !== "idle") {
+    if (migrationStatus?.status !== "idle" && migrationStatus?.status) {
       const t = setTimeout(fetchMigrationStatus, 2000);
       return () => clearTimeout(t);
     }
   }, [migrationStatus]);
 
-  const exportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const handleExport = async () => {
-    setExportLoading(true);
-    try {
-      const res = await fetch("/api/v1/migration/export", { method: "POST" });
-      const data = await res.json();
-      if (data.error) { setImportResult(`❌ ${data.message}`); setExportLoading(false); return; }
-      // 轮询等待完成
-      if (exportPollRef.current) clearInterval(exportPollRef.current);
-      exportPollRef.current = setInterval(async () => {
-        try {
-          const st = await (await fetch("/api/v1/migration/status")).json();
-          setMigrationStatus(st);
-          if (st.status === "idle") {
-            if (exportPollRef.current) { clearInterval(exportPollRef.current); exportPollRef.current = null; }
-            setExportLoading(false);
-            if (st.result?.file) {
-              window.location.href = "/api/v1/migration/export/download";
-            }
-          }
-        } catch {
-          // 忽略单次轮询失败
-        }
-      }, 2000);
-    } catch { setExportLoading(false); setImportResult("❌ 导出请求失败"); }
-  };
-
-  const handleMigrationImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImportLoading(true);
-    setImportResult("正在上传...");
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/api/v1/migration/import", { method: "POST", body: form });
-      const data = await res.json();
-      if (data.error) { setImportResult(`❌ ${data.message}`); setImportLoading(false); return; }
-      setMigrationStatus({ status: "importing", progress: "导入中..." });
-    } catch { setImportResult("❌ 上传失败"); setImportLoading(false); }
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleCleanupStats = async () => {
-    setCleanupLoading(true);
-    try {
-      const res = await fetch("/api/v1/settings/cleanup/stats");
-      const data = await res.json();
-      setCleanupStats(data);
-      setCleanupMessage("");
-    } catch {
-      setCleanupMessage("获取统计失败");
-    } finally {
-      setCleanupLoading(false);
-    }
-  };
-
-  const handleCleanup = async (dryRun: boolean) => {
-    if (!dryRun && !confirm(`确定要清理 ${cleanupDays} 天之前的数据吗？此操作不可撤销！`)) return;
-    setCleanupLoading(true);
-    try {
-      const res = await fetch("/api/v1/settings/cleanup/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ retention_days: cleanupDays, dry_run: dryRun }),
-      });
-      const data = await res.json();
-      setCleanupMessage(data.message || "清理完成");
-      handleCleanupStats();
-    } catch {
-      setCleanupMessage("清理失败");
-    } finally {
-      setCleanupLoading(false);
-    }
-  };
-
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-
-  const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
-  const [dbStats, setDbStats] = useState<DatabaseStats | null>(null);
-  const [dbConfig, setDbConfig] = useState<DbConfigInfo | null>(null);
-  const [showDbPassword, setShowDbPassword] = useState(false);
-
-  const [exporting, setExporting] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [backups, setBackups] = useState<BackupInfoItem[]>([]);
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [backupName, setBackupName] = useState("");
-  const [mergeResult, setMergeResult] = useState<any>(null);
-
-  const [updateInfo, setUpdateInfo] = useState<{ current_version: string; current_commit: string; branch: string }>({ current_version: "-", current_commit: "-", branch: "-" });
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [updateResult, setUpdateResult] = useState<any>(null);
-  const [updating, setUpdating] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState<any>(null);
-  const [updateDone, setUpdateDone] = useState<{ success: boolean; error?: string } | null>(null);
-  const [progressTimer, setProgressTimer] = useState<any>(null);
-
-  useEffect(() => {
-    fetchSettings();
-    fetchDatabaseInfo();
-    fetchDbConfig();
-    fetchBackups();
-    fetchUpdateInfo();
-    return () => {
-      if (progressTimer) clearInterval(progressTimer);
-      if (exportPollRef.current) { clearInterval(exportPollRef.current); exportPollRef.current = null; }
-    };
-  }, []);
+  // --- 数据获取 ---
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -241,7 +157,16 @@ export function SettingsPage() {
         enable_browser_notifications: data.enable_browser_notifications ?? prev.enable_browser_notifications,
         enable_sound_alerts: data.enable_sound_alerts ?? prev.enable_sound_alerts,
         minimum_alert_level: data.minimum_alert_level ?? prev.minimum_alert_level,
+        enable_alert_notification_dedup: data.enable_alert_notification_dedup ?? prev.enable_alert_notification_dedup,
+        alert_dedup_window_minutes: data.alert_dedup_window_minutes ?? prev.alert_dedup_window_minutes,
+        notification_queue_workers: data.notification_queue_workers ?? prev.notification_queue_workers,
+        notification_max_retries: data.notification_max_retries ?? prev.notification_max_retries,
+        max_message_records: data.max_message_records ?? prev.max_message_records,
+        max_alert_records: data.max_alert_records ?? prev.max_alert_records,
+        max_database_size_gb: data.max_database_size_gb ?? prev.max_database_size_gb,
       }));
+      setMaxMessages(data.max_message_records ?? DEFAULT_SETTINGS.max_message_records ?? 200_000_000);
+      setMaxAlerts(data.max_alert_records ?? DEFAULT_SETTINGS.max_alert_records ?? 100_000_000);
     } catch (error) {
       console.error("Failed to fetch settings:", error);
     } finally {
@@ -270,157 +195,163 @@ export function SettingsPage() {
     } catch { /* ignore */ }
   };
 
-  const fetchBackups = async () => {
-    setBackupLoading(true);
-    try {
-      const list = await api.backups.list();
-      setBackups(Array.isArray(list) ? list : []);
-    } catch (error) {
-      console.error("Failed to fetch backups:", error);
-    } finally {
-      setBackupLoading(false);
-    }
-  };
-
   const fetchUpdateInfo = async () => {
     try {
-      const data = await api.system.getUpdateStatus();
-      setUpdateInfo(data);
+      const data = await api.system.getInfo();
+      setUpdateInfo({ current_version: data.version || "1.1.0", current_commit: "-", branch: "-" });
     } catch { /* ignore */ }
   };
 
-  const handleCheckUpdate = async () => {
-    setCheckingUpdate(true);
-    setUpdateResult(null);
-    setUpdateDone(null);
+  // --- 数据清理 ---
+
+  const handleCleanupStats = async () => {
+    setCleanupLoading(true);
     try {
-      const data = await api.system.checkUpdate();
-      setUpdateResult(data);
-    } catch (error: any) {
-      setUpdateResult(null);
-      alert("检查更新失败: " + (error.message || "未知错误"));
+      const params = new URLSearchParams({
+        max_messages: maxMessages.toString(),
+        max_alerts: maxAlerts.toString(),
+      });
+      const res = await fetch(`/api/v1/settings/cleanup/stats?${params}`);
+      const data = await res.json();
+      setCleanupStats(data);
+      setCleanupMessage("");
+    } catch {
+      setCleanupMessage("获取统计失败");
     } finally {
-      setCheckingUpdate(false);
+      setCleanupLoading(false);
     }
   };
 
-  const handlePerformUpdate = async () => {
-    if (!confirm("确定要执行系统更新吗？更新期间服务将暂时不可用。")) return;
-    setUpdating(true);
-    setUpdateDone(null);
-    setUpdateProgress({ progress: "开始更新...", log: [] });
-
-    const timer = setInterval(async () => {
-      try {
-        const p = await api.system.getUpdateProgress();
-        setUpdateProgress(p);
-      } catch { /* ignore */ }
-    }, 2000);
-    setProgressTimer(timer);
-
+  const handleCleanup = async (dryRun: boolean) => {
+    if (!dryRun && !confirm(`确定按当前数量上限清理超限数据吗？此操作不可撤销！`)) return;
+    setCleanupLoading(true);
     try {
-      await api.system.performUpdate();
-      setUpdateDone({ success: true });
-    } catch (error: any) {
-      setUpdateDone({ success: false, error: error.message || "未知错误" });
+      const res = await fetch("/api/v1/settings/cleanup/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_messages: maxMessages, max_alerts: maxAlerts, dry_run: false }),
+      });
+      const data = await res.json();
+      setCleanupMessage(data.message || "清理完成");
+      handleCleanupStats();
+    } catch {
+      setCleanupMessage("清理失败");
     } finally {
-      clearInterval(timer);
-      setProgressTimer(null);
-      setUpdating(false);
-      try {
-        const p = await api.system.getUpdateProgress();
-        setUpdateProgress(p);
-      } catch { /* ignore */ }
+      setCleanupLoading(false);
     }
   };
 
-  const handleCreateBackup = async () => {
-    setBackupLoading(true);
-    try {
-      await api.backups.create(backupName.trim() || undefined);
-      setBackupName("");
-      await fetchBackups();
-      alert("备份创建成功");
-    } catch (error: any) {
-      alert(error.message || "创建备份失败");
-    } finally {
-      setBackupLoading(false);
-    }
-  };
+  // --- 配置文件导出 ---
 
-  const handleRestoreBackup = async (name: string) => {
-    if (!confirm(`恢复备份 ${name} 将覆盖当前数据库，确定继续吗？`)) return;
-    setBackupLoading(true);
+  const handleConfigExport = async () => {
+    setConfigExporting(true);
     try {
-      const result = await api.backups.restore(name);
-      alert(`恢复任务已提交：${result.status || "pending"}。建议稍后刷新并重启服务。`);
-    } catch (error: any) {
-      alert(error.message || "恢复备份失败");
-    } finally {
-      setBackupLoading(false);
-    }
-  };
-
-  const handleDownloadBackup = async (name: string) => {
-    try {
-      const res = await fetch(`/api/v1/backups/download/${encodeURIComponent(name)}`);
-      if (!res.ok) throw new Error("下载失败");
-      const blob = await res.blob();
+      const data = await api.settings.exportAll();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = name;
+      a.download = `tg-monitor-config-${new Date().toISOString().split("T")[0]}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (error: any) {
-      alert(error.message || "下载失败");
-    }
-  };
-
-  const handleDeleteBackup = async (name: string) => {
-    if (!confirm(`确定删除备份 ${name}？`)) return;
-    setBackupLoading(true);
-    try {
-      await api.backups.delete(name);
-      await fetchBackups();
-    } catch (error: any) {
-      alert(error.message || "删除备份失败");
+    } catch (error) {
+      console.error("Config export failed:", error);
+      alert("导出失败");
     } finally {
-      setBackupLoading(false);
+      setConfigExporting(false);
     }
   };
 
-  const handleUploadMergeBackup = async (file: File) => {
-    if (!confirm(`上传备份文件 "${file.name}" 将与现有数据合并（不会覆盖），确定继续吗？`)) return;
-    setBackupLoading(true);
-    setMergeResult(null);
+  // --- 配置文件导入 ---
+
+  const handleConfigImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!confirm("导入配置将覆盖现有系统设置，确定要继续吗？")) return;
+    setConfigImporting(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/v1/backups/upload-merge", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      if (data.success) {
-        setMergeResult(data);
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const result = await api.settings.importAll(data);
+      let message = "导入完成！\n\n";
+      if (result.details) {
+        message += `系统设置: ${result.details.system_settings?.success ? "✓" : "✗"}\n`;
+        const kg = result.details.keyword_groups;
+        if (kg) message += `关键词组: 导入 ${kg.imported} 个，跳过 ${kg.skipped} 个\n`;
+        const nc = result.details.notification_configs;
+        if (nc) message += `通知配置: 导入 ${nc.imported} 个，跳过 ${nc.skipped} 个`;
       } else {
-        alert("合并失败: " + (data.detail || "未知错误"));
+        message += "导入成功";
       }
-    } catch (error: any) {
-      alert("上传合并失败: " + (error.message || "未知错误"));
+      alert(message);
+      fetchSettings();
+    } catch (error) {
+      console.error("Config import failed:", error);
+      alert("导入失败：" + (error instanceof Error ? error.message : "未知错误"));
     } finally {
-      setBackupLoading(false);
+      setConfigImporting(false);
+      if (configFileInputRef.current) configFileInputRef.current.value = "";
     }
   };
+
+  // --- 全量数据导出 ---
+
+  const handleFullExport = async () => {
+    setFullExportLoading(true);
+    setImportResult("");
+    try {
+      const res = await fetch("/api/v1/migration/export", { method: "POST" });
+      const data = await res.json();
+      if (data.error) { setImportResult(`❌ ${data.message}`); setFullExportLoading(false); return; }
+      const poll = setInterval(async () => {
+        const st = await (await fetch("/api/v1/migration/status")).json();
+        setMigrationStatus(st);
+        if (st.status === "idle") {
+          clearInterval(poll);
+          setFullExportLoading(false);
+          if (st.result?.file) {
+            window.location.href = "/api/v1/migration/export/download";
+          }
+        }
+      }, 2000);
+    } catch {
+      setFullExportLoading(false);
+      setImportResult("❌ 导出请求失败");
+    }
+  };
+
+  // --- 全量数据导入 ---
+
+  const handleFullImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFullImportLoading(true);
+    setImportResult("正在上传...");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/v1/migration/import", { method: "POST", body: form });
+      const data = await res.json();
+      if (data.error) { setImportResult(`❌ ${data.message}`); setFullImportLoading(false); return; }
+      setMigrationStatus({ status: "importing", progress: "导入中..." });
+    } catch {
+      setImportResult("❌ 上传失败");
+      setFullImportLoading(false);
+    }
+    if (fullFileInputRef.current) fullFileInputRef.current.value = "";
+  };
+
+  // --- 设置保存/重置 ---
 
   const handleSave = async () => {
     setSaving(true);
     setSaveSuccess(false);
     try {
       await api.settings.update(settings);
+      setMaxMessages(settings.max_message_records ?? maxMessages);
+      setMaxAlerts(settings.max_alert_records ?? maxAlerts);
       setHasChanges(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
@@ -441,60 +372,18 @@ export function SettingsPage() {
         enable_browser_notifications: data.enable_browser_notifications ?? true,
         enable_sound_alerts: data.enable_sound_alerts ?? true,
         minimum_alert_level: data.minimum_alert_level ?? "low",
+        enable_alert_notification_dedup: data.enable_alert_notification_dedup ?? true,
+        alert_dedup_window_minutes: data.alert_dedup_window_minutes ?? 10,
+        notification_queue_workers: data.notification_queue_workers ?? 2,
+        notification_max_retries: data.notification_max_retries ?? 3,
+        max_message_records: data.max_message_records ?? 200_000_000,
+        max_alert_records: data.max_alert_records ?? 100_000_000,
+        max_database_size_gb: data.max_database_size_gb ?? 900,
       });
       setHasChanges(true);
     } catch (error) {
       console.error("Failed to reset settings:", error);
       alert("重置设置失败");
-    }
-  };
-
-  const handleExportAll = async () => {
-    setExporting(true);
-    try {
-      const data = await api.settings.exportAll();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `tg-monitor-config-${new Date().toISOString().split("T")[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      alert("配置导出成功！");
-    } catch (error) {
-      console.error("Export failed:", error);
-      alert("导出失败");
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const handleImport = async (file: File) => {
-    if (!confirm("导入配置将覆盖现有系统设置，确定要继续吗？")) return;
-    setImporting(true);
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      const result = await api.settings.importAll(data);
-      let message = "导入完成！\n\n";
-      if (result.details) {
-        message += `系统设置: ${result.details.system_settings?.success ? "✓" : "✗"}\n`;
-        const kg = result.details.keyword_groups;
-        if (kg) message += `关键词组: 导入 ${kg.imported} 个，跳过 ${kg.skipped} 个\n`;
-        const nc = result.details.notification_configs;
-        if (nc) message += `通知配置: 导入 ${nc.imported} 个，跳过 ${nc.skipped} 个`;
-      } else {
-        message += "导入成功";
-      }
-      alert(message);
-      fetchSettings();
-    } catch (error) {
-      console.error("Import failed:", error);
-      alert("导入失败：" + (error instanceof Error ? error.message : "未知错误"));
-    } finally {
-      setImporting(false);
     }
   };
 
@@ -523,6 +412,8 @@ export function SettingsPage() {
       />
     </button>
   );
+
+  const isMigrationBusy = migrationStatus?.status === "exporting" || migrationStatus?.status === "importing";
 
   return (
     <div className="space-y-6">
@@ -569,7 +460,7 @@ export function SettingsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 数据采集设置 - 简化 */}
+          {/* 数据采集 */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -591,7 +482,7 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* 通知设置 - 保持原样 */}
+          {/* 通知设置 */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -636,10 +527,55 @@ export function SettingsPage() {
                   只显示此级别及以上的告警
                 </p>
               </div>
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <p>同类告警通知降噪</p>
+                  <p className="text-xs text-muted-foreground">同一会话、发送人、关键词在窗口内只推送一次通知</p>
+                </div>
+                <ToggleSwitch
+                  enabled={settings.enable_alert_notification_dedup ?? true}
+                  onChange={(value) => updateSetting("enable_alert_notification_dedup", value)}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">降噪窗口(分钟)</label>
+                  <input
+                    type="number"
+                    value={settings.alert_dedup_window_minutes ?? 10}
+                    onChange={(e) => updateSetting("alert_dedup_window_minutes", Math.max(0, parseInt(e.target.value) || 0))}
+                    min={0}
+                    max={1440}
+                    className="input-tech w-full px-3 py-2 rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">通知并发</label>
+                  <input
+                    type="number"
+                    value={settings.notification_queue_workers ?? 2}
+                    onChange={(e) => updateSetting("notification_queue_workers", Math.max(1, parseInt(e.target.value) || 1))}
+                    min={1}
+                    max={10}
+                    className="input-tech w-full px-3 py-2 rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">失败重试</label>
+                  <input
+                    type="number"
+                    value={settings.notification_max_retries ?? 3}
+                    onChange={(e) => updateSetting("notification_max_retries", Math.max(0, parseInt(e.target.value) || 0))}
+                    min={0}
+                    max={10}
+                    className="input-tech w-full px-3 py-2 rounded-lg text-sm"
+                  />
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          {/* 数据清理 - 保持原样 */}
+          {/* 数据清理 */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -649,25 +585,53 @@ export function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">清理多少天之前的数据</label>
+                <label className="text-sm font-medium">实时消息最大保留条数</label>
                 <div className="flex items-center gap-3">
                   <input
                     type="number"
-                    value={cleanupDays}
-                    onChange={(e) => setCleanupDays(Math.max(1, parseInt(e.target.value) || 30))}
-                    min={1}
-                    max={365}
-                    className="input-tech w-24 px-3 py-2 rounded-lg text-sm"
+                    value={maxMessages}
+                    onChange={(e) => {
+                      const value = Math.max(1000, parseInt(e.target.value) || 200000000);
+                      setMaxMessages(value);
+                      updateSetting("max_message_records", value);
+                    }}
+                    min={1000}
+                    max={1500000000}
+                    step={10000}
+                    className="input-tech w-40 px-3 py-2 rounded-lg text-sm"
                   />
-                  <span className="text-sm text-muted-foreground">天</span>
+                  <span className="text-sm text-muted-foreground">条</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">告警最大保留条数</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    value={maxAlerts}
+                    onChange={(e) => {
+                      const value = Math.max(1000, parseInt(e.target.value) || 100000000);
+                      setMaxAlerts(value);
+                      updateSetting("max_alert_records", value);
+                    }}
+                    min={1000}
+                    max={1000000000}
+                    step={10000}
+                    className="input-tech w-40 px-3 py-2 rounded-lg text-sm"
+                  />
+                  <span className="text-sm text-muted-foreground">条</span>
                 </div>
               </div>
               {cleanupStats && (
                 <div className="bg-cyber-blue/5 border border-cyber-blue/20 rounded-lg p-3 space-y-1 text-sm">
-                  <p>📊 数据库大小: <strong>{cleanupStats.database_size_mb.toFixed(1)} MB</strong></p>
+                  <p>📊 数据库大小: <strong>{(cleanupStats.database_size_gb ?? cleanupStats.database_size_mb / 1024).toFixed(3)} GB</strong></p>
+                  <p>📦 消息上限: <strong>{(cleanupStats.limits?.max_messages || maxMessages).toLocaleString()}</strong> 条，当前 <strong>{(cleanupStats.total?.messages || 0).toLocaleString()}</strong> 条</p>
+                  <p>🚨 告警上限: <strong>{(cleanupStats.limits?.max_alerts || maxAlerts).toLocaleString()}</strong> 条，当前 <strong>{(cleanupStats.total?.alerts || 0).toLocaleString()}</strong> 条</p>
                   <p>🗑️ 将清理告警: <strong>{(cleanupStats.expired?.alerts || 0).toLocaleString()}</strong> 条</p>
                   <p>🗑️ 将清理消息: <strong>{(cleanupStats.expired?.messages || 0).toLocaleString()}</strong> 条</p>
-                  <p className="text-xs text-muted-foreground mt-1">仅清理已处理/已忽略的告警，待处理告警保留 90 天</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    当前策略按数量上限清理最旧数据，容量上限 {(cleanupStats.limits?.max_database_size_gb || 900).toLocaleString()} GB，按当前平均行大小估算上限约 {(cleanupStats.estimated_limit_size_gb || 0).toLocaleString()} GB。
+                  </p>
                 </div>
               )}
               <div className="flex gap-2">
@@ -698,233 +662,135 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* 数据导入导出 - 简化 */}
+          {/* 数据迁移（统一） */}
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <FileJson size={20} />
-                配置导入导出
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full justify-start"
-                onClick={handleExportAll}
-                disabled={exporting || importing}
-              >
-                <Download size={16} className="mr-2" />
-                {exporting ? "导出中..." : "导出所有配置"}
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                将系统设置、关键词组、通知配置等导出为 JSON 文件
-              </p>
-
-              <div className="border-t border-cyber-blue/10 pt-4">
-                <label className="block">
-                  <input
-                    type="file"
-                    accept=".json"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        handleImport(file);
-                        e.target.value = "";
-                      }
-                    }}
-                    disabled={importing || exporting}
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-start"
-                    onClick={() => (document.querySelector('input[type="file"]') as HTMLInputElement)?.click()}
-                    disabled={importing || exporting}
-                  >
-                    <Upload size={16} className="mr-2" />
-                    {importing ? "导入中..." : "导入配置文件"}
-                  </Button>
-                </label>
-                <p className="text-xs text-muted-foreground mt-2">
-                  上传 JSON 配置文件，合并覆盖现有设置
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* 数据备份与恢复 - 增强 */}
-          <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <HardDrive size={20} />
-                数据备份与恢复
+                数据迁移
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="备份名称（可选）"
-                  value={backupName}
-                  onChange={(e) => setBackupName(e.target.value)}
-                  className="flex-1"
-                />
-                <Button variant="tech" onClick={handleCreateBackup} disabled={backupLoading}>
-                  创建备份
-                </Button>
-                <Button variant="outline" onClick={fetchBackups} disabled={backupLoading}>
-                  <RefreshCw size={16} className="mr-1" />
-                  刷新
-                </Button>
-                <label>
-                  <input
-                    type="file"
-                    accept=".sql,.sql.gz,.bak"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        handleUploadMergeBackup(file);
-                        e.target.value = "";
-                      }
-                    }}
-                    disabled={backupLoading}
-                  />
-                  <Button variant="outline" onClick={() => (document.querySelectorAll('input[type="file"]')[1] as HTMLInputElement)?.click()} disabled={backupLoading}>
-                    <Upload size={16} className="mr-1" />
-                    上传合并
-                  </Button>
-                </label>
-              </div>
-
-              {mergeResult && (
-                <div className="bg-cyber-green/10 border border-cyber-green/30 rounded-lg p-3 text-sm">
-                  <p className="font-semibold text-cyber-green mb-1">✓ 合并完成</p>
-                  <p>新增: {mergeResult.stats?.inserted || 0} 条</p>
-                  <p>更新: {mergeResult.stats?.updated || 0} 条</p>
-                  <p>跳过: {mergeResult.stats?.skipped || 0} 条</p>
-                  {mergeResult.message && <p className="text-xs text-muted-foreground mt-1">{mergeResult.message}</p>}
+              {/* 配置文件 */}
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <FileJson size={16} className="text-cyber-blue" />
+                  <p className="text-sm font-medium">配置文件</p>
                 </div>
-              )}
-
-              <div className="space-y-2 max-h-64 overflow-auto">
-                {backupLoading && !backups.length ? (
-                  <p className="text-sm text-muted-foreground">备份列表加载中...</p>
-                ) : backups.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">暂无备份</p>
-                ) : (
-                  backups.map((b) => (
-                    <div key={b.name} className="p-3 rounded-lg border border-cyber-blue/10 bg-secondary/20">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <p className="font-semibold">{b.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            时间: {b.created_at || "未知"} · 大小: {b.size_mb} MB
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="outline" onClick={() => handleRestoreBackup(b.name)}>
-                            恢复
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleDownloadBackup(b.name)}>
-                            <Download size={14} />
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleDeleteBackup(b.name)}>
-                            <Trash2 size={14} />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* 系统更新 - 修复 */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Rocket size={20} />
-                系统更新
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">当前版本</p>
-                  <p className="text-lg font-bold">v{updateInfo.current_version}</p>
-                  <p className="text-xs text-muted-foreground font-mono">{updateInfo.current_commit?.slice(0, 7)}</p>
-                </div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <GitBranch size={12} />
-                  {updateInfo.branch}
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={handleCheckUpdate}
-                  disabled={checkingUpdate || updating}
-                  className="flex-1 min-h-[44px]"
-                >
-                  {checkingUpdate ? <Loader2 size={16} className="mr-2 animate-spin" /> : <RefreshCw size={16} className="mr-2" />}
-                  {checkingUpdate ? "检查中..." : "检查更新"}
-                </Button>
-                {updateResult?.has_update && (
+                <p className="text-xs text-muted-foreground mb-2">
+                  系统设置、关键词组、通知配置（JSON 格式，轻量快速）
+                </p>
+                <div className="flex gap-2">
                   <Button
-                    variant="tech"
-                    onClick={handlePerformUpdate}
-                    disabled={updating}
-                    className="flex-1 min-h-[44px]"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleConfigExport}
+                    disabled={configExporting || configImporting}
+                    className="flex-1 min-h-[40px]"
                   >
-                    {updating ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Rocket size={16} className="mr-2" />}
-                    {updating ? "更新中..." : "立即更新"}
+                    {configExporting ? (
+                      <><Loader2 size={14} className="mr-1 animate-spin" />导出中...</>
+                    ) : (
+                      <><Download size={14} className="mr-1" />导出配置</>
+                    )}
                   </Button>
-                )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => configFileInputRef.current?.click()}
+                    disabled={configExporting || configImporting}
+                    className="flex-1 min-h-[40px]"
+                  >
+                    {configImporting ? (
+                      <><Loader2 size={14} className="mr-1 animate-spin" />导入中...</>
+                    ) : (
+                      <><Upload size={14} className="mr-1" />导入配置</>
+                    )}
+                  </Button>
+                  <input
+                    ref={configFileInputRef}
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={handleConfigImport}
+                  />
+                </div>
               </div>
 
-              {updateResult && !updateResult.has_update && (
-                <p className="text-sm text-cyber-green flex items-center gap-1">
-                  <CheckCircle size={14} /> 已是最新版本
-                </p>
-              )}
+              <div className="border-t border-cyber-blue/10" />
 
-              {updateResult?.has_update && updateResult.changelog?.length > 0 && (
-                <div className="bg-cyber-blue/5 border border-cyber-blue/20 rounded-lg p-3">
-                  <p className="text-sm font-semibold mb-2">更新日志（{updateResult.commits_behind} 个提交）</p>
-                  <div className="space-y-1 max-h-40 overflow-auto text-xs text-muted-foreground">
-                    {updateResult.changelog.map((c: string, i: number) => (
-                      <p key={i} className="font-mono">{c}</p>
-                    ))}
-                  </div>
+              {/* 全量数据 */}
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Database size={16} className="text-cyber-purple" />
+                  <p className="text-sm font-medium">全量数据</p>
+                </div>
+                <p className="text-xs text-muted-foreground mb-2">
+                  数据库、Telegram 会话、系统配置（.tar.gz 格式，完整备份）
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleFullExport}
+                    disabled={fullExportLoading || isMigrationBusy}
+                    className="flex-1 min-h-[40px]"
+                  >
+                    {fullExportLoading || migrationStatus?.status === "exporting" ? (
+                      <><Loader2 size={14} className="mr-1 animate-spin" />导出中...</>
+                    ) : (
+                      <><Download size={14} className="mr-1" />导出全量</>
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fullFileInputRef.current?.click()}
+                    disabled={fullImportLoading || isMigrationBusy}
+                    className="flex-1 min-h-[40px]"
+                  >
+                    {fullImportLoading || migrationStatus?.status === "importing" ? (
+                      <><Loader2 size={14} className="mr-1 animate-spin" />导入中...</>
+                    ) : (
+                      <><Upload size={14} className="mr-1" />导入全量</>
+                    )}
+                  </Button>
+                  <input
+                    ref={fullFileInputRef}
+                    type="file"
+                    accept=".tar.gz"
+                    className="hidden"
+                    onChange={handleFullImport}
+                  />
+                </div>
+              </div>
+
+              {/* 进度/状态 */}
+              {(isMigrationBusy || importResult) && (
+                <div className="text-sm space-y-1">
+                  {migrationStatus?.progress && isMigrationBusy && (
+                    <p className="text-muted-foreground">⏳ {migrationStatus.progress}</p>
+                  )}
+                  {importResult && (
+                    <p className={importResult.startsWith("✅") ? "text-cyber-green" : importResult.startsWith("❌") ? "text-cyber-pink" : "text-muted-foreground"}>
+                      {importResult}
+                    </p>
+                  )}
                 </div>
               )}
 
-              {updating && updateProgress && (
-                <div className="bg-cyber-blue/5 border border-cyber-blue/20 rounded-lg p-3 space-y-1">
-                  <p className="text-sm font-semibold">更新进度</p>
-                  <p className="text-xs text-muted-foreground">{updateProgress.progress}</p>
-                  <div className="max-h-32 overflow-auto text-xs text-muted-foreground space-y-0.5">
-                    {updateProgress.log.map((l: string, i: number) => (
-                      <p key={i} className="font-mono">• {l}</p>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {updateDone && (
-                <p className={`text-sm ${updateDone.success ? "text-cyber-green" : "text-cyber-pink"}`}>
-                  {updateDone.success ? "✓ 更新完成，服务正在重启..." : `✗ 更新失败: ${updateDone.error || "未知错误"}`}
+              <div className="rounded-md bg-cyber-blue/5 border border-cyber-blue/20 p-3 text-xs text-muted-foreground">
+                <p className="flex items-center gap-1 text-cyber-blue font-semibold mb-1">
+                  <Info size={14} />
+                  说明
                 </p>
-              )}
+                <p>配置文件仅包含系统设置，适合快速迁移配置；全量数据包含所有历史记录和 Telegram 会话，适合完整迁移。导入操作均为合并模式，不会删除现有数据。</p>
+              </div>
             </CardContent>
           </Card>
 
-          {/* 数据库配置 - 新增 */}
-          <Card>
+          {/* 数据库配置 */}
+          <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <Database size={20} />
@@ -979,87 +845,12 @@ export function SettingsPage() {
                 <p>数据库配置在 .env 文件中修改，修改后重启服务生效。</p>
               </div>
 
-              <div className="flex gap-2">
-                <div className="flex-1 flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-block w-2 h-2 rounded-full ${dbStatus?.connected ? "bg-cyber-green" : "bg-cyber-pink"}`} />
-                    <span>{dbStatus?.connected ? "已连接" : "未连接"}</span>
-                    {dbStatus?.connection_info?.version && (
-                      <span className="text-muted-foreground">MySQL {dbStatus.connection_info.version}</span>
-                    )}
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => document.getElementById('migration-section')?.scrollIntoView({ behavior: 'smooth' })}
-                >
-                  <ArrowDown size={14} className="mr-1" />
-                  数据迁移
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* 数据迁移 */}
-          <Card id="migration-section" className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Download size={18} />
-                数据迁移
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                一键导出系统所有数据（配置、历史记录、Telegram会话），可在新服务器上导入恢复。
-              </p>
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleExport}
-                  disabled={exportLoading || migrationStatus?.status === "exporting"}
-                >
-                  {exportLoading || migrationStatus?.status === "exporting" ? (
-                    <><Loader2 size={14} className="mr-1 animate-spin" />导出中...</>
-                  ) : (
-                    <><Download size={14} className="mr-1" />导出数据</>
-                  )}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={importLoading || migrationStatus?.status === "importing"}
-                >
-                  {importLoading || migrationStatus?.status === "importing" ? (
-                    <><Loader2 size={14} className="mr-1 animate-spin" />导入中...</>
-                  ) : (
-                    <><Upload size={14} className="mr-1" />导入数据</>
-                  )}
-                </Button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".tar.gz"
-                  className="hidden"
-                  onChange={handleMigrationImport}
-                />
-              </div>
-              {(migrationStatus?.status !== "idle" || importResult) && (
-                <div className="text-sm space-y-1">
-                  {migrationStatus?.progress && migrationStatus.status !== "idle" && (
-                    <p className="text-muted-foreground">⏳ {migrationStatus.progress}</p>
-                  )}
-                  {importResult && (
-                    <p className={importResult.startsWith("✅") ? "text-cyber-green" : importResult.startsWith("❌") ? "text-cyber-pink" : "text-muted-foreground"}>
-                      {importResult}
-                    </p>
-                  )}
-                </div>
-              )}
-              <div className="rounded-md bg-yellow-500/10 border border-yellow-500/20 p-3 text-xs text-yellow-200">
-                ⚠️ 导入将合并数据，不会删除现有记录。导入前请确保目标服务器已部署完成。
+              <div className="flex items-center gap-2 text-sm">
+                <span className={`inline-block w-2 h-2 rounded-full ${dbStatus?.connected ? "bg-cyber-green" : "bg-cyber-pink"}`} />
+                <span>{dbStatus?.connected ? "已连接" : "未连接"}</span>
+                {dbStatus?.connection_info?.version && (
+                  <span className="text-muted-foreground">MySQL {dbStatus.connection_info.version}</span>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -1067,7 +858,7 @@ export function SettingsPage() {
           {/* 版本信息 */}
           <div className="lg:col-span-2 text-center text-sm text-muted-foreground py-4 space-y-1">
             <p className="font-medium">
-              听风追影–群组数据预警分析系统 v{updateInfo.current_version}
+              听风追影–群组数据预警分析系统 V{updateInfo.current_version}
             </p>
             <p>
               Python (FastAPI) · TypeScript (React) · TailwindCSS · MySQL · Telethon

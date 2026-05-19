@@ -79,6 +79,7 @@ export function MonitoringPage() {
   const [globalStats, setGlobalStats] = useState<any>(null);
   const { isConnected, messages: wsMessages, clearMessages } = useWebSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
 
   // 分页状态
   const [currentPage, setCurrentPage] = useState(1);
@@ -530,6 +531,13 @@ export function MonitoringPage() {
 
       setMessages(newMessages);
       setTotalCount(total);
+
+      // 翻页或切换会话后滚动到消息列表顶部
+      setTimeout(() => {
+        if (messageListRef.current) {
+          messageListRef.current.scrollTop = 0;
+        }
+      }, 50);
     } catch (error) {
       console.error("Failed to fetch messages:", error);
     }
@@ -745,7 +753,10 @@ export function MonitoringPage() {
                       <GripVertical size={14} className="text-muted-foreground shrink-0 cursor-grab hidden sm:block" />
                       {/* 左侧：会话名称 + 副标题 */}
                       <button
-                        onClick={() => setSelectedConversation(conv.id)}
+                        onClick={() => {
+                          setSelectedConversation(conv.id);
+                          setCurrentPage(1);
+                        }}
                         className="flex-1 text-left min-w-0 min-h-[44px] py-1"
                       >
                         <div className="flex items-center gap-2">
@@ -884,6 +895,7 @@ export function MonitoringPage() {
                     setFilter("");
                     setMessageTypeFilter("all");
                     setAlertFilter("all");
+                    setPhoneFilter(false);
                     setCurrentPage(1);
                   }}
                   className="min-h-[44px]"
@@ -897,7 +909,7 @@ export function MonitoringPage() {
           <CardContent className="p-3 sm:p-6 pt-0 sm:pt-0">
             <div className="space-y-4">
               {/* 消息列表 */}
-              <div className="max-h-[400px] sm:max-h-[600px] overflow-y-auto tech-scrollbar pr-0 sm:pr-2">
+              <div ref={messageListRef} className="max-h-[400px] sm:max-h-[600px] overflow-y-auto tech-scrollbar pr-0 sm:pr-2">
                 {!selectedConversation ? (
                   <div className="flex items-center justify-center h-64 text-muted-foreground">
                     请选择一个会话开始监控

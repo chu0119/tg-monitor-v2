@@ -69,6 +69,10 @@ def _get_git_output(args: list[str]) -> str:
         raise RuntimeError("git 命令未找到，请确保已安装 git")
 
 
+def _is_git_repo() -> bool:
+    return (PROJECT_ROOT / ".git").exists()
+
+
 def _get_local_commit() -> str:
     return _get_git_output(["rev-parse", "HEAD"])
 
@@ -83,6 +87,12 @@ def _get_local_branch() -> str:
 @router.get("/update-status", response_model=UpdateStatusResponse)
 async def get_update_status():
     """获取当前版本信息"""
+    if not _is_git_repo():
+        return UpdateStatusResponse(
+            current_version=settings.VERSION,
+            current_commit="not-a-git-deploy",
+            branch="release-package",
+        )
     try:
         commit = _get_local_commit()
         branch = _get_local_branch()
@@ -99,6 +109,15 @@ async def get_update_status():
 @router.get("/check-update", response_model=CheckUpdateResponse)
 async def check_update():
     """检查 GitHub 是否有新版本"""
+    if not _is_git_repo():
+        return CheckUpdateResponse(
+            has_update=False,
+            current_version=settings.VERSION,
+            current_commit="not-a-git-deploy",
+            remote_commit="",
+            commits_behind=0,
+            changelog=["当前为部署包安装目录，不支持在线 Git 更新"],
+        )
     try:
         local_commit = _get_local_commit()
 

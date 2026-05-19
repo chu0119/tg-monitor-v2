@@ -1,13 +1,13 @@
 """消息相关的 Pydantic 模型"""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, ConfigDict, field_serializer
+from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
 from app.utils import datetime_to_iso
 
 
 class MessageResponse(BaseModel):
     """消息响应"""
-    model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     conversation_id: int
@@ -29,10 +29,27 @@ class MessageResponse(BaseModel):
     sender_first_name: Optional[str] = None
     conversation_title: Optional[str] = None
 
+    @field_validator('matched_keywords', mode='before')
+    @classmethod
+    def normalize_matched_keywords(cls, value):
+        if not value:
+            return value
+        normalized = []
+        for item in value:
+            if isinstance(item, dict):
+                word = item.get("word") or item.get("keyword")
+                if word:
+                    normalized.append(str(word))
+            else:
+                normalized.append(str(item))
+        return normalized
+
     @field_serializer('date', 'created_at')
     def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
         """序列化datetime为ISO格式（带时区信息）"""
         return datetime_to_iso(dt)
+
+    model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')
 
 
 class MessageFilter(BaseModel):

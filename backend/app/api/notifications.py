@@ -11,6 +11,7 @@ from app.schemas.notification import (
     NotificationConfigUpdate,
     NotificationConfigResponse,
     NotificationTest,
+    merge_masked_notification_config,
 )
 from app.models.notification_config import NotificationConfig
 from app.services.notification_service import notification_service
@@ -98,6 +99,11 @@ async def update_notification(
         )
 
     update_dict = update_data.model_dump(exclude_unset=True)
+    if "config" in update_dict:
+        update_dict["config"] = merge_masked_notification_config(
+            config.config,
+            update_dict.get("config"),
+        )
 
     # 处理 min_alert_level: int 转为 str (1->"low", 2->"medium", 3->"high", 4->"critical")
     if "min_alert_level" in update_dict and update_dict["min_alert_level"] is not None:

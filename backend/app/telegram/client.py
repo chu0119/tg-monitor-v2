@@ -95,7 +95,7 @@ class TelegramClientManager:
             try:
                 import json
                 proxy_config = json.loads(proxy_config)
-            except (json.JSONDecodeError, ValueError, TypeError):
+            except:
                 return None
 
         # 如果已经是字典，验证其格式

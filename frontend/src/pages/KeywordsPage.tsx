@@ -15,6 +15,7 @@ import {
   Search,
   FolderOpen,
   Tag,
+  BarChart3,
 } from "lucide-react";
 
 interface KeywordGroup {
@@ -48,6 +49,8 @@ export function KeywordsPage() {
   const [showFileImportModal, setShowFileImportModal] = useState(false);
   const [editingKeyword, setEditingKeyword] = useState<Keyword | null>(null);
   const [editingGroup, setEditingGroup] = useState<KeywordGroup | null>(null);
+  const [qualityReport, setQualityReport] = useState<any>(null);
+  const [qualityLoading, setQualityLoading] = useState(false);
 
   // 分页状态
   const [currentPage, setCurrentPage] = useState(1);
@@ -212,6 +215,19 @@ export function KeywordsPage() {
     }
   };
 
+  const handleQualityReport = async () => {
+    setQualityLoading(true);
+    try {
+      const data = await api.keywords.qualityReport();
+      setQualityReport(data);
+    } catch (error) {
+      console.error("Failed to get quality report:", error);
+      alert("获取关键词质量报告失败");
+    } finally {
+      setQualityLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* 标题 */}
@@ -220,11 +236,44 @@ export function KeywordsPage() {
           <h1 className="text-2xl sm:text-3xl font-bold neon-text">关键词管理</h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">管理关键词组和关键词</p>
         </div>
-        <Button variant="tech" onClick={() => setShowGroupModal(true)} className="w-full sm:w-auto min-h-[44px]">
-          <Plus size={18} className="mr-2" />
-          新建关键词组
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={handleQualityReport} disabled={qualityLoading} className="w-full sm:w-auto min-h-[44px]">
+            <BarChart3 size={18} className="mr-2" />
+            质量检查
+          </Button>
+          <Button variant="tech" onClick={() => setShowGroupModal(true)} className="w-full sm:w-auto min-h-[44px]">
+            <Plus size={18} className="mr-2" />
+            新建关键词组
+          </Button>
+        </div>
       </div>
+
+      {qualityReport && (
+        <Card>
+          <CardContent className="p-4 grid grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
+            <div>
+              <p className="text-muted-foreground">关键词</p>
+              <p className="text-xl font-semibold">{qualityReport.total_keywords}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">全局重复</p>
+              <p className="text-xl font-semibold text-yellow-400">{qualityReport.duplicates_global?.length || 0}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">同组重复</p>
+              <p className="text-xl font-semibold text-yellow-400">{qualityReport.duplicates_in_group?.length || 0}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">正则错误</p>
+              <p className="text-xl font-semibold text-red-400">{qualityReport.regex_errors?.length || 0}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">零命中</p>
+              <p className="text-xl font-semibold">{qualityReport.zero_match_keywords?.length || 0}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* 关键词组列表 */}

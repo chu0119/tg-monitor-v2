@@ -114,24 +114,26 @@ class ReportService:
         end_date = datetime.now()
 
         # 消息统计
+        message_day = func.date(Message.date)
         message_stats = await db.execute(
             select(
-                func.date_trunc('day', Message.date).label('day'),
+                message_day.label('day'),
                 func.count(Message.id).label('count')
             )
             .where(and_(Message.date >= start_date, Message.date < end_date))
-            .group_by(func.date_trunc('day', Message.date))
+            .group_by(message_day)
         )
         message_stats = message_stats.all()
 
         # 告警统计
+        alert_day = func.date(Alert.created_at)
         alert_stats = await db.execute(
             select(
-                func.date_trunc('day', Alert.created_at).label('day'),
+                alert_day.label('day'),
                 func.count(Alert.id).label('count')
             )
             .where(and_(Alert.created_at >= start_date, Alert.created_at < end_date))
-            .group_by(func.date_trunc('day', Alert.created_at))
+            .group_by(alert_day)
         )
         alert_stats = alert_stats.all()
 
@@ -160,11 +162,11 @@ class ReportService:
             "report_period": f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
             "generated_at": datetime.now().isoformat(),
             "message_trend": [
-                {"date": stat.day.strftime("%Y-%m-%d"), "count": stat.count}
+                {"date": stat.day.strftime("%Y-%m-%d") if hasattr(stat.day, "strftime") else str(stat.day), "count": stat.count}
                 for stat in message_stats
             ],
             "alert_trend": [
-                {"date": stat.day.strftime("%Y-%m-%d"), "count": stat.count}
+                {"date": stat.day.strftime("%Y-%m-%d") if hasattr(stat.day, "strftime") else str(stat.day), "count": stat.count}
                 for stat in alert_stats
             ],
             "top_keyword_groups": [

@@ -1,5 +1,6 @@
 """关键词匹配服务"""
 import re
+import time
 from typing import List, Optional
 from sqlalchemy import select, update
 from loguru import logger
@@ -10,6 +11,48 @@ from datetime import datetime
 
 class KeywordMatcher:
     """关键词匹配器"""
+
+    def __init__(self):
+        self._rules_cache = {}
+        self._cache_ttl = 30
+
+    def invalidate_cache(self):
+        self._rules_cache.clear()
+
+    def _cache_key(self, group_ids: Optional[list], enable_all_keywords: bool) -> tuple:
+        if enable_all_keywords or not group_ids:
+            return ("all",)
+        return tuple(sorted(int(gid) for gid in group_ids))
+
+    async def _get_keyword_rules(self, db, group_ids: Optional[list], enable_all_keywords: bool) -> List[dict]:
+        key = self._cache_key(group_ids, enable_all_keywords)
+        cached = self._rules_cache.get(key)
+        if cached and time.time() - cached["created_at"] < self._cache_ttl:
+            return cached["rules"]
+
+        query = (
+            select(Keyword, KeywordGroup)
+            .join(KeywordGroup, Keyword.group_id == KeywordGroup.id)
+            .where(Keyword.is_active == True, KeywordGroup.is_active == True)
+        )
+        if group_ids and not enable_all_keywords:
+            query = query.where(Keyword.group_id.in_(group_ids))
+
+        result = await db.execute(query)
+        rules = []
+        for keyword, group in result.all():
+            rules.append({
+                "keyword_id": keyword.id,
+                "word": keyword.word,
+                "group_id": group.id,
+                "group_name": group.name,
+                "match_type": keyword.match_type or group.match_type,
+                "case_sensitive": keyword.case_sensitive if keyword.case_sensitive is not None else group.case_sensitive,
+                "alert_level": keyword.alert_level or group.alert_level,
+            })
+
+        self._rules_cache[key] = {"created_at": time.time(), "rules": rules}
+        return rules
 
     async def match_message(
         self,
@@ -31,68 +74,27 @@ class KeywordMatcher:
         if not conversation:
             return []
 
-        # 确定要使用的关键词组
-        if conversation.enable_all_keywords:
-            # 使用所有激活的关键词
-            keyword_result = await db.execute(
-                select(Keyword).where(Keyword.is_active == True)
-            )
-        else:
-            # 使用指定关键词组
-            group_ids = conversation.keyword_groups
-            if not group_ids:
-                # 如果没有指定关键词组，默认使用所有激活的关键词组
-                # 这样用户无需为每个会话手动配置关键词组
-                keyword_result = await db.execute(
-                    select(Keyword).where(Keyword.is_active == True)
-                )
-            else:
-                keyword_result = await db.execute(
-                    select(Keyword).where(
-                        Keyword.group_id.in_(group_ids),
-                        Keyword.is_active == True
-                    )
-                )
-
-        keywords = keyword_result.scalars().all()
-
-        # 预加载所有相关关键词组，避免 N+1 查询
-        group_ids_in_keywords = list(set(k.group_id for k in keywords if k.group_id))
-        groups_map = {}
-        if group_ids_in_keywords:
-            groups_result = await db.execute(
-                select(KeywordGroup).where(KeywordGroup.id.in_(group_ids_in_keywords))
-            )
-            groups_map = {g.id: g for g in groups_result.scalars().all()}
+        group_ids = conversation.keyword_groups
+        rules = await self._get_keyword_rules(db, group_ids, conversation.enable_all_keywords)
 
         # 执行匹配
         matched = []
-        for keyword in keywords:
-            # 从预加载的 map 中获取关键词组配置
-            group = groups_map.get(keyword.group_id)
-            if not group or not group.is_active:
-                continue
-
-            # 使用关键词级别的配置或组级别的配置
-            match_type = keyword.match_type or group.match_type
-            case_sensitive = keyword.case_sensitive if keyword.case_sensitive is not None else group.case_sensitive
-            alert_level = keyword.alert_level or group.alert_level
-
+        for rule in rules:
             # 执行匹配
-            if self._match(text, keyword.word, match_type, case_sensitive):
+            if self._match(text, rule["word"], rule["match_type"], rule["case_sensitive"]):
                 matched.append({
-                    "keyword_id": keyword.id,
-                    "word": keyword.word,
-                    "group_id": group.id,
-                    "group_name": group.name,
-                    "alert_level": alert_level,
-                    "match_type": match_type,
+                    "keyword_id": rule["keyword_id"],
+                    "word": rule["word"],
+                    "group_id": rule["group_id"],
+                    "group_name": rule["group_name"],
+                    "alert_level": rule["alert_level"],
+                    "match_type": rule["match_type"],
                 })
 
                 # 更新关键词匹配统计 - 使用 SQLAlchemy update 语句确保持久化
                 await db.execute(
                     update(Keyword)
-                    .where(Keyword.id == keyword.id)
+                    .where(Keyword.id == rule["keyword_id"])
                     .values(
                         match_count=Keyword.match_count + 1,
                         last_matched_at=message.date
@@ -133,23 +135,12 @@ class KeywordMatcher:
             return keyword in text
 
         elif match_type == "regex":
-            # 正则匹配（带超时保护防止 ReDoS 攻击）
+            # 正则匹配
             try:
                 flags = 0 if case_sensitive else re.IGNORECASE
-                # 编译正则并使用超时保护
-                pattern = re.compile(keyword, flags)
-                import signal
-                import functools
-
-                # 使用简单的长度限制来避免灾难性回溯
-                # 对于超长文本，先截取前 10000 个字符进行匹配
-                search_text = text[:10000] if len(text) > 10000 else text
-                return bool(pattern.search(search_text))
+                return bool(re.search(keyword, text, flags))
             except re.error:
                 logger.warning(f"正则表达式错误: {keyword}")
-                return False
-            except Exception:
-                logger.warning(f"正则匹配异常: {keyword}")
                 return False
 
         elif match_type == "fuzzy":
@@ -162,13 +153,18 @@ class KeywordMatcher:
     async def test_keywords(
         self,
         text: str,
-        keyword_ids: List[int]
+        keyword_ids: Optional[List[int]] = None
     ) -> List[dict]:
         """测试关键词匹配"""
         async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(Keyword).where(Keyword.id.in_(keyword_ids))
-            )
+            if keyword_ids:
+                result = await db.execute(
+                    select(Keyword).where(Keyword.id.in_(keyword_ids))
+                )
+            else:
+                result = await db.execute(
+                    select(Keyword).where(Keyword.is_active == True)
+                )
             keywords = result.scalars().all()
 
             # 预加载关键词组

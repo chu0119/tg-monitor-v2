@@ -118,6 +118,8 @@ class SentimentService:
                     Message.text.isnot(None)
                 )
             )
+            .order_by(Message.date.desc())
+            .limit(2000)
         )
         messages = result.scalars().all()
 
@@ -190,7 +192,7 @@ class SentimentService:
                     Message.date >= start_date,
                     Message.text.isnot(None)
                 )
-            ).order_by(Message.date)
+            ).order_by(Message.date.desc()).limit(5000)
         )
         messages = result.scalars().all()
 

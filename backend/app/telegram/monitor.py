@@ -13,7 +13,7 @@ from app.models import (
 )
 from app.telegram.client import client_manager
 from app.services.keyword_matcher import KeywordMatcher
-from app.services.alert_service import AlertService
+from app.services.alert_service import alert_service
 from app.utils import now_utc
 
 
@@ -23,7 +23,7 @@ class MessageMonitor:
     def __init__(self):
         self.active_monitors: Set[int] = set()  # 正在监控的会话ID
         self.keyword_matcher = KeywordMatcher()
-        self.alert_service = AlertService()
+        self.alert_service = alert_service
         self._running = False
         # 存储事件处理器引用,用于重新注册
         self.event_handlers: Dict[int, List[Dict]] = {}  # {account_id: [{'conversation_id': x, 'handler': y, 'chat_id': z, 'type': str}]}
@@ -668,33 +668,42 @@ class MessageMonitor:
         else:
             return "unknown"
 
-    async def _update_conversation_stats(self, db, conversation_id: int, message_id: int):
+    async def _update_conversation_stats(self, db, conversation_id: int, message_id: int, increment: int = 1):
         """更新会话统计(使用 MySQL 原生 SQL 避免死锁)"""
         from sqlalchemy import text
+        increment = max(1, int(increment or 1))
 
         # 使用单条 SQL 更新会话和账号统计,减少锁竞争(参数化查询)
         sql = text("""
             UPDATE conversations c
             INNER JOIN telegram_accounts a ON c.account_id = a.id
             SET
-                c.total_messages = c.total_messages + 1,
+                c.total_messages = c.total_messages + :increment,
                 c.last_message_id = :message_id,
                 c.last_message_at = NOW(),
                 c.updated_at = NOW(),
-                a.total_messages = a.total_messages + 1,
+                a.total_messages = a.total_messages + :increment,
                 a.updated_at = NOW()
             WHERE c.id = :conversation_id
         """)
 
         try:
-            await db.execute(sql, {"message_id": message_id, "conversation_id": conversation_id})
+            await db.execute(
+                sql,
+                {
+                    "message_id": message_id,
+                    "conversation_id": conversation_id,
+                    "increment": increment,
+                },
+            )
         except Exception as e:
             # 如果更新失败,回退到分离的更新语句
             logger.warning(f"联合更新失败,回退到分离更新: {e}")
-            await self._update_conversation_stats_fallback(db, conversation_id, message_id)
+            await self._update_conversation_stats_fallback(db, conversation_id, message_id, increment)
 
-    async def _update_conversation_stats_fallback(self, db, conversation_id: int, message_id: int):
+    async def _update_conversation_stats_fallback(self, db, conversation_id: int, message_id: int, increment: int = 1):
         """回退方法:分离更新会话和账号统计"""
+        increment = max(1, int(increment or 1))
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -711,7 +720,7 @@ class MessageMonitor:
                     update(Conversation)
                     .where(Conversation.id == conversation_id)
                     .values(
-                        total_messages=Conversation.total_messages + 1,
+                        total_messages=Conversation.total_messages + increment,
                         last_message_id=message_id,
                         last_message_at=now_utc(),
                         updated_at=now_utc()
@@ -723,7 +732,7 @@ class MessageMonitor:
                     update(TelegramAccount)
                     .where(TelegramAccount.id == account_id)
                     .values(
-                        total_messages=TelegramAccount.total_messages + 1,
+                        total_messages=TelegramAccount.total_messages + increment,
                         updated_at=now_utc()
                     )
                 )
@@ -883,8 +892,53 @@ class MessageMonitor:
                     processed += 1
 
             logger.info(f"历史消息拉取完成: 会话 {conversation_id}, 处理了 {processed}/{len(messages)} 条消息")
+            await self._record_history_state(
+                conversation_id,
+                status="ok",
+                error=None,
+                processed=processed,
+            )
         except Exception as e:
             logger.error(f"拉取历史消息失败(conversation_id={conversation_id}): {e}")
+            await self._record_history_state(
+                conversation_id,
+                status="error",
+                error=str(e),
+                processed=0,
+            )
+
+    async def _record_history_state(self, conversation_id: int, status: str, error: Optional[str], processed: int):
+        """记录历史拉取状态，连续失败后自动停用历史拉取，避免重复刷错。"""
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Conversation).where(Conversation.id == conversation_id)
+            )
+            conversation = result.scalar_one_or_none()
+            if not conversation:
+                return
+
+            extra = dict(conversation.extra or {})
+            error_count = int(extra.get("history_error_count") or 0)
+            if status == "ok":
+                error_count = 0
+                extra.pop("last_history_error", None)
+            else:
+                error_count += 1
+                extra["last_history_error"] = (error or "unknown")[:1000]
+
+            extra.update({
+                "history_status": status,
+                "last_history_at": now_utc().isoformat(),
+                "last_history_processed": processed,
+                "history_error_count": error_count,
+            })
+
+            conversation.extra = extra
+            if error_count >= 3:
+                conversation.enable_history = False
+                conversation.note = (conversation.note or "") + "\n历史拉取连续失败3次，系统已自动停用历史拉取；实时监控不受影响。"
+                logger.warning(f"会话 {conversation_id} 历史拉取连续失败，已自动停用 enable_history")
+            await db.commit()
 
     async def start_all_monitors(self):
         """启动所有会话的监控"""
@@ -1070,6 +1124,7 @@ class MessageMonitor:
             # 批量创建发送者和消息
             db_messages = []
             senders_cache = {}
+            message_senders = {}
             skipped_count = 0
             # 批内去重：记录已处理的消息ID
             processed_ids = set()
@@ -1134,6 +1189,7 @@ class MessageMonitor:
                 )
                 db_messages.append(db_message)
                 db.add(db_message)
+                message_senders[db_message.id] = sender
                 processed_ids.add(message.id)  # 记录已处理
 
             if skipped_count > 0:
@@ -1147,7 +1203,10 @@ class MessageMonitor:
                     # 如果 flush 失败（可能是主键冲突），逐条处理
                     logger.warning(f"批量 flush 失败，降级为逐条处理: {flush_error}")
                     await db.rollback()
+                    senders_cache.clear()
                     await self._process_messages_individually(db, conversation_id, messages, senders_cache)
+                    await db.commit()
+                    logger.info(f"逐条降级处理完成: 会话 {conversation_id}, {len(messages)} 条消息")
                     return
 
                 # 批量处理关键词匹配
@@ -1165,18 +1224,22 @@ class MessageMonitor:
                         )
 
                         if matched_keywords:
-                            # 获取发送者
-                            sender = senders_cache.get(db_message.sender_id)
+                            sender = message_senders.get(db_message.id)
                             if sender:
                                 await self.alert_service.create_alerts(
                                     db, db_message, sender, matched_keywords
+                                )
+                            else:
+                                logger.warning(
+                                    f"消息 {db_message.id} 匹配到 {len(matched_keywords)} 个关键词, "
+                                    f"但找不到发送者, 跳过告警创建"
                                 )
                     except Exception as e:
                         logger.error(f"消息 {db_message.id} 关键词匹配失败: {e}")
 
                 # 更新会话统计
                 await self._update_conversation_stats(
-                    db, conversation_id, db_messages[-1].id
+                    db, conversation_id, db_messages[-1].id, len(db_messages)
                 )
 
                 # 更新最后消息时间
@@ -1204,6 +1267,9 @@ class MessageMonitor:
 
     async def _process_messages_individually(self, db, conversation_id: int, messages: List[Message], senders_cache: Dict):
         """逐条处理消息（降级方案，用于批量处理失败时）"""
+        processed_count = 0
+        last_message_id = None
+
         for message in messages:
             try:
                 # 获取发送者
@@ -1245,6 +1311,8 @@ class MessageMonitor:
                 )
                 db.add(db_message)
                 await db.flush()
+                processed_count += 1
+                last_message_id = db_message.id
 
                 # 关键词匹配
                 class _Msg:
@@ -1268,9 +1336,9 @@ class MessageMonitor:
                 continue
 
         # 更新会话统计
-        if messages:
+        if processed_count > 0 and last_message_id is not None:
             await self._update_conversation_stats(
-                db, conversation_id, messages[-1].id
+                db, conversation_id, last_message_id, processed_count
             )
 
     async def stop_all_monitors(self):

@@ -35,6 +35,8 @@ async def get_wordcloud(
             )
 
         return {"image": image_base64}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"生成词云失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

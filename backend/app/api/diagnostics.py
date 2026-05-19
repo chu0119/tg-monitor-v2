@@ -103,7 +103,7 @@ async def check_conversation_accessibility(
 @router.get("/conversations")
 async def diagnose_conversations(
     db: AsyncSession = Depends(get_db),
-    check_accessibility: bool = True,
+    check_accessibility: bool = False,
     limit: int = 50,
 ):
     """
@@ -391,6 +391,49 @@ async def fix_all_issues(
 
     return results
 
+
+@router.get("/message-id-risk")
+async def message_id_risk_report(db: AsyncSession = Depends(get_db)):
+    """诊断消息主键结构风险。
+
+    当前 messages.id 使用 Telegram 消息 ID，Telegram 的消息 ID 只在单个会话内唯一。
+    此接口不修改结构，只给出风险和迁移建议，避免在线强制迁移主键。
+    """
+    total_messages = (await db.execute(select(func.count(MessageModel.id)))).scalar() or 0
+    total_conversations = (await db.execute(select(func.count(Conversation.id)))).scalar() or 0
+    conversations_with_messages = (await db.execute(
+        select(func.count(func.distinct(MessageModel.conversation_id)))
+    )).scalar() or 0
+
+    repeated_last_ids = await db.execute(
+        select(Conversation.last_message_id, func.count(Conversation.id).label("cnt"))
+        .where(Conversation.last_message_id.is_not(None))
+        .group_by(Conversation.last_message_id)
+        .having(func.count(Conversation.id) > 1)
+        .limit(20)
+    )
+    repeated_examples = [
+        {"telegram_message_id": row[0], "conversation_count": int(row[1])}
+        for row in repeated_last_ids.all()
+    ]
+
+    risk_level = "low"
+    if conversations_with_messages > 1:
+        risk_level = "medium"
+    if repeated_examples:
+        risk_level = "high"
+
+    return {
+        "risk_level": risk_level,
+        "total_messages": total_messages,
+        "total_conversations": total_conversations,
+        "conversations_with_messages": conversations_with_messages,
+        "repeated_last_message_id_examples": repeated_examples,
+        "current_structure": "messages.id = Telegram message id",
+        "recommended_structure": "使用自增内部主键 id，并增加唯一键 (conversation_id, telegram_message_id)",
+        "safe_next_step": "需要单独维护窗口执行迁移：新增 telegram_message_id、回填、修复外键、重建唯一索引、验证后切换。",
+    }
+
 @router.get("/internet-status")
 async def check_internet_status():
     """检测与 Telegram 服务器的连通性"""
@@ -415,12 +458,12 @@ async def check_internet_status():
                         sock = socket.create_connection((parsed.hostname, parsed.port), timeout=3)
                         sock.close()
                         return True
-                    except Exception:
+                    except:
                         return False
                 proxy_ok = await loop.run_in_executor(None, check_in_thread)
                 if proxy_ok:
                     return {"online": True, "checked_url": "proxy_reachable"}
-            except Exception:
+            except:
                 pass
     
     return {"online": False, "checked_url": None}

@@ -1,30 +1,34 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { api } from "@/lib/api";
 import {
-  MessageSquare,
-  AlertTriangle,
   Activity,
-  Users,
-  Shield,
-  Radio,
-  Zap,
+  AlertTriangle,
+  BarChart3,
+  BellRing,
+  CircleDot,
+  Cpu,
+  Database,
+  Gauge,
   Globe,
-  Clock,
-  TrendingUp,
+  HardDrive,
   Maximize2,
+  MessageSquare,
   Minimize2,
+  Radio,
+  Shield,
+  Sparkles,
+  TrendingUp,
+  Users,
+  Wifi,
+  Zap,
 } from "lucide-react";
 import {
-  AreaChart,
-  Area,
-  PieChart,
-  Pie,
   Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
+  Pie,
+  PieChart,
   ResponsiveContainer,
+  Tooltip,
 } from "recharts";
 
 interface DashboardStats {
@@ -48,31 +52,82 @@ interface DashboardStats {
 
 interface HealthStatus {
   status: string;
-  resources: { memory_mb: number; cpu_percent: number; memory_percent: number; threads: number; memory_total_gb: number; memory_used_gb: number; memory_available_gb: number; disk_total_gb: number; disk_used_gb: number; disk_free_gb: number; disk_percent: number };
-  telegram: { clients_count: number; active_monitors: number };
-  websocket: { connections: number };
+  resources?: {
+    cpu_percent?: number;
+    memory_percent?: number;
+    memory_total_gb?: number;
+    memory_used_gb?: number;
+    memory_available_gb?: number;
+    disk_total_gb?: number;
+    disk_used_gb?: number;
+    disk_free_gb?: number;
+    disk_percent?: number;
+    threads?: number;
+    process_memory_mb?: number;
+  };
+  telegram?: {
+    clients_count?: number;
+    active_monitors?: number;
+    message_queue?: { queue_size?: number; dropped?: number; processed?: number };
+  };
+  websocket?: { connections?: number };
+  alert_pipeline?: {
+    status?: string;
+    latest_message_at?: string;
+    latest_alert_at?: string;
+    recent_alerts_1h?: number;
+    matched_without_alert_1h?: number;
+    notification_failures_24h?: number;
+    notification_queue?: {
+      queue_size?: number;
+      workers?: number;
+      processed?: number;
+      failed?: number;
+      dropped?: number;
+    };
+    problems?: string[];
+  };
 }
 
 interface AlertItem {
   id: number;
-  keyword_text: string;
-  keyword_group_name: string;
-  alert_level: string;
-  message_preview: string;
-  created_at: string;
-  status: string;
-  conversation_id: number;
+  keyword_text?: string;
+  keyword_group_name?: string;
+  alert_level?: string;
+  message_preview?: string;
+  created_at?: string;
+  status?: string;
+  conversation_id?: number;
   sender_username?: string;
   conversation_title?: string;
 }
 
-const COLORS = ["#00f0ff", "#ff006e", "#b026ff", "#0aff00", "#ffaa00"];
-const LEVEL_COLORS: Record<string, string> = {
-  low: "#0aff00",
-  medium: "#ffaa00",
-  high: "#ff6b00",
-  critical: "#ff006e",
-};
+interface KeywordTrend {
+  keyword_group: string;
+  dates: string[];
+  counts: number[];
+  top_keywords?: Array<{ word: string; count: number }>;
+}
+
+interface SenderRanking {
+  sender_id: number;
+  username?: string;
+  first_name?: string;
+  message_count: number;
+  alert_count: number;
+  rank: number;
+}
+
+interface ConversationActivity {
+  conversation_id: number;
+  title: string;
+  chat_type: string;
+  message_count: number;
+  sender_count: number;
+  alert_count: number;
+  last_message_at?: string;
+}
+
 const LEVEL_MAP: Record<string, string> = {
   critical: "严重",
   high: "高危",
@@ -80,67 +135,213 @@ const LEVEL_MAP: Record<string, string> = {
   low: "低危",
 };
 
-function AnimatedNumber({ value }: { value: number }) {
-  const [display, setDisplay] = useState(0);
-  const prevRef = useRef(0);
-  useEffect(() => {
-    const from = prevRef.current;
-    const to = value;
-    prevRef.current = to;
-    if (from === to) return;
-    const duration = 800;
-    const start = performance.now();
-    function tick(now: number) {
-      const progress = Math.min((now - start) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(from + (to - from) * eased));
-      if (progress < 1) requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-  }, [value]);
-  return <>{display.toLocaleString()}</>;
+const LEVEL_COLORS: Record<string, string> = {
+  critical: "#f43f5e",
+  high: "#fb923c",
+  medium: "#facc15",
+  low: "#22c55e",
+};
+
+const CHART_COLORS = ["#38bdf8", "#f43f5e", "#a78bfa", "#22c55e", "#facc15", "#fb7185"];
+
+function formatNumber(value?: number | string) {
+  if (typeof value === "number") return value.toLocaleString();
+  return value ?? "--";
 }
 
-function BigStatCard({
+function shortNumber(value?: number) {
+  if (!value) return "0";
+  if (value >= 100000000) return `${(value / 100000000).toFixed(1)}亿`;
+  if (value >= 10000) return `${(value / 10000).toFixed(1)}万`;
+  return value.toLocaleString();
+}
+
+function sanitizePreview(value?: string) {
+  if (!value) return "无消息预览";
+  return value
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function AnimatedNumber({ value }: { value: number }) {
+  const [display, setDisplay] = useState(value);
+  const [rollKey, setRollKey] = useState(0);
+  const previous = useRef(value);
+
+  useEffect(() => {
+    if (value === previous.current) return;
+    previous.current = value;
+    setDisplay(value);
+    setRollKey((current) => current + 1);
+  }, [value]);
+
+  const text = display.toLocaleString();
+  return (
+    <span className="inline-flex overflow-hidden tabular-nums" aria-label={text}>
+      {text.split("").map((char, index) => (
+        <span
+          key={`${rollKey}-${index}-${char}`}
+          className={/\d/.test(char) ? "metric-roll-char" : "inline-block"}
+          style={{ animationDelay: `${Math.min(index * 22, 120)}ms` }}
+        >
+          {char}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function Panel({
+  title,
+  icon: Icon,
+  action,
+  children,
+  className = "",
+}: {
+  title: string;
+  icon: any;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`relative overflow-hidden rounded-lg border border-cyan-300/10 bg-slate-950/70 shadow-[0_0_28px_rgba(14,165,233,0.08)] ${className}`}>
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
+      <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+          <Icon size={16} className="text-cyan-300" />
+          <span>{title}</span>
+        </div>
+        {action}
+      </div>
+      <div className="p-4">{children}</div>
+    </section>
+  );
+}
+
+function MetricTile({
   label,
   value,
-  unit,
+  sub,
   icon: Icon,
   color,
-  glow,
 }: {
   label: string;
   value: number | string;
-  unit?: string;
+  sub?: string;
   icon: any;
   color: string;
-  glow?: string;
 }) {
   return (
-    <div
-      className="relative rounded-xl md:rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.07] to-transparent p-3 md:p-6 flex flex-col justify-between min-h-[100px] md:min-h-[160px] overflow-hidden"
-      style={{ boxShadow: glow ? `inset 0 0 30px ${glow}` : undefined }}
-    >
-      {/* 顶部发光线 */}
-      <div
-        className="absolute top-0 left-0 right-0 h-[2px]"
-        style={{
-          background: `linear-gradient(90deg, transparent, ${color}, transparent)`,
-        }}
-      />
-      <div className="flex items-center gap-1.5 md:gap-2 text-gray-400 text-xs md:text-sm mb-2 md:mb-3">
-        <Icon size={14} className="md:w-4 md:h-4" style={{ color }} />
-        <span>{label}</span>
+    <div className="relative min-h-[104px] overflow-hidden rounded-lg border border-white/10 bg-white/[0.045] p-3.5">
+      <div className="absolute -right-5 -top-8 h-24 w-24 rounded-full opacity-10 blur-2xl" style={{ backgroundColor: color }} />
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-slate-400">{label}</span>
+        <Icon size={18} style={{ color }} />
       </div>
-      <div className="flex items-baseline gap-1">
-        <span className="text-2xl md:text-4xl font-bold text-white tracking-tight font-mono">
+      <div className="mt-3 flex items-end gap-2">
+        <span className="font-mono text-2xl font-bold tracking-normal text-white 2xl:text-3xl">
           {typeof value === "number" ? <AnimatedNumber value={value} /> : value}
         </span>
-        {unit && (
-          <span className="text-xs md:text-sm text-gray-500">{unit}</span>
-        )}
+      </div>
+      {sub && <p className="mt-1.5 truncate text-xs text-slate-500">{sub}</p>}
+    </div>
+  );
+}
+
+function ProgressRow({ label, value, color, detail }: { label: string; value: number; color: string; detail?: string }) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="text-slate-400">{label}</span>
+        <span className="font-mono text-slate-200">{detail ?? `${value.toFixed(1)}%`}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-white/10">
+        <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(value, 100)}%`, backgroundColor: color }} />
       </div>
     </div>
+  );
+}
+
+function MessageTrendChart({ data }: { data: Array<{ hour: string; count: number }> }) {
+  const width = 760;
+  const height = 230;
+  const pad = { left: 50, right: 16, top: 16, bottom: 30 };
+  const max = Math.max(...data.map((item) => item.count), 1);
+  const points = data.map((item, index) => {
+    const x = pad.left + (data.length <= 1 ? 0 : (index / (data.length - 1)) * (width - pad.left - pad.right));
+    const y = pad.top + (1 - item.count / max) * (height - pad.top - pad.bottom);
+    return { x, y, ...item };
+  });
+  const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+  const areaPath = points.length
+    ? `M ${pad.left} ${height - pad.bottom} ${linePath.replace(/^M/, "L")} L ${points[points.length - 1].x.toFixed(1)} ${height - pad.bottom} Z`
+    : "";
+  const yTicks = [max, max * 0.66, max * 0.33, 0];
+  const xStep = Math.max(1, Math.ceil(data.length / 7));
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" preserveAspectRatio="none" role="img">
+      <defs>
+        <linearGradient id="bigscreenTrendFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.36" />
+          <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      {yTicks.map((tick, index) => {
+        const y = pad.top + index * ((height - pad.top - pad.bottom) / (yTicks.length - 1));
+        return (
+          <g key={index}>
+            <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke="rgba(148,163,184,0.13)" strokeDasharray="4 5" />
+            <text x={pad.left - 9} y={y + 4} textAnchor="end" fill="#64748b" fontSize="11">{shortNumber(Math.round(tick))}</text>
+          </g>
+        );
+      })}
+      {data.map((item, index) => {
+        if (index % xStep !== 0 && index !== data.length - 1) return null;
+        const point = points[index];
+        return <text key={item.hour} x={point.x} y={height - 8} textAnchor="middle" fill="#64748b" fontSize="11">{item.hour}</text>;
+      })}
+      <line x1={pad.left} x2={pad.left} y1={pad.top} y2={height - pad.bottom} stroke="rgba(148,163,184,0.35)" />
+      <line x1={pad.left} x2={width - pad.right} y1={height - pad.bottom} y2={height - pad.bottom} stroke="rgba(148,163,184,0.35)" />
+      {areaPath && <path d={areaPath} fill="url(#bigscreenTrendFill)" />}
+      {linePath && <path d={linePath} fill="none" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+    </svg>
+  );
+}
+
+function HorizontalBarChart({ data }: { data: Array<{ name: string; value: number }> }) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+  return (
+    <div className="flex h-full min-h-[190px] flex-col justify-center gap-3">
+      {data.slice(0, 6).map((item, index) => (
+        <div key={`${item.name}-${index}`} className="grid grid-cols-[72px_1fr_48px] items-center gap-2">
+          <div className="truncate text-xs text-slate-400" title={item.name}>{item.name}</div>
+          <div className="h-3 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.max(2, Math.min(100, (item.value / max) * 100))}%`,
+                background: CHART_COLORS[index % CHART_COLORS.length],
+              }}
+            />
+          </div>
+          <div className="text-right font-mono text-xs text-slate-300">{shortNumber(item.value)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusPill({ ok, text }: { ok: boolean; text: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
+      ok ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-amber-400/30 bg-amber-400/10 text-amber-100"
+    }`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-300" : "bg-amber-300 animate-pulse"}`} />
+      {text}
+    </span>
   );
 }
 
@@ -148,10 +349,57 @@ export function BigScreenPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [keywordTrend, setKeywordTrend] = useState<KeywordTrend[]>([]);
+  const [senders, setSenders] = useState<SenderRanking[]>([]);
+  const [conversations, setConversations] = useState<ConversationActivity[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const alertTableRef = useRef<HTMLDivElement>(null);
-  const scrollIntervalRef = useRef<number | null>(null);
+  const [viewport, setViewport] = useState({ width: 1920, height: 1080 });
+
+  const fetchData = useCallback(async () => {
+    const [statsRes, healthRes, alertsRes, keywordRes, senderRes, conversationRes] = await Promise.allSettled([
+      api.dashboard.getStats(),
+      fetch("/health").then((r) => (r.ok ? r.json() : null)),
+      api.alerts.list({ page: 1, page_size: 18 }),
+      api.dashboard.getKeywordTrend(7, 6),
+      api.dashboard.getSenderRanking(8, "alerts"),
+      api.dashboard.getConversationActivity(8),
+    ]);
+
+    if (statsRes.status === "fulfilled") setStats(statsRes.value);
+    if (healthRes.status === "fulfilled") setHealth(healthRes.value);
+    if (alertsRes.status === "fulfilled") setAlerts(alertsRes.value?.items || alertsRes.value || []);
+    if (keywordRes.status === "fulfilled") setKeywordTrend(keywordRes.value || []);
+    if (senderRes.status === "fulfilled") setSenders(senderRes.value || []);
+    if (conversationRes.status === "fulfilled") setConversations(conversationRes.value || []);
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    const dataTimer = window.setInterval(fetchData, 3000);
+    const clockTimer = window.setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => {
+      window.clearInterval(dataTimer);
+      window.clearInterval(clockTimer);
+    };
+  }, [fetchData]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      const active = !!document.fullscreenElement;
+      setIsFullscreen(active);
+      document.documentElement.classList.toggle("bigscreen-active", active);
+    };
+    const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    onResize();
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      window.removeEventListener("resize", onResize);
+      document.documentElement.classList.remove("bigscreen-active");
+    };
+  }, []);
 
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
@@ -161,621 +409,341 @@ export function BigScreenPage() {
     }
   }, []);
 
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-      // 全屏时隐藏主布局的 header 和 sidebar
-      document.documentElement.classList.toggle('bigscreen-active', !!document.fullscreenElement);
-    };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.documentElement.classList.remove('bigscreen-active');
-    };
-  }, []);
+  const alertPieData = useMemo(
+    () =>
+      Object.entries(stats?.alerts_by_level || {})
+        .filter(([, value]) => value > 0)
+        .map(([key, value]) => ({ key, name: LEVEL_MAP[key] || key, value })),
+    [stats?.alerts_by_level]
+  );
 
-  const fetchData = useCallback(async () => {
-    try {
-      const [statsData, healthData] = await Promise.all([
-        api.dashboard.getStats(),
-        fetch("/health").then((r) => r.ok ? r.json() : null).catch(() => null),
-      ]);
-      setStats(statsData);
-      setHealth(healthData);
-      // 获取最新告警
-      try {
-        const alertsRes = await api.alerts.list({ page: 1, page_size: 30 });
-        setAlerts(alertsRes.items || alertsRes || []);
-      } catch {
-        // ignore
-      }
-    } catch (e) {
-      console.error("BigScreen fetch error", e);
-    }
-  }, []);
+  const keywordBars = useMemo(
+    () =>
+      keywordTrend.map((item) => ({
+        name: item.keyword_group?.length > 8 ? `${item.keyword_group.slice(0, 8)}...` : item.keyword_group,
+        value: item.counts?.reduce((sum, value) => sum + value, 0) || 0,
+      })),
+    [keywordTrend]
+  );
 
-  useEffect(() => {
-    fetchData();
-    const dataTimer = setInterval(fetchData, 15000);
-    const clockTimer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => {
-      clearInterval(dataTimer);
-      clearInterval(clockTimer);
-    };
-  }, [fetchData]);
+  const messagePeak = Math.max(...(stats?.messages_24h || []).map((item) => item.count), 1);
+  const senderAlertPeak = Math.max(...senders.map((sender) => sender.alert_count || 0), 1);
+  const pipelineHardIssues =
+    (health?.alert_pipeline?.matched_without_alert_1h || 0) > 0 ||
+    (health?.alert_pipeline?.notification_queue?.queue_size || 0) > 100 ||
+    (health?.alert_pipeline?.notification_queue?.failed || 0) > 0;
+  const pipelineOk = health?.alert_pipeline?.status === "healthy" || !pipelineHardIssues;
+  const resourceOk =
+    (health?.resources?.cpu_percent || 0) < 85 &&
+    (health?.resources?.memory_percent || 0) < 85 &&
+    (health?.resources?.disk_percent || 0) < 90;
+  const systemOk = health?.status === "healthy" || resourceOk;
+  const hourlyRate = stats ? Math.round(stats.today_messages / Math.max(currentTime.getHours(), 1)) : 0;
 
-  // 告警表格自动滚动
-  useEffect(() => {
-    const container = alertTableRef.current;
-    if (!container || alerts.length === 0) return;
+  const threatScore = useMemo(() => {
+    if (!stats) return 0;
+    const alertPressure = Math.min(stats.today_alerts / Math.max(stats.today_messages, 1), 0.35) * 150;
+    const pendingPressure = Math.min(stats.pending_alerts / Math.max(stats.total_alerts, 1), 1) * 35;
+    const pipelinePressure = pipelineOk ? 0 : 12;
+    const score = Math.min(100, alertPressure + pendingPressure + pipelinePressure);
+    return Math.round(score);
+  }, [pipelineOk, stats]);
 
-    const scrollStep = 40; // 每次滚动的像素(约一行高度)
-    let scrollTop = 0;
-
-    const startScrolling = () => {
-      scrollIntervalRef.current = window.setInterval(() => {
-        if (!container) return;
-        scrollTop += scrollStep;
-        
-        // 滚动到底部后重置
-        if (scrollTop >= container.scrollHeight - container.clientHeight) {
-          scrollTop = 0;
-          container.scrollTop = 0;
-        } else {
-          container.scrollTop = scrollTop;
-        }
-      }, 3000);
-    };
-
-    startScrolling();
-
-    return () => {
-      if (scrollIntervalRef.current) {
-        clearInterval(scrollIntervalRef.current);
-      }
-    };
-  }, [alerts]);
-
-  const handleMouseEnter = () => {
-    if (scrollIntervalRef.current) {
-      clearInterval(scrollIntervalRef.current);
-      scrollIntervalRef.current = null;
-    }
-  };
-
-  const handleMouseLeave = () => {
-    const container = alertTableRef.current;
-    if (!container || alerts.length === 0) return;
-
-    const scrollStep = 40;
-    scrollIntervalRef.current = window.setInterval(() => {
-      if (!container) return;
-      const newScrollTop = container.scrollTop + scrollStep;
-      
-      if (newScrollTop >= container.scrollHeight - container.clientHeight) {
-        container.scrollTop = 0;
-      } else {
-        container.scrollTop = newScrollTop;
-      }
-    }, 3000);
-  };
+  const designWidth = 1920;
+  const designHeight = 1080;
+  const fullscreenScale = isFullscreen
+    ? Math.min(viewport.width / designWidth, viewport.height / designHeight)
+    : 1;
+  const fullscreenOffsetX = isFullscreen ? Math.max(0, (viewport.width - designWidth * fullscreenScale) / 2) : 0;
+  const fullscreenOffsetY = isFullscreen ? Math.max(0, (viewport.height - designHeight * fullscreenScale) / 2) : 0;
 
   if (!stats) {
     return (
-      <div className="min-h-screen bg-[#030712] flex items-center justify-center">
-        <div className="flex items-center gap-3 text-cyber-blue text-xl">
-          <Radio className="animate-pulse" size={28} />
-          <span>正在加载监控大屏...</span>
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-cyan-200">
+        <div className="flex items-center gap-3 text-lg">
+          <Radio className="animate-pulse" size={24} />
+          正在加载监控大屏...
         </div>
       </div>
     );
   }
 
-  const alertsPieData = Object.entries(stats.alerts_by_level || {}).map(
-    ([name, value]) => ({ name: LEVEL_MAP[name] || name, value })
-  );
-  const messagesTrend = stats.messages_24h || [];
-
-  // 计算运行时间指标
-  const msgRate =
-    stats.today_messages > 0
-      ? (stats.today_messages / (new Date().getHours() || 1)).toFixed(1)
-      : "0";
-
   return (
-    <div className={`bg-[#030712] text-white ${isFullscreen ? 'fixed inset-0 z-[9999] overflow-hidden' : 'min-h-screen overflow-auto'}`}>
-      {/* 背景网格 */}
+    <div className={`bg-[#030712] text-white ${isFullscreen ? "fixed inset-0 z-[9999] overflow-hidden" : "min-h-[calc(100vh-64px)] overflow-auto xl:h-[calc(100vh-64px)] xl:overflow-hidden"}`}>
       <div
-        className="fixed inset-0 opacity-30 pointer-events-none"
+        className="pointer-events-none fixed inset-0 opacity-40"
         style={{
           backgroundImage:
-            "linear-gradient(rgba(0,240,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,240,255,0.03) 1px, transparent 1px)",
-          backgroundSize: "60px 60px",
+            "linear-gradient(rgba(56,189,248,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,0.05) 1px, transparent 1px)",
+          backgroundSize: "52px 52px",
         }}
       />
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_18%_10%,rgba(56,189,248,0.16),transparent_26%),radial-gradient(circle_at_82%_18%,rgba(244,63,94,0.12),transparent_24%),radial-gradient(circle_at_50%_100%,rgba(34,197,94,0.10),transparent_28%)]" />
 
-      {/* 顶部标题栏 */}
-      <div className="relative z-10 border-b border-white/10 bg-black/40 backdrop-blur-sm sticky top-0">
-        <div className="flex flex-col md:flex-row items-center justify-between px-4 md:px-8 py-3 md:py-4 gap-2 md:gap-0">
-          <div className="flex items-center gap-3 md:gap-4">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl bg-gradient-to-br from-cyber-blue to-cyber-purple flex items-center justify-center">
-              <Shield size={18} className="md:w-[22px] md:h-[22px]" />
+      <div
+        className={isFullscreen ? "absolute z-10" : "relative z-10"}
+        style={isFullscreen ? {
+          width: designWidth,
+          height: designHeight,
+          transform: `translate(${fullscreenOffsetX}px, ${fullscreenOffsetY}px) scale(${fullscreenScale})`,
+          transformOrigin: "top left",
+        } : undefined}
+      >
+      <header className="relative z-10 border-b border-cyan-300/10 bg-slate-950/85 px-4 py-2.5 backdrop-blur md:px-6">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-cyan-300/30 bg-cyan-300/10 shadow-[0_0_24px_rgba(56,189,248,0.25)]">
+              <Shield size={25} className="text-cyan-200" />
             </div>
-            <div className="text-center md:text-left">
-              <h1 className="text-lg md:text-2xl font-bold tracking-wide">
-                听风追影–群组数据预警分析系统
-              </h1>
-              <p className="hidden md:block text-xs text-gray-500 mt-0.5">
-                TELEGRAM MONITORING & ALERT SYSTEM
-              </p>
+            <div>
+              <h1 className="text-xl font-bold tracking-wide text-white md:text-[26px]">听风追影 群组数据预警分析指挥中心</h1>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                <span>TELEGRAM MONITORING & EARLY WARNING CENTER</span>
+                <span className="hidden h-1 w-1 rounded-full bg-slate-500 sm:inline-block" />
+                <span>数据刷新: 3s</span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-4 md:gap-8 w-full md:w-auto justify-between md:justify-end">
-            <div className="flex items-center gap-2">
-              <div
-                className={`w-2 h-2 md:w-2.5 md:h-2.5 rounded-full ${
-                  health?.status === "healthy"
-                    ? "bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.8)]"
-                    : "bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.8)] animate-pulse"
-                }`}
-              />
-              <span className="text-xs md:text-sm text-gray-300">
-                {health?.status === "healthy" ? "系统正常运行" : "系统异常"}
-              </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <StatusPill ok={systemOk} text={systemOk ? "系统运行稳定" : "系统资源需关注"} />
+            <StatusPill ok={pipelineOk} text={pipelineOk ? "告警链路稳定" : "告警链路需关注"} />
+            <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-right">
+              <div className="font-mono text-xl text-cyan-200">{currentTime.toLocaleTimeString("zh-CN", { hour12: false })}</div>
+              <div className="text-xs text-slate-500">
+                {currentTime.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" })}
+              </div>
             </div>
             <button
               onClick={toggleFullscreen}
-              className="p-1.5 md:p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-              title={isFullscreen ? "退出全屏" : "全屏"}
+              className="rounded-lg border border-white/10 bg-white/[0.04] p-2.5 text-slate-300 transition hover:border-cyan-300/40 hover:text-cyan-100"
+              title={isFullscreen ? "退出全屏" : "全屏展示"}
             >
-              {isFullscreen ? (
-                <Minimize2 size={16} className="md:w-5 md:h-5 text-gray-300" />
-              ) : (
-                <Maximize2 size={16} className="md:w-5 md:h-5 text-gray-300" />
-              )}
+              {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>
-            <div className="text-right">
-              <p className="text-lg md:text-2xl font-mono text-cyber-blue tracking-wider">
-                {currentTime.toLocaleTimeString("zh-CN", { hour12: false })}
-              </p>
-              <p className="hidden md:block text-xs text-gray-500 font-mono">
-                {currentTime.toLocaleDateString("zh-CN", {
-                  year: "numeric",
-                  month: "2-digit",
-                  day: "2-digit",
-                  weekday: "long",
-                })}
-              </p>
+          </div>
+        </div>
+      </header>
+
+      <main className={`relative z-10 grid gap-3 p-3 md:gap-3 xl:grid-rows-[112px_minmax(0,1.15fr)_minmax(0,1fr)] xl:overflow-hidden ${isFullscreen ? "h-[1002px] grid-rows-[112px_minmax(0,1.15fr)_minmax(0,1fr)]" : "xl:h-[calc(100vh-142px)]"}`}>
+        <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6 xl:min-h-0">
+          <MetricTile label="今日消息" value={stats.today_messages} sub={`峰值 ${shortNumber(messagePeak)} / 小时`} icon={MessageSquare} color="#38bdf8" />
+          <MetricTile label="今日告警" value={stats.today_alerts} sub={`待处理 ${shortNumber(stats.pending_alerts)}`} icon={BellRing} color="#f43f5e" />
+          <MetricTile label="活跃会话" value={stats.active_conversations} sub={`总会话 ${stats.total_conversations}`} icon={Globe} color="#a78bfa" />
+          <MetricTile label="监控账号" value={stats.active_accounts} sub={`TG 客户端 ${health?.telegram?.clients_count || 0}`} icon={Users} color="#22c55e" />
+          <MetricTile label="消息速率" value={hourlyRate} sub="条 / 小时" icon={Zap} color="#facc15" />
+          <MetricTile label="态势指数" value={threatScore} sub={threatScore >= 70 ? "高压态势" : threatScore >= 35 ? "中等态势" : "态势平稳"} icon={Gauge} color={threatScore >= 70 ? "#f43f5e" : threatScore >= 35 ? "#facc15" : "#22c55e"} />
+        </section>
+
+        <section className="grid min-h-0 gap-3 xl:grid-cols-[1.45fr_0.8fr_0.95fr]">
+          <Panel title="24小时消息态势" icon={TrendingUp} className="min-h-[260px] xl:min-h-0">
+            <div className="h-[210px] xl:h-full xl:min-h-[190px]">
+              <MessageTrendChart data={stats.messages_24h || []} />
             </div>
-          </div>
-        </div>
-      </div>
+          </Panel>
 
-      {/* 主内容区 */}
-      <div className={`relative z-10 p-3 md:p-6 grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 auto-rows-auto md:grid-rows-[auto_1fr_1fr] ${isFullscreen ? 'h-[calc(100vh-72px)]' : ''}`}>
-        {/* 第一行：核心指标 */}
-        <div className="col-span-12 grid grid-cols-2 md:grid-cols-6 gap-3 md:gap-4">
-          <BigStatCard
-            label="监控账号"
-            value={stats.active_accounts}
-            icon={Users}
-            color="#00f0ff"
-            glow="rgba(0,240,255,0.05)"
-          />
-          <BigStatCard
-            label="监控频道"
-            value={stats.active_conversations}
-            icon={Globe}
-            color="#b026ff"
-            glow="rgba(176,38,255,0.05)"
-          />
-          <BigStatCard
-            label="今日消息"
-            value={stats.today_messages}
-            icon={MessageSquare}
-            color="#0aff00"
-            glow="rgba(10,255,0,0.05)"
-          />
-          <BigStatCard
-            label="待处理告警"
-            value={stats.pending_alerts}
-            icon={AlertTriangle}
-            color="#ff006e"
-            glow="rgba(255,0,110,0.05)"
-          />
-          <BigStatCard
-            label="消息速率"
-            value={msgRate}
-            unit="条/时"
-            icon={Zap}
-            color="#ffaa00"
-            glow="rgba(255,170,0,0.05)"
-          />
-          <BigStatCard
-            label="活跃关键词"
-            value={stats.active_keywords}
-            icon={Activity}
-            color="#00f0ff"
-            glow="rgba(0,240,255,0.05)"
-          />
-        </div>
-
-        {/* 第二行：趋势图 + 告警饼图 */}
-        <div className="col-span-12 md:col-span-8 rounded-xl md:rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-3 md:p-5 flex flex-col h-[200px] md:h-auto">
-          <div className="flex items-center justify-between mb-2 md:mb-3">
-            <h3 className="text-sm md:text-base font-semibold text-gray-200 flex items-center gap-2">
-              <TrendingUp size={14} className="md:w-4 md:h-4 text-cyber-blue" />
-              24小时消息趋势
-            </h3>
-            <span className="text-xs text-gray-500 font-mono">
-              TOTAL: {stats.total_messages.toLocaleString()}
-            </span>
-          </div>
-          <div className="flex-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={messagesTrend}>
-                <defs>
-                  <linearGradient id="bsGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#00f0ff" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#00f0ff" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="rgba(255,255,255,0.04)"
-                />
-                <XAxis
-                  dataKey="hour"
-                  name="时间"
-                  stroke="#555"
-                  fontSize={10}
-                  interval="preserveStartEnd"
-                  tick={{ fontSize: 10 }}
-                />
-                <YAxis stroke="#555" fontSize={10} tick={{ fontSize: 10 }} />
-                <Tooltip
-                  contentStyle={{
-                    background: "rgba(3,7,18,0.95)",
-                    border: "1px solid rgba(0,240,255,0.3)",
-                    borderRadius: "8px",
-                    color: "#fff",
-                    fontSize: 12,
-                  }}
-                  formatter={(value: any, name: any) => [value, name === "count" ? "消息数" : name === "hour" ? "时间" : name]}
-                  labelFormatter={(label) => `时间: ${label}`}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="count"
-                  name="消息数"
-                  stroke="#00f0ff"
-                  strokeWidth={2}
-                  fill="url(#bsGrad)"
-                  dot={false}
-                  activeDot={{ r: 4, fill: "#00f0ff", stroke: "#030712", strokeWidth: 2 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* 告警级别分布 */}
-        <div className="col-span-12 md:col-span-4 rounded-xl md:rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-3 md:p-5 flex flex-col h-[200px] md:h-auto">
-          <h3 className="text-sm md:text-base font-semibold text-gray-200 mb-2 md:mb-3 flex items-center gap-2">
-            <AlertTriangle size={14} className="md:w-4 md:h-4 text-cyber-pink" />
-            告警级别分布
-          </h3>
-          <div className="flex-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={alertsPieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={30}
-                  outerRadius={48}
-                  paddingAngle={4}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {alertsPieData.map((_, i) => (
-                    <Cell
-                      key={i}
-                      fill={COLORS[i % COLORS.length]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    background: "rgba(3,7,18,0.95)",
-                    border: "1px solid rgba(0,240,255,0.3)",
-                    borderRadius: "8px",
-                    color: "#ffffff",
-                    fontSize: 13,
-                    fontWeight: "bold",
-                  }}
-                  formatter={(value: any, name: any) => [<span style={{ color: "#fff" }}>{value}</span>, <span style={{ color: "#fff" }}>{name}</span>]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex flex-wrap justify-center gap-x-3 md:gap-x-4 gap-y-1 mt-1">
-            {alertsPieData.map((item, i) => (
-              <div key={item.name} className="flex items-center gap-1 text-xs">
-                <div
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                />
-                <span className="text-gray-400">
-                  {item.name} {item.value}
-                </span>
+          <Panel title="告警等级结构" icon={AlertTriangle} className="min-h-[260px] xl:min-h-0">
+            <div className="grid h-[210px] grid-cols-[1fr_0.85fr] items-center gap-2 xl:h-full xl:min-h-[190px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={alertPieData} dataKey="value" innerRadius="56%" outerRadius="82%" paddingAngle={4} stroke="none" isAnimationActive={false}>
+                    {alertPieData.map((item, index) => (
+                      <Cell key={item.key} fill={LEVEL_COLORS[item.key] || CHART_COLORS[index % CHART_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ background: "rgba(2,6,23,0.96)", border: "1px solid rgba(244,63,94,0.25)", borderRadius: 8, color: "#fff" }}
+                    formatter={(value: any, name: any) => [formatNumber(Number(value)), name]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="space-y-2">
+                {alertPieData.length === 0 ? (
+                  <div className="text-sm text-slate-500">暂无告警分布</div>
+                ) : (
+                  alertPieData.map((item) => (
+                    <div key={item.key} className="flex items-center justify-between rounded-md bg-white/[0.04] px-2 py-2 text-xs">
+                      <span className="flex items-center gap-2 text-slate-300">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: LEVEL_COLORS[item.key] }} />
+                        {item.name}
+                      </span>
+                      <span className="font-mono text-white">{formatNumber(item.value)}</span>
+                    </div>
+                  ))
+                )}
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          </Panel>
 
-        {/* 第三行：最新告警 + 系统状态 */}
-        <div className="col-span-12 md:col-span-8 rounded-xl md:rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-3 md:p-5 flex flex-col min-h-[280px] md:h-auto">
-          <h3 className="text-sm md:text-base font-semibold text-gray-200 mb-2 md:mb-3 flex items-center gap-2">
-            <AlertTriangle size={14} className="md:w-4 md:h-4 text-cyber-pink" />
-            最新告警
-            {alerts.length > 0 && (
-              <span className="text-xs bg-cyber-pink/20 text-cyber-pink px-2 py-0.5 rounded-full">
-                {alerts.length}
-              </span>
-            )}
-          </h3>
-          <div
-            ref={alertTableRef}
-            className="flex-1 overflow-auto tech-scrollbar"
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
-          >
-            {alerts.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-gray-500">
-                <div className="text-center">
-                  <Shield size={28} className="mx-auto mb-2 opacity-30 md:w-8 md:h-8" />
-                  <p className="text-sm">暂无告警</p>
+          <Panel title="系统运行态势" icon={Cpu} className="min-h-[260px] xl:min-h-0">
+            <div className="space-y-3">
+              <ProgressRow label="CPU" value={health?.resources?.cpu_percent || 0} color="#22c55e" />
+              <ProgressRow
+                label="内存"
+                value={health?.resources?.memory_percent || 0}
+                color="#38bdf8"
+                detail={`${health?.resources?.memory_used_gb?.toFixed(1) || "0"} / ${health?.resources?.memory_total_gb?.toFixed(1) || "0"} GB`}
+              />
+              <ProgressRow
+                label="磁盘"
+                value={health?.resources?.disk_percent || 0}
+                color="#a78bfa"
+                detail={`剩余 ${health?.resources?.disk_free_gb?.toFixed(0) || "0"} GB`}
+              />
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div className="rounded-md bg-white/[0.04] p-2.5">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500"><Wifi size={13} />监控会话</div>
+                  <div className="mt-1 font-mono text-xl text-cyan-100">{health?.telegram?.active_monitors || 0}</div>
+                </div>
+                <div className="rounded-md bg-white/[0.04] p-2.5">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500"><Database size={13} />通知队列</div>
+                  <div className="mt-1 font-mono text-xl text-emerald-100">{health?.alert_pipeline?.notification_queue?.queue_size || 0}</div>
+                </div>
+                <div className="rounded-md bg-white/[0.04] p-2.5">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500"><Activity size={13} />链路异常</div>
+                  <div className="mt-1 font-mono text-xl text-amber-100">{health?.alert_pipeline?.matched_without_alert_1h || 0}</div>
+                </div>
+                <div className="rounded-md bg-white/[0.04] p-2.5">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500"><HardDrive size={13} />进程内存</div>
+                  <div className="mt-1 font-mono text-xl text-slate-100">{health?.resources?.process_memory_mb || 0}M</div>
                 </div>
               </div>
-            ) : (
-              <>
-                {/* 手机端卡片式布局 */}
-                <div className="md:hidden space-y-2">
-                  {alerts.slice(0, 10).map((alert) => (
-                    <div
-                      key={alert.id}
-                      className="border-b border-white/5 pb-2 last:border-0"
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span
-                          className="inline-block px-2 py-0.5 rounded text-xs font-medium"
-                          style={{
-                            backgroundColor: `${LEVEL_COLORS[alert.alert_level] || "#666"}20`,
-                            color: LEVEL_COLORS[alert.alert_level] || "#666",
-                          }}
-                        >
-                          {LEVEL_MAP[alert.alert_level] || alert.alert_level || "低危"}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {alert.created_at
-                            ? new Date(alert.created_at).toLocaleTimeString("zh-CN", {
-                                hour12: false,
-                              })
-                            : "--"}
-                        </span>
-                      </div>
-                      <div className="text-sm text-cyber-blue mb-1">
-                        {alert.keyword_text}
-                      </div>
-                      <div className="text-xs text-gray-400">
-                        {alert.conversation_title || `#${alert.conversation_id}`}
+            </div>
+          </Panel>
+        </section>
+
+        <section className="grid min-h-0 gap-3 xl:grid-cols-[0.9fr_0.9fr_1.35fr]">
+          <Panel title="关键词组热度" icon={BarChart3} className="min-h-[260px] xl:min-h-0">
+            <div className="h-[208px] xl:h-full xl:min-h-[190px]">
+              <HorizontalBarChart data={keywordBars} />
+            </div>
+          </Panel>
+
+          <Panel title="重点对象排行" icon={Users} className="min-h-[260px] xl:min-h-0">
+            <div className="space-y-2">
+              {senders.slice(0, 5).map((sender, index) => {
+                const name = sender.username || sender.first_name || `用户 ${sender.sender_id}`;
+                return (
+                  <div key={sender.sender_id} className="flex items-center gap-3">
+                    <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-mono text-xs ${
+                      index < 3 ? "bg-cyan-300/15 text-cyan-100" : "bg-white/[0.05] text-slate-400"
+                    }`}>
+                      {index + 1}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm text-slate-200">{name}</div>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full rounded-full bg-cyan-300"
+                          style={{ width: `${Math.min(100, ((sender.alert_count || 0) / senderAlertPeak) * 100)}%` }}
+                        />
                       </div>
                     </div>
-                  ))}
+                    <div className="text-right">
+                      <div className="font-mono text-sm text-white">{shortNumber(sender.message_count)}</div>
+                      <div className="text-[11px] text-rose-300">{sender.alert_count} 告警</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Panel>
+
+          <Panel
+            title="实时告警流"
+            icon={Sparkles}
+            className="min-h-[260px] xl:min-h-0"
+            action={<span className="font-mono text-xs text-slate-500">RECENT {alerts.length}</span>}
+          >
+            <div className="max-h-[212px] space-y-2 overflow-hidden xl:max-h-none">
+              {alerts.length === 0 ? (
+                <div className="flex h-[220px] items-center justify-center text-sm text-slate-500">暂无最新告警</div>
+              ) : (
+                alerts.slice(0, 8).map((alert) => {
+                  const color = LEVEL_COLORS[alert.alert_level || "low"] || "#38bdf8";
+                  return (
+                    <div key={alert.id} className="grid grid-cols-[88px_1fr_auto] items-center gap-3 rounded-md border border-white/5 bg-white/[0.035] px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 12px ${color}` }} />
+                        <span className="text-xs" style={{ color }}>{LEVEL_MAP[alert.alert_level || ""] || "告警"}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-slate-100">
+                          {alert.keyword_text || "--"}
+                          <span className="ml-2 text-xs text-slate-500">{alert.keyword_group_name || ""}</span>
+                        </div>
+                        <div className="mt-0.5 truncate text-xs text-slate-500">
+                          {alert.conversation_title || `会话 ${alert.conversation_id || "--"}`} · {sanitizePreview(alert.message_preview)}
+                        </div>
+                      </div>
+                      <div className="whitespace-nowrap text-right text-[11px] text-slate-500">
+                        {alert.created_at ? new Date(alert.created_at).toLocaleTimeString("zh-CN", { hour12: false }) : "--"}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </Panel>
+        </section>
+
+        <section className="hidden gap-3">
+          <Panel title="会话活跃度" icon={Radio} className="min-h-[260px]">
+            <div className="space-y-2">
+              {conversations.slice(0, 6).map((conversation) => (
+                <div key={conversation.conversation_id} className="grid grid-cols-[1fr_auto] gap-3 rounded-md bg-white/[0.035] px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-slate-200">{conversation.title || `会话 ${conversation.conversation_id}`}</div>
+                    <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-slate-500">
+                      <span>{conversation.chat_type}</span>
+                      <span>{conversation.sender_count} 发送者</span>
+                      <span>{conversation.alert_count} 告警</span>
+                    </div>
+                  </div>
+                  <div className="text-right font-mono text-sm text-cyan-100">{shortNumber(conversation.message_count)}</div>
                 </div>
+              ))}
+            </div>
+          </Panel>
 
-                {/* PC端表格布局 */}
-                <table className="hidden md:table w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-white/10">
-                      <th className="text-left py-2 px-3 text-gray-500 font-medium">
-                        级别
-                      </th>
-                      <th className="text-left py-2 px-3 text-gray-500 font-medium">
-                        关键词
-                      </th>
-                      <th className="text-left py-2 px-3 text-gray-500 font-medium">
-                        来源
-                      </th>
-                      <th className="text-left py-2 px-3 text-gray-500 font-medium">
-                        消息预览
-                      </th>
-                      <th className="text-left py-2 px-3 text-gray-500 font-medium">
-                        时间
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {alerts.slice(0, 8).map((alert) => (
-                      <tr
-                        key={alert.id}
-                        className="border-b border-white/5 hover:bg-white/[0.03] transition-colors"
-                      >
-                        <td className="py-2.5 px-3">
-                          <span
-                            className="inline-block px-2 py-0.5 rounded text-xs font-medium"
-                            style={{
-                              backgroundColor: `${LEVEL_COLORS[alert.alert_level] || "#666"}20`,
-                              color: LEVEL_COLORS[alert.alert_level] || "#666",
-                            }}
-                          >
-                            {LEVEL_MAP[alert.alert_level] || alert.alert_level || "低危"}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-cyber-blue">
-                          {alert.keyword_text}
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-400">
-                          {alert.conversation_title || `#${alert.conversation_id}`}
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-300 max-w-[300px] truncate">
-                          {alert.message_preview || "--"}
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-500 text-xs whitespace-nowrap">
-                          <Clock size={11} className="inline mr-1" />
-                          {alert.created_at
-                            ? new Date(alert.created_at).toLocaleTimeString("zh-CN", {
-                                hour12: false,
-                              })
-                            : "--"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* 系统状态面板 */}
-        <div className="col-span-12 md:col-span-4 rounded-xl md:rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-sm p-3 md:p-5 flex flex-col">
-          <h3 className="text-sm md:text-base font-semibold text-gray-200 mb-3 md:mb-4 flex items-center gap-2">
-            <Shield size={14} className="md:w-4 md:h-4 text-cyber-blue" />
-            系统状态
-          </h3>
-          <div className="flex-1 space-y-3 md:space-y-5">
-            {/* CPU */}
-            <div>
-              <div className="flex justify-between text-xs md:text-sm mb-1 md:mb-1.5">
-                <span className="text-gray-400">CPU 使用率</span>
-                <span className="text-gray-300 font-mono">
-                  {health?.resources?.cpu_percent?.toFixed(1) || "0"}%
-                </span>
+          <Panel title="处置压力" icon={CircleDot} className="min-h-[260px]">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-rose-400/10 p-4 text-center">
+                <div className="font-mono text-3xl font-bold text-rose-200">{shortNumber(stats.pending_alerts)}</div>
+                <div className="mt-1 text-xs text-rose-100/70">待处理告警</div>
               </div>
-              <div className="h-1.5 md:h-2 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-1000"
-                  style={{
-                    width: `${Math.min(health?.resources?.cpu_percent || 0, 100)}%`,
-                    background:
-                      (health?.resources?.cpu_percent || 0) > 80
-                        ? "#ff006e"
-                        : (health?.resources?.cpu_percent || 0) > 50
-                        ? "#ffaa00"
-                        : "#0aff00",
-                  }}
-                />
+              <div className="rounded-lg bg-cyan-400/10 p-4 text-center">
+                <div className="font-mono text-3xl font-bold text-cyan-100">{shortNumber(health?.alert_pipeline?.recent_alerts_1h || 0)}</div>
+                <div className="mt-1 text-xs text-cyan-100/70">1小时告警</div>
+              </div>
+              <div className="rounded-lg bg-emerald-400/10 p-4 text-center">
+                <div className="font-mono text-3xl font-bold text-emerald-100">{health?.alert_pipeline?.notification_queue?.workers || 0}</div>
+                <div className="mt-1 text-xs text-emerald-100/70">通知线程</div>
+              </div>
+              <div className="rounded-lg bg-amber-400/10 p-4 text-center">
+                <div className="font-mono text-3xl font-bold text-amber-100">{health?.alert_pipeline?.notification_failures_24h || 0}</div>
+                <div className="mt-1 text-xs text-amber-100/70">24h通知失败</div>
               </div>
             </div>
+          </Panel>
 
-            {/* Memory */}
-            <div>
-              <div className="flex justify-between text-xs md:text-sm mb-1 md:mb-1.5">
-                <span className="text-gray-400">内存使用</span>
-                <span className="text-gray-300 font-mono">
-                  {health?.resources?.memory_used_gb?.toFixed(1) || "0"} / {health?.resources?.memory_total_gb?.toFixed(1) || "0"} GB
-                </span>
-              </div>
-              <div className="h-1.5 md:h-2 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-1000"
-                  style={{
-                    width: `${Math.min(health?.resources?.memory_percent || 0, 100)}%`,
-                    background:
-                      (health?.resources?.memory_percent || 0) > 80
-                        ? "#ff006e"
-                        : (health?.resources?.memory_percent || 0) > 50
-                        ? "#ffaa00"
-                        : "#00f0ff",
-                  }}
-                />
-              </div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                可用 {health?.resources?.memory_available_gb?.toFixed(1) || "0"} GB ({health?.resources?.memory_percent?.toFixed(1) || "0"}%)
-              </div>
+          <Panel title="数据资产概览" icon={Database} className="min-h-[260px]">
+            <div className="space-y-3 text-sm">
+              {[
+                ["累计消息", stats.total_messages, "#38bdf8"],
+                ["累计告警", stats.total_alerts, "#f43f5e"],
+                ["关键词库", stats.total_keywords, "#a78bfa"],
+                ["发送者画像", stats.total_senders, "#22c55e"],
+              ].map(([label, value, color]) => (
+                <div key={String(label)} className="flex items-center justify-between rounded-md bg-white/[0.035] px-3 py-2">
+                  <span className="text-slate-400">{label}</span>
+                  <span className="font-mono text-base font-semibold" style={{ color: String(color) }}>{shortNumber(Number(value))}</span>
+                </div>
+              ))}
             </div>
-
-            {/* Disk */}
-            <div>
-              <div className="flex justify-between text-xs md:text-sm mb-1 md:mb-1.5">
-                <span className="text-gray-400">硬盘使用</span>
-                <span className="text-gray-300 font-mono">
-                  {health?.resources?.disk_used_gb?.toFixed(1) || "0"} / {health?.resources?.disk_total_gb?.toFixed(1) || "0"} GB
-                </span>
-              </div>
-              <div className="h-1.5 md:h-2 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-1000"
-                  style={{
-                    width: `${Math.min(health?.resources?.disk_percent || 0, 100)}%`,
-                    background:
-                      (health?.resources?.disk_percent || 0) > 90
-                        ? "#ff006e"
-                        : (health?.resources?.disk_percent || 0) > 70
-                        ? "#ffaa00"
-                        : "#00f0ff",
-                  }}
-                />
-              </div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                剩余 {health?.resources?.disk_free_gb?.toFixed(1) || "0"} GB ({health?.resources?.disk_percent?.toFixed(1) || "0"}%)
-              </div>
-            </div>
-
-            {/* 运行指标 */}
-            <div className="grid grid-cols-2 gap-2 md:gap-3 pt-1 md:pt-2">
-              <div className="rounded-lg bg-white/[0.04] p-2 md:p-3 text-center">
-                <p className="text-xs text-gray-500 mb-0.5 md:mb-1">TG 客户端</p>
-                <p className="text-lg md:text-xl font-bold text-cyber-blue font-mono">
-                  {health?.telegram?.clients_count || 0}
-                </p>
-              </div>
-              <div className="rounded-lg bg-white/[0.04] p-2 md:p-3 text-center">
-                <p className="text-xs text-gray-500 mb-0.5 md:mb-1">活跃监控</p>
-                <p className="text-lg md:text-xl font-bold text-cyber-purple font-mono">
-                  {health?.telegram?.active_monitors || 0}
-                </p>
-              </div>
-              <div className="rounded-lg bg-white/[0.04] p-2 md:p-3 text-center">
-                <p className="text-xs text-gray-500 mb-0.5 md:mb-1">WebSocket</p>
-                <p className="text-lg md:text-xl font-bold text-cyber-green font-mono">
-                  {health?.websocket?.connections || 0}
-                </p>
-              </div>
-              <div className="rounded-lg bg-white/[0.04] p-2 md:p-3 text-center">
-                <p className="text-xs text-gray-500 mb-0.5 md:mb-1">线程数</p>
-                <p className="text-lg md:text-xl font-bold text-gray-300 font-mono">
-                  {health?.resources?.threads || 0}
-                </p>
-              </div>
-            </div>
-
-            {/* 累计统计 */}
-            <div className="pt-1 md:pt-2 border-t border-white/5 space-y-1.5 md:space-y-2 text-xs md:text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-500">累计消息</span>
-                <span className="text-gray-300 font-mono">
-                  {stats.total_messages.toLocaleString()}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">累计告警</span>
-                <span className="text-gray-300 font-mono">
-                  {stats.total_alerts.toLocaleString()}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">发送者总数</span>
-                <span className="text-gray-300 font-mono">
-                  {stats.total_senders.toLocaleString()}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+          </Panel>
+        </section>
+      </main>
       </div>
     </div>
   );

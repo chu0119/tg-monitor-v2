@@ -1,12 +1,13 @@
 """发送者查询 API"""
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from app.api.deps import get_db
 from app.models.sender import Sender
+from app.models.alert import Alert
 
 router = APIRouter(prefix="/senders", tags=["发送者查询"])
 
@@ -27,7 +28,7 @@ async def list_senders(
         conditions.append(Sender.phone != "")
     if keyword:
         conditions.append(
-            func.or_(
+            or_(
                 Sender.username.ilike(f"%{keyword}%"),
                 Sender.first_name.ilike(f"%{keyword}%"),
                 Sender.phone.ilike(f"%{keyword}%"),
@@ -41,8 +42,19 @@ async def list_senders(
         count_query = count_query.where(and_(*conditions))
     total = (await db.execute(count_query)).scalar()
 
-    # 分页数据
-    query = select(Sender)
+    # 分页数据：告警数以 alerts 表实时聚合为准，避免 Sender.alert_count 冗余字段不同步
+    alert_counts = (
+        select(
+            Alert.sender_id,
+            func.count(Alert.id).label("real_alert_count"),
+        )
+        .group_by(Alert.sender_id)
+        .subquery()
+    )
+    query = select(
+        Sender,
+        func.coalesce(alert_counts.c.real_alert_count, 0).label("real_alert_count"),
+    ).outerjoin(alert_counts, alert_counts.c.sender_id == Sender.id)
     if conditions:
         from sqlalchemy import and_
         query = query.where(and_(*conditions))
@@ -50,10 +62,10 @@ async def list_senders(
     query = query.offset((page - 1) * page_size).limit(page_size)
 
     result = await db.execute(query)
-    senders = result.scalars().all()
+    sender_rows = result.all()
 
     items = []
-    for s in senders:
+    for s, real_alert_count in sender_rows:
         items.append({
             "id": s.id,
             "user_id": s.user_id,
@@ -65,7 +77,7 @@ async def list_senders(
             "is_verified": s.is_verified,
             "is_premium": s.is_premium,
             "message_count": s.message_count,
-            "alert_count": s.alert_count,
+            "alert_count": real_alert_count or 0,
             "created_at": s.created_at.isoformat() if s.created_at else None,
         })
 

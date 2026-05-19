@@ -18,6 +18,7 @@ from app.schemas.keyword import (
 )
 from app.models.keyword import KeywordGroup, Keyword
 from app.models.alert import Alert
+from app.models.message import Message
 
 router = APIRouter(prefix="/keywords", tags=["关键词管理"])
 
@@ -91,6 +92,175 @@ async def list_keyword_groups(db: AsyncSession = Depends(get_db)):
     return await list_keyword_groups_internal(db)
 
 
+@router.get("/quality-report")
+async def keyword_quality_report(db: AsyncSession = Depends(get_db)):
+    """关键词质量报告：重复、长期无命中、正则错误等。"""
+    groups_result = await db.execute(select(KeywordGroup))
+    groups = {group.id: group for group in groups_result.scalars().all()}
+
+    keywords_result = await db.execute(select(Keyword).order_by(Keyword.group_id, Keyword.word))
+    keywords = keywords_result.scalars().all()
+
+    seen_global = {}
+    duplicates_global = []
+    duplicates_in_group = []
+    regex_errors = []
+    inactive_groups_used = []
+    zero_match_keywords = []
+
+    seen_in_group = {}
+    import re
+    for keyword in keywords:
+        normalized = (keyword.word or "").strip().lower()
+        group = groups.get(keyword.group_id)
+        if not normalized:
+            continue
+
+        global_key = normalized
+        if global_key in seen_global:
+            duplicates_global.append({
+                "word": keyword.word,
+                "keyword_id": keyword.id,
+                "duplicate_of": seen_global[global_key],
+                "group_id": keyword.group_id,
+            })
+        else:
+            seen_global[global_key] = keyword.id
+
+        group_key = (keyword.group_id, normalized)
+        if group_key in seen_in_group:
+            duplicates_in_group.append({
+                "word": keyword.word,
+                "keyword_id": keyword.id,
+                "duplicate_of": seen_in_group[group_key],
+                "group_id": keyword.group_id,
+            })
+        else:
+            seen_in_group[group_key] = keyword.id
+
+        match_type = keyword.match_type or (group.match_type if group else "contains")
+        if match_type == "regex":
+            try:
+                re.compile(keyword.word)
+            except re.error as e:
+                regex_errors.append({"keyword_id": keyword.id, "word": keyword.word, "error": str(e)})
+
+        if group and not group.is_active and keyword.is_active:
+            inactive_groups_used.append({"keyword_id": keyword.id, "word": keyword.word, "group_id": group.id, "group_name": group.name})
+
+        if (keyword.match_count or 0) == 0 and keyword.is_active:
+            zero_match_keywords.append({"keyword_id": keyword.id, "word": keyword.word, "group_id": keyword.group_id})
+
+    return {
+        "total_keywords": len(keywords),
+        "total_groups": len(groups),
+        "duplicates_global": duplicates_global[:200],
+        "duplicates_in_group": duplicates_in_group[:200],
+        "regex_errors": regex_errors[:200],
+        "inactive_group_keywords": inactive_groups_used[:200],
+        "zero_match_keywords": zero_match_keywords[:500],
+        "recommendations": [
+            "优先清理同组重复关键词，避免同一消息产生重复告警",
+            "检查正则错误关键词，错误正则不会命中",
+            "长期零命中的关键词建议用最近消息试跑，确认是否过窄或已失效",
+        ],
+    }
+
+
+@router.post("/import-preview")
+async def preview_keyword_import(
+    import_data: KeywordBatchImport,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量导入前预览：空词、重复词、已存在词、将新增数量。"""
+    group = (await db.execute(
+        select(KeywordGroup).where(KeywordGroup.id == import_data.group_id)
+    )).scalar_one_or_none()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="关键词组不存在")
+
+    existing_result = await db.execute(
+        select(Keyword.word).where(Keyword.group_id == import_data.group_id)
+    )
+    existing_words = {str(row[0]).strip().lower() for row in existing_result.all()}
+
+    seen = set()
+    empty_count = 0
+    duplicates = []
+    existing = []
+    to_create = []
+    for raw_word in import_data.keywords:
+        word = (raw_word or "").strip()
+        normalized = word.lower()
+        if not word:
+            empty_count += 1
+            continue
+        if normalized in seen:
+            duplicates.append(word)
+            continue
+        seen.add(normalized)
+        if not import_data.overwrite and normalized in existing_words:
+            existing.append(word)
+            continue
+        to_create.append(word)
+
+    return {
+        "group_id": group.id,
+        "group_name": group.name,
+        "overwrite": import_data.overwrite,
+        "input_count": len(import_data.keywords),
+        "empty_count": empty_count,
+        "duplicate_count": len(duplicates),
+        "existing_count": len(existing),
+        "create_count": len(to_create),
+        "duplicates": duplicates[:100],
+        "existing": existing[:100],
+        "sample_to_create": to_create[:100],
+    }
+
+
+@router.post("/recent-match-preview")
+async def recent_match_preview(
+    request_data: KeywordTestMatchRequest,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+):
+    """用最近消息试跑关键词，帮助判断关键词是否过宽或过窄。"""
+    from app.services.keyword_matcher import KeywordMatcher
+    matcher = KeywordMatcher()
+
+    result = await db.execute(
+        select(Message)
+        .where(Message.text.is_not(None))
+        .order_by(Message.date.desc())
+        .limit(max(1, min(limit, 500)))
+    )
+    messages = result.scalars().all()
+
+    hits = []
+    keyword_hit_count = {}
+    for message in messages:
+        text = message.text or message.caption or ""
+        matched = await matcher.test_keywords(text, request_data.keyword_ids)
+        if matched:
+            for match in matched:
+                keyword_hit_count[match["word"]] = keyword_hit_count.get(match["word"], 0) + 1
+            hits.append({
+                "message_id": message.id,
+                "conversation_id": message.conversation_id,
+                "date": message.date,
+                "preview": text[:300],
+                "matched": matched,
+            })
+
+    return {
+        "sample_size": len(messages),
+        "hit_messages": len(hits),
+        "keyword_hit_count": keyword_hit_count,
+        "hits": hits[:100],
+    }
+
+
 @router.get("/groups/{group_id}", response_model=KeywordGroupResponse)
 async def get_keyword_group(group_id: int, db: AsyncSession = Depends(get_db)):
     """获取关键词组详情"""
@@ -156,6 +326,26 @@ async def delete_keyword_group(group_id: int, db: AsyncSession = Depends(get_db)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="关键词组不存在"
+        )
+
+    # 先删除组下关键词关联的告警记录，再删除关键词，最后删除组
+    from app.models.alert import Alert
+    from sqlalchemy import delete as sa_delete
+
+    # 获取组内所有关键词ID
+    kw_result = await db.execute(
+        select(Keyword.id).where(Keyword.group_id == group_id)
+    )
+    kw_ids = [row[0] for row in kw_result.all()]
+
+    if kw_ids:
+        # 删除这些关键词关联的告警
+        await db.execute(
+            sa_delete(Alert).where(Alert.keyword_id.in_(kw_ids))
+        )
+        # 删除关键词
+        await db.execute(
+            sa_delete(Keyword).where(Keyword.group_id == group_id)
         )
 
     await db.delete(group)
@@ -281,6 +471,14 @@ async def batch_import_keywords(
 
     # 如果覆盖，删除现有关键词
     if import_data.overwrite:
+        existing_kw_result = await db.execute(
+            select(Keyword.id).where(Keyword.group_id == import_data.group_id)
+        )
+        existing_kw_ids = [row[0] for row in existing_kw_result.all()]
+        if existing_kw_ids:
+            await db.execute(
+                delete(Alert).where(Alert.keyword_id.in_(existing_kw_ids))
+            )
         await db.execute(
             delete(Keyword).where(Keyword.group_id == import_data.group_id)
         )
@@ -306,6 +504,8 @@ async def batch_import_keywords(
             )
             db.add(keyword)
             created_count += 1
+
+    await db.flush()
 
     # 使用 SQLAlchemy update 语句更新关键词组统计，确保持久化
     count_result = await db.execute(

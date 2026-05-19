@@ -1,7 +1,7 @@
 """仪表盘 API"""
 from datetime import datetime, timedelta
 from typing import List
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from functools import lru_cache
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
 # 简单的内存缓存（30秒）
 last_stats_time = 0
 last_stats_data = None
-CACHE_TTL = 30  # 缓存30秒
+CACHE_TTL = 3  # 大屏需要接近实时的数字滚动，保留短缓存避免重复请求压垮数据库
 
 async def get_cached_stats():
     """获取缓存的统计数据"""
@@ -87,7 +87,7 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     # 今日消息（本地时间今天 00:00 开始到现在）
     today_messages = await db.execute(
         select(func.count(Message.id))
-        .where(Message.date >= today_local_start_utc)
+        .where(Message.created_at >= today_local_start_utc)
     )
     today_messages = today_messages.scalar()
 
@@ -217,8 +217,9 @@ async def get_message_trend(
         .order_by(Conversation.total_messages.desc())
         .limit(5)
     )
-    top_conv_ids = [c[0] for c in top_convs.all()]
-    top_conv_map = {c[0]: c[1] for c in top_convs.all()}
+    top_conv_rows = top_convs.all()
+    top_conv_ids = [c[0] for c in top_conv_rows]
+    top_conv_map = {c[0]: c[1] for c in top_conv_rows}
 
     if top_conv_ids:
         trend_result = await db.execute(
@@ -371,16 +372,27 @@ async def get_keyword_trend(
 @router.get("/sender-ranking", response_model=List[SenderRanking])
 async def get_sender_ranking(
     limit: int = 20,
+    sort_by: str = Query("messages"),
     db: AsyncSession = Depends(get_db)
 ):
     """获取发送者排行"""
+    if sort_by not in {"messages", "alerts"}:
+        sort_by = "messages"
+    alert_count_expr = func.count(Alert.id).label("alert_count")
+    order_by = (
+        [alert_count_expr.desc(), Sender.message_count.desc()]
+        if sort_by == "alerts"
+        else [Sender.message_count.desc()]
+    )
     result = await db.execute(
         select(
             Sender.id, Sender.username, Sender.first_name,
             Sender.message_count,
-            func.coalesce(Sender.alert_count, 0).label("alert_count"),
+            alert_count_expr,
         )
-        .order_by(Sender.message_count.desc())
+        .outerjoin(Alert, Alert.sender_id == Sender.id)
+        .group_by(Sender.id, Sender.username, Sender.first_name, Sender.message_count)
+        .order_by(*order_by)
         .limit(limit)
     )
     rows = result.all()

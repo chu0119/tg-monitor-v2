@@ -273,12 +273,12 @@ async def get_database_statistics():
 
 
 @router.post("/clear")
-async def clear_database(confirm: bool = False):
+async def clear_database(confirm: bool = False, confirmation: str = ""):
     """清空数据库（删除所有表）"""
-    if not confirm:
+    if not confirm or confirmation != "CLEAR_DATABASE":
         return {
             "success": False,
-            "message": "请确认操作（设置 confirm=true）"
+            "message": "请确认操作（设置 confirm=true 且 confirmation=CLEAR_DATABASE）"
         }
 
     try:

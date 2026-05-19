@@ -92,7 +92,7 @@ class ConnectionManager:
         for conn in disconnected:
             try:
                 await conn.close()
-            except Exception:
+            except:
                 pass
             self.disconnect(conn)
 
@@ -142,7 +142,7 @@ class ConnectionManager:
             for ws in stale_connections:
                 try:
                     await ws.close()
-                except Exception:
+                except:
                     pass
                 self.disconnect(ws)
 
@@ -417,6 +417,8 @@ async def health():
     from app.telegram.client import client_manager
     from app.telegram.monitor import message_monitor
     from app.core.database import check_database_connection
+    from app.core.database import AsyncSessionLocal
+    from app.services.alert_service import alert_service
     import psutil
     import os
 
@@ -441,6 +443,16 @@ async def health():
 
     # 检查活跃监控
     active_monitors = len(message_monitor.active_monitors)
+    message_queue = {
+        **getattr(message_monitor, "_queue_stats", {}),
+        "queue_size": message_monitor._message_queue.qsize() if hasattr(message_monitor, "_message_queue") else 0,
+    }
+
+    try:
+        async with AsyncSessionLocal() as db:
+            alert_pipeline = await alert_service.get_pipeline_health(db)
+    except Exception as e:
+        alert_pipeline = {"status": "unknown", "error": str(e)}
 
     # 检查 WebSocket 连接
     ws_connections = manager.get_connection_count()
@@ -488,7 +500,8 @@ async def health():
     is_healthy = (
         db_info.get("connected", False) and
         resource_info.get("memory_percent", 100) < 90 and
-        resource_info.get("cpu_percent", 100) < 95
+        resource_info.get("cpu_percent", 100) < 95 and
+        alert_pipeline.get("status") in {"healthy", "unknown"}
     )
 
     return {
@@ -497,8 +510,10 @@ async def health():
         "telegram": {
             "clients_count": tg_clients,
             "clients_status": tg_client_status,
-            "active_monitors": active_monitors
+            "active_monitors": active_monitors,
+            "message_queue": message_queue,
         },
+        "alert_pipeline": alert_pipeline,
         "websocket": {
             "connections": ws_connections
         },
@@ -516,9 +531,9 @@ async def websocket_endpoint(
     # 验证令牌（如果配置了的话）
     from app.core.config import settings
 
-    # 只有在配置了WS_TOKEN时才验证，且配置后必须提供有效令牌
+    # 只有在配置了WS_TOKEN时才验证
     if hasattr(settings, 'WS_TOKEN') and settings.WS_TOKEN:
-        if not token or token != settings.WS_TOKEN:
+        if token != settings.WS_TOKEN:
             await websocket.close(code=1008, reason="Invalid token")
             logger.warning(f"WebSocket 连接被拒绝: 无效的令牌")
             return

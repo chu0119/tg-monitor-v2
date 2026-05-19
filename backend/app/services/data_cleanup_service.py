@@ -1,15 +1,21 @@
-"""数据清理服务 - 自动清理过期的告警和消息数据"""
+"""数据清理服务 - 按数据量自动清理告警和消息数据"""
 import asyncio
-from datetime import timedelta
+import time
 from typing import Dict, Any, Optional
 from loguru import logger
-from sqlalchemy import select, delete, func, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete, update, func, text
 
 from app.core.database import AsyncSessionLocal
 from app.models.alert import Alert
 from app.models.message import Message
-from app.utils import now_utc
+from app.models.notification_log import NotificationLog
+
+
+DEFAULT_MAX_MESSAGE_RECORDS = 200_000_000
+DEFAULT_MAX_ALERT_RECORDS = 100_000_000
+DEFAULT_MAX_DATABASE_SIZE_GB = 900
+DELETE_BATCH_SIZE = 5000
+MAX_DELETE_BATCHES = 2000
 
 
 class DataCleanupService:
@@ -18,427 +24,383 @@ class DataCleanupService:
     def __init__(self):
         self._cleanup_task: Optional[asyncio.Task] = None
         self._running = False
-        # 缓存整个清理统计结果（60秒）
         self._stats_cache: Optional[Dict[str, Any]] = None
         self._stats_cache_time: float = 0
-        self._stats_cache_ttl: int = 60  # 缓存60秒
+        self._stats_cache_ttl: int = 60
+
+    def _invalidate_stats_cache(self):
+        self._stats_cache = None
+        self._stats_cache_time = 0
+
+    def _normalize_limit(self, value: Optional[int], default: int) -> int:
+        try:
+            limit = int(value) if value is not None else default
+        except (TypeError, ValueError):
+            limit = default
+        return max(1, limit)
+
+    async def _get_configured_limits(self) -> Dict[str, int]:
+        try:
+            from app.api.settings import get_settings_snapshot
+            async with AsyncSessionLocal() as db:
+                settings_snapshot = await get_settings_snapshot(db)
+            max_messages = getattr(settings_snapshot, "max_message_records", DEFAULT_MAX_MESSAGE_RECORDS)
+            max_alerts = getattr(settings_snapshot, "max_alert_records", DEFAULT_MAX_ALERT_RECORDS)
+            max_database_size_gb = getattr(settings_snapshot, "max_database_size_gb", DEFAULT_MAX_DATABASE_SIZE_GB)
+        except (ImportError, AttributeError) as e:
+            logger.warning(f"获取数据量清理配置失败: {e}，使用默认值")
+            max_messages = DEFAULT_MAX_MESSAGE_RECORDS
+            max_alerts = DEFAULT_MAX_ALERT_RECORDS
+            max_database_size_gb = DEFAULT_MAX_DATABASE_SIZE_GB
+
+        return {
+            "max_messages": self._normalize_limit(max_messages, DEFAULT_MAX_MESSAGE_RECORDS),
+            "max_alerts": self._normalize_limit(max_alerts, DEFAULT_MAX_ALERT_RECORDS),
+            "max_database_size_bytes": self._normalize_limit(
+                int(max_database_size_gb * 1024 * 1024 * 1024),
+                DEFAULT_MAX_DATABASE_SIZE_GB * 1024 * 1024 * 1024,
+            ),
+        }
 
     async def cleanup_expired_alerts(
         self,
         retention_days: Optional[int] = None,
-        dry_run: bool = False
+        max_alerts: Optional[int] = None,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
-        """清理过期的告警数据
+        """按数量上限清理告警数据。
 
-        Args:
-            retention_days: 保留天数，None 则使用系统配置
-            dry_run: 是否为演练模式（不实际删除）
-
-        Returns:
-            清理统计信息
-            
-        清理规则：
-        - 已解决（resolved）、已忽略（ignored）、误报（false_positive）的告警超过 30 天后删除
-        - 待处理（pending）的告警保留 90 天
+        retention_days 仅保留为兼容旧接口，当前不再按天清理。
         """
-        # 计算不同状态的过期时间点
-        resolved_cutoff = now_utc() - timedelta(days=30)  # 已解决/忽略/误报保留30天
-        pending_cutoff = now_utc() - timedelta(days=90)   # 待处理保留90天
-
-        logger.info(f"开始清理过期告警数据（已解决/忽略/误报: 30天前，待处理: 90天前）")
+        limits = await self._get_configured_limits()
+        max_alerts = self._normalize_limit(max_alerts, limits["max_alerts"])
+        logger.info(f"开始按数量清理告警数据（最多保留 {max_alerts} 条）")
 
         async with AsyncSessionLocal() as db:
             try:
-                total_to_delete = 0
-                stats_by_status = {}
-                
-                # 统计各状态要删除的数据
-                # 1. 已解决/忽略/误报超过30天的
-                for status in ['resolved', 'ignored', 'false_positive']:
-                    count_query = select(func.count(Alert.id)).where(
-                        Alert.status == status,
-                        Alert.created_at < resolved_cutoff
-                    )
-                    count_result = await db.execute(count_query)
-                    count = count_result.scalar() or 0
-                    stats_by_status[status] = count
-                    total_to_delete += count
-
-                # 2. 待处理超过90天的
-                count_query = select(func.count(Alert.id)).where(
-                    Alert.status == 'pending',
-                    Alert.created_at < pending_cutoff
-                )
-                count_result = await db.execute(count_query)
-                count = count_result.scalar() or 0
-                stats_by_status['pending'] = count
-                total_to_delete += count
+                total_alerts = (await db.execute(select(func.count(Alert.id)))).scalar() or 0
+                total_to_delete = max(0, total_alerts - max_alerts)
 
                 if total_to_delete == 0:
-                    logger.info("没有需要清理的过期告警数据")
+                    logger.info("告警数量未超过上限，无需清理")
                     return {
                         "success": True,
-                        "cutoff_times": {
-                            "resolved_ignored_false_positive": resolved_cutoff.isoformat(),
-                            "pending": pending_cutoff.isoformat()
-                        },
+                        "cleanup_mode": "count",
+                        "max_alerts": max_alerts,
+                        "total_alerts": total_alerts,
                         "deleted_count": 0,
-                        "stats_by_status": stats_by_status,
-                        "dry_run": dry_run
+                        "dry_run": dry_run,
                     }
 
                 if dry_run:
-                    logger.info(f"[演练模式] 将删除 {total_to_delete} 条过期告警: {stats_by_status}")
+                    logger.info(f"[演练模式] 将删除最旧的 {total_to_delete} 条告警")
                     return {
                         "success": True,
-                        "cutoff_times": {
-                            "resolved_ignored_false_positive": resolved_cutoff.isoformat(),
-                            "pending": pending_cutoff.isoformat()
-                        },
+                        "cleanup_mode": "count",
+                        "max_alerts": max_alerts,
+                        "total_alerts": total_alerts,
                         "deleted_count": total_to_delete,
-                        "stats_by_status": stats_by_status,
                         "dry_run": True,
-                        "message": f"将删除 {total_to_delete} 条过期告警"
+                        "message": f"将删除最旧的 {total_to_delete} 条告警",
                     }
 
-                # 实际删除 - 分批删除以避免锁表
-                batch_size = 1000
-                max_iterations = 200  # 最多删除 20 万条
                 total_deleted = 0
                 iteration = 0
-
-                # 分状态删除
-                # 1. 删除已解决/忽略/误报超过30天的
-                for status in ['resolved', 'ignored', 'false_positive']:
-                    status_deleted = 0
-                    status_iteration = 0
-                    while status_iteration < max_iterations:
-                        status_iteration += 1
-                        iteration += 1
-                        batch_ids_query = select(Alert.id).where(
-                            Alert.status == status,
-                            Alert.created_at < resolved_cutoff
-                        ).limit(batch_size)
-                        batch_ids = (await db.execute(batch_ids_query)).scalars().all()
-                        if not batch_ids:
-                            break
-                        await db.execute(delete(Alert).where(Alert.id.in_(batch_ids)))
-                        batch_deleted = len(batch_ids)
-                        total_deleted += batch_deleted
-                        status_deleted += batch_deleted
-
-                        await db.commit()
-
-                        if batch_deleted < batch_size:
-                            break
-
-                        logger.info(f"已删除 {status} 状态告警 {status_deleted} 条...")
-                        await asyncio.sleep(0.1)
-
-                # 2. 删除待处理超过90天的
-                pending_deleted = 0
-                pending_iteration = 0
-                while pending_iteration < max_iterations:
-                    pending_iteration += 1
+                while total_deleted < total_to_delete and iteration < MAX_DELETE_BATCHES:
                     iteration += 1
-                    batch_ids_query = select(Alert.id).where(
-                        Alert.status == 'pending',
-                        Alert.created_at < pending_cutoff
-                    ).limit(batch_size)
-                    batch_ids = (await db.execute(batch_ids_query)).scalars().all()
+                    limit = min(DELETE_BATCH_SIZE, total_to_delete - total_deleted)
+                    batch_ids = (
+                        await db.execute(
+                            select(Alert.id)
+                            .order_by(Alert.created_at.asc(), Alert.id.asc())
+                            .limit(limit)
+                        )
+                    ).scalars().all()
+
                     if not batch_ids:
                         break
+
+                    await db.execute(delete(NotificationLog).where(NotificationLog.alert_id.in_(batch_ids)))
+                    await db.execute(
+                        update(Message)
+                        .where(Message.alert_id.in_(batch_ids))
+                        .values(alert_id=None)
+                    )
                     await db.execute(delete(Alert).where(Alert.id.in_(batch_ids)))
+
                     batch_deleted = len(batch_ids)
                     total_deleted += batch_deleted
-                    pending_deleted += batch_deleted
-
                     await db.commit()
 
-                    if batch_deleted < batch_size:
-                        break
-
-                    logger.info(f"已删除 pending 状态告警 {pending_deleted} 条...")
+                    logger.info(f"已删除最旧告警 {total_deleted}/{total_to_delete} 条...")
                     await asyncio.sleep(0.1)
 
-                if iteration >= max_iterations:
-                    logger.warning(f"已达到最大迭代次数 {max_iterations}，停止删除")
+                if iteration >= MAX_DELETE_BATCHES:
+                    logger.warning(f"已达到最大迭代次数 {MAX_DELETE_BATCHES}，停止删除")
 
+                self._invalidate_stats_cache()
                 logger.info(f"告警数据清理完成，共删除 {total_deleted} 条记录")
-
                 return {
                     "success": True,
-                    "cutoff_times": {
-                        "resolved_ignored_false_positive": resolved_cutoff.isoformat(),
-                        "pending": pending_cutoff.isoformat()
-                    },
+                    "cleanup_mode": "count",
+                    "max_alerts": max_alerts,
+                    "total_alerts": total_alerts,
                     "deleted_count": total_deleted,
-                    "stats_by_status": stats_by_status,
-                    "dry_run": False
+                    "dry_run": False,
                 }
 
             except Exception as e:
                 logger.error(f"清理告警数据失败: {e}")
                 await db.rollback()
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "message": f"清理失败: {str(e)}"
-                }
+                return {"success": False, "error": str(e), "message": f"清理失败: {str(e)}"}
 
     async def cleanup_expired_messages(
         self,
         retention_days: Optional[int] = None,
-        dry_run: bool = False
+        max_messages: Optional[int] = None,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
-        """清理过期的消息数据（仅删除没有关联告警的消息）
+        """按数量上限清理消息数据。
 
-        Args:
-            retention_days: 保留天数，None 则使用系统配置
-            dry_run: 是否为演练模式
-
-        Returns:
-            清理统计信息
+        删除消息时会先删除这些消息关联的告警和通知日志，保证外键一致。
+        retention_days 仅保留为兼容旧接口，当前不再按天清理。
         """
-        if retention_days is None:
-            try:
-                from app.api.settings import _global_settings
-                retention_days = _global_settings.data_retention_days
-            except (ImportError, AttributeError) as e:
-                logger.warning(f"获取全局数据保留配置失败: {e}，使用默认值 90 天")
-                retention_days = 90
-
-        if retention_days is None or retention_days <= 0:
-            retention_days = 90
-
-        cutoff_time = now_utc() - timedelta(days=retention_days)
-
-        logger.info(f"开始清理 {retention_days} 天前的消息数据（截止时间: {cutoff_time}）")
+        limits = await self._get_configured_limits()
+        max_messages = self._normalize_limit(max_messages, limits["max_messages"])
+        logger.info(f"开始按数量清理消息数据（最多保留 {max_messages} 条）")
 
         async with AsyncSessionLocal() as db:
             try:
-                # 统计要删除的消息（没有关联告警的过期消息）
-                from app.models.message import Message as MessageModel
-
-                count_query = select(func.count(MessageModel.id)).where(
-                    MessageModel.date < cutoff_time,
-                    MessageModel.alert_id == None  # 只删除没有告警的消息
-                )
-                count_result = await db.execute(count_query)
-                total_to_delete = count_result.scalar() or 0
+                total_messages = (await db.execute(select(func.count(Message.id)))).scalar() or 0
+                total_to_delete = max(0, total_messages - max_messages)
 
                 if total_to_delete == 0:
-                    logger.info("没有需要清理的过期消息数据")
+                    logger.info("消息数量未超过上限，无需清理")
                     return {
                         "success": True,
-                        "retention_days": retention_days,
-                        "cutoff_time": cutoff_time.isoformat(),
+                        "cleanup_mode": "count",
+                        "max_messages": max_messages,
+                        "total_messages": total_messages,
                         "deleted_count": 0,
-                        "dry_run": dry_run
+                        "dry_run": dry_run,
                     }
 
                 if dry_run:
-                    logger.info(f"[演练模式] 将删除 {total_to_delete} 条过期消息")
+                    logger.info(f"[演练模式] 将删除最旧的 {total_to_delete} 条消息")
                     return {
                         "success": True,
-                        "retention_days": retention_days,
-                        "cutoff_time": cutoff_time.isoformat(),
+                        "cleanup_mode": "count",
+                        "max_messages": max_messages,
+                        "total_messages": total_messages,
                         "deleted_count": total_to_delete,
                         "dry_run": True,
-                        "message": f"将删除 {total_to_delete} 条过期消息"
+                        "message": f"将删除最旧的 {total_to_delete} 条消息",
                     }
 
-                # 实际删除 - 分批删除
-                batch_size = 1000
-                max_iterations = 100  # 最多删除 10 万条
                 total_deleted = 0
                 iteration = 0
-
-                while iteration < max_iterations:
+                while total_deleted < total_to_delete and iteration < MAX_DELETE_BATCHES:
                     iteration += 1
-                    # SQLAlchemy 2.x: use subquery for batch delete
-                    batch_ids_query = select(MessageModel.id).where(
-                        MessageModel.date < cutoff_time,
-                        MessageModel.alert_id == None
-                    ).limit(batch_size)
-                    batch_ids = (await db.execute(batch_ids_query)).scalars().all()
+                    limit = min(DELETE_BATCH_SIZE, total_to_delete - total_deleted)
+                    batch_ids = (
+                        await db.execute(
+                            select(Message.id)
+                            .order_by(Message.created_at.asc(), Message.id.asc())
+                            .limit(limit)
+                        )
+                    ).scalars().all()
 
                     if not batch_ids:
                         break
 
-                    await db.execute(
-                        delete(MessageModel).where(MessageModel.id.in_(batch_ids))
-                    )
+                    alert_ids = (
+                        await db.execute(select(Alert.id).where(Alert.message_id.in_(batch_ids)))
+                    ).scalars().all()
+                    if alert_ids:
+                        await db.execute(delete(NotificationLog).where(NotificationLog.alert_id.in_(alert_ids)))
+                        await db.execute(delete(Alert).where(Alert.id.in_(alert_ids)))
+
+                    await db.execute(delete(Message).where(Message.id.in_(batch_ids)))
+
                     batch_deleted = len(batch_ids)
                     total_deleted += batch_deleted
-
                     await db.commit()
 
-                    if batch_deleted < batch_size:
-                        break
-
-                    logger.info(f"已删除 {total_deleted}/{total_to_delete} 条消息...")
+                    logger.info(f"已删除最旧消息 {total_deleted}/{total_to_delete} 条...")
                     await asyncio.sleep(0.1)
 
-                if iteration >= max_iterations:
-                    logger.warning(f"已达到最大迭代次数 {max_iterations}，停止删除")
+                if iteration >= MAX_DELETE_BATCHES:
+                    logger.warning(f"已达到最大迭代次数 {MAX_DELETE_BATCHES}，停止删除")
 
+                self._invalidate_stats_cache()
                 logger.info(f"消息数据清理完成，共删除 {total_deleted} 条记录")
-
                 return {
                     "success": True,
-                    "retention_days": retention_days,
-                    "cutoff_time": cutoff_time.isoformat(),
+                    "cleanup_mode": "count",
+                    "max_messages": max_messages,
+                    "total_messages": total_messages,
                     "deleted_count": total_deleted,
-                    "dry_run": False
+                    "dry_run": False,
                 }
 
             except Exception as e:
                 logger.error(f"清理消息数据失败: {e}")
                 await db.rollback()
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "message": f"清理失败: {str(e)}"
-                }
+                return {"success": False, "error": str(e), "message": f"清理失败: {str(e)}"}
 
     async def cleanup_all(
         self,
         retention_days: Optional[int] = None,
-        dry_run: bool = False
+        max_messages: Optional[int] = None,
+        max_alerts: Optional[int] = None,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
-        """清理所有过期数据（告警和消息）
+        """按数量上限清理所有数据（告警和消息）。"""
+        logger.info("开始按数量上限清理所有数据...")
 
-        Args:
-            retention_days: 保留天数
-            dry_run: 是否为演练模式
-
-        Returns:
-            清理统计信息
-        """
-        logger.info("开始清理所有过期数据...")
-
-        # 清理告警
         alert_result = await self.cleanup_expired_alerts(
             retention_days=retention_days,
-            dry_run=dry_run
+            max_alerts=max_alerts,
+            dry_run=dry_run,
         )
-
-        # 清理消息
         message_result = await self.cleanup_expired_messages(
             retention_days=retention_days,
-            dry_run=dry_run
+            max_messages=max_messages,
+            dry_run=dry_run,
         )
 
         return {
             "success": alert_result.get("success", True) and message_result.get("success", True),
+            "cleanup_mode": "count",
             "alerts": alert_result,
             "messages": message_result,
-            "total_deleted": (
-                alert_result.get("deleted_count", 0) +
-                message_result.get("deleted_count", 0)
-            )
+            "total_deleted": alert_result.get("deleted_count", 0) + message_result.get("deleted_count", 0),
         }
 
-    async def get_cleanup_stats(self) -> Dict[str, Any]:
-        """获取清理统计信息（不执行清理，只统计）带完整缓存优化"""
-        import time
+    async def get_cleanup_stats(
+        self,
+        max_messages: Optional[int] = None,
+        max_alerts: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """获取清理统计信息（不执行清理）"""
         current_time = time.time()
-
-        # 检查缓存是否有效（60秒内）
-        if (self._stats_cache is not None and
-            current_time - self._stats_cache_time < self._stats_cache_ttl):
+        use_cache = max_messages is None and max_alerts is None
+        if use_cache and self._stats_cache is not None and current_time - self._stats_cache_time < self._stats_cache_ttl:
             logger.debug("使用缓存的清理统计数据")
             return self._stats_cache
 
-        # 缓存过期，重新查询
-        try:
-            from app.api.settings import _global_settings
-            retention_days = getattr(_global_settings, 'data_retention_days', None) or 90
-        except (ImportError, AttributeError) as e:
-            logger.warning(f"获取全局数据保留配置失败: {e}，使用默认值 90 天")
-            retention_days = 90
-        cutoff_time = now_utc() - timedelta(days=retention_days)
+        limits = await self._get_configured_limits()
+        max_messages = self._normalize_limit(max_messages, limits["max_messages"])
+        max_alerts = self._normalize_limit(max_alerts, limits["max_alerts"])
+        max_database_size_bytes = limits["max_database_size_bytes"]
 
         async with AsyncSessionLocal() as db:
             try:
-                from app.models.message import Message as MessageModel
-                
-                # 优化：使用单个复合查询获取所有统计数据
-                # 这样可以减少数据库往返次数，同时避免并发问题
-                from sqlalchemy import text
-                
-                # 使用单个 SQL 查询获取所有统计信息
                 stats_query = text("""
-                    SELECT 
-                        (SELECT COUNT(*) FROM alerts WHERE created_at < :cutoff) as expired_alerts,
-                        (SELECT COUNT(*) FROM messages WHERE date < :cutoff AND alert_id IS NULL) as expired_messages,
-                        (SELECT COUNT(*) FROM alerts) as total_alerts,
-                        (SELECT COUNT(*) FROM messages) as total_messages
+                    SELECT
+                        GREATEST((SELECT COUNT(*) FROM alerts) - :max_alerts, 0) AS expired_alerts,
+                        GREATEST((SELECT COUNT(*) FROM messages) - :max_messages, 0) AS expired_messages,
+                        (SELECT COUNT(*) FROM alerts) AS total_alerts,
+                        (SELECT COUNT(*) FROM messages) AS total_messages
                 """)
-                
-                result = await db.execute(stats_query, {"cutoff": cutoff_time})
+                result = await db.execute(stats_query, {
+                    "max_alerts": max_alerts,
+                    "max_messages": max_messages,
+                })
                 row = result.fetchone()
-                
-                if row:
-                    expired_alerts = row[0] or 0
-                    expired_messages = row[1] or 0
-                    total_alerts = row[2] or 0
-                    total_messages = row[3] or 0
-                else:
-                    expired_alerts = 0
-                    expired_messages = 0
-                    total_alerts = 0
-                    total_messages = 0
 
-                # 获取数据库大小（也缓存）
+                expired_alerts = row[0] or 0 if row else 0
+                expired_messages = row[1] or 0 if row else 0
+                total_alerts = row[2] or 0 if row else 0
+                total_messages = row[3] or 0 if row else 0
+
                 db_size = await self._get_database_size()
+                table_sizes = await self._get_table_sizes()
+                message_bytes_per_row = self._estimate_bytes_per_row(table_sizes.get("messages", 0), total_messages)
+                alert_bytes_per_row = self._estimate_bytes_per_row(table_sizes.get("alerts", 0), total_alerts)
+                estimated_limit_bytes = int(
+                    message_bytes_per_row * max_messages +
+                    alert_bytes_per_row * max_alerts +
+                    sum(size for name, size in table_sizes.items() if name not in {"messages", "alerts"})
+                )
 
                 stats = {
-                    "retention_days": retention_days,
-                    "cutoff_time": cutoff_time.isoformat(),
+                    "cleanup_mode": "count",
+                    "retention_days": 0,
+                    "cutoff_time": "count-based",
+                    "limits": {
+                        "max_messages": max_messages,
+                        "max_alerts": max_alerts,
+                        "max_database_size_bytes": max_database_size_bytes,
+                        "max_database_size_gb": round(max_database_size_bytes / 1024 / 1024 / 1024, 1),
+                    },
                     "expired": {
                         "alerts": expired_alerts,
                         "messages": expired_messages,
-                        "total": expired_alerts + expired_messages
+                        "total": expired_alerts + expired_messages,
                     },
                     "total": {
                         "alerts": total_alerts,
-                        "messages": total_messages
+                        "messages": total_messages,
                     },
                     "database_size_bytes": int(db_size),
                     "database_size_mb": round(float(db_size) / 1024 / 1024, 1) if db_size else 0.0,
+                    "database_size_gb": round(float(db_size) / 1024 / 1024 / 1024, 3) if db_size else 0.0,
+                    "estimated_limit_size_bytes": estimated_limit_bytes,
+                    "estimated_limit_size_gb": round(estimated_limit_bytes / 1024 / 1024 / 1024, 1),
+                    "estimated_bytes_per_row": {
+                        "messages": round(message_bytes_per_row, 1),
+                        "alerts": round(alert_bytes_per_row, 1),
+                    },
+                    "within_database_limit": int(db_size) <= max_database_size_bytes,
                 }
-                
-                # 缓存结果
-                self._stats_cache = stats
-                self._stats_cache_time = current_time
-                
+
+                if use_cache:
+                    self._stats_cache = stats
+                    self._stats_cache_time = current_time
                 return stats
 
             except Exception as e:
                 logger.error(f"获取清理统计失败: {e}")
-                return {
-                    "error": str(e)
-                }
+                return {"error": str(e)}
 
     async def _get_database_size(self) -> float:
         """获取数据库大小"""
         try:
             from app.core.config import settings
-            from sqlalchemy import text
-
-            db_name = settings.MYSQL_DB if hasattr(settings, 'MYSQL_DB') else 'tg_monitor'
+            db_name = settings.MYSQL_DATABASE if hasattr(settings, "MYSQL_DATABASE") else "tg_monitor"
 
             async with AsyncSessionLocal() as db:
                 size_result = await db.execute(text(
-                    "SELECT SUM(data_length + index_length) FROM information_schema.TABLES WHERE table_schema = :db"
+                    "SELECT SUM(data_length + index_length) "
+                    "FROM information_schema.TABLES WHERE table_schema = :db"
                 ), {"db": db_name})
-                db_size = size_result.scalar() or 0
-                return db_size
+                return size_result.scalar() or 0
         except Exception as e:
             logger.warning(f"获取数据库大小失败: {e}")
             return 0
+
+    async def _get_table_sizes(self) -> Dict[str, int]:
+        """获取当前数据库各表大小"""
+        try:
+            from app.core.config import settings
+            db_name = settings.MYSQL_DATABASE if hasattr(settings, "MYSQL_DATABASE") else "tg_monitor"
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(text("""
+                    SELECT table_name, COALESCE(data_length + index_length, 0) AS bytes
+                    FROM information_schema.TABLES
+                    WHERE table_schema = :db
+                """), {"db": db_name})
+                return {row[0]: int(row[1] or 0) for row in result.fetchall()}
+        except Exception as e:
+            logger.warning(f"获取表大小失败: {e}")
+            return {}
+
+    def _estimate_bytes_per_row(self, table_size: int, row_count: int) -> float:
+        if row_count <= 0:
+            return 0.0
+        return float(table_size) / float(row_count)
 
     async def start_auto_cleanup(self):
         """启动自动清理任务（后台运行）"""
@@ -451,30 +413,29 @@ class DataCleanupService:
 
         while self._running:
             try:
-                from app.api.settings import _global_settings
-                # 检查是否启用自动清理
+                from app.api.settings import get_settings_snapshot
                 try:
-                    auto_cleanup = getattr(_global_settings, 'auto_cleanup_expired_data', False)
+                    async with AsyncSessionLocal() as db:
+                        settings_snapshot = await get_settings_snapshot(db)
+                    auto_cleanup = getattr(settings_snapshot, "auto_cleanup_expired_data", False)
                 except AttributeError:
                     logger.warning("无法获取自动清理配置，默认禁用")
                     auto_cleanup = False
+
                 if not auto_cleanup:
-                    await asyncio.sleep(3600)  # 每小时检查一次
+                    await asyncio.sleep(3600)
                     continue
 
-                # 执行清理
                 result = await self.cleanup_all()
                 if result.get("success"):
                     deleted = result.get("total_deleted", 0)
                     if deleted > 0:
-                        logger.info(f"自动清理完成，删除了 {deleted} 条过期数据")
+                        logger.info(f"自动清理完成，删除了 {deleted} 条超限数据")
 
-                # 等待 24 小时后再次执行
                 await asyncio.sleep(86400)
 
             except Exception as e:
                 logger.error(f"自动清理任务出错: {e}")
-                # 出错后等待 1 小时再重试
                 await asyncio.sleep(3600)
 
     def stop_auto_cleanup(self):
@@ -483,5 +444,4 @@ class DataCleanupService:
         logger.info("自动清理任务已停止")
 
 
-# 全局清理服务实例
 data_cleanup_service = DataCleanupService()

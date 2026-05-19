@@ -5,6 +5,53 @@ from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_valid
 from app.models.notification_config import NotificationType
 from app.utils import datetime_to_iso
 
+MASKED_VALUE = "******"
+SENSITIVE_CONFIG_KEYS = {
+    "password", "smtp_password", "secret", "token", "bot_token", "webhook",
+    "webhook_url", "url", "sckey", "key", "api_key", "authorization",
+}
+
+
+def mask_notification_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """隐藏通知配置中的敏感字段，避免列表/详情接口泄露密钥。"""
+    if not config:
+        return {}
+
+    def mask_value(key: str, value: Any) -> Any:
+        normalized = key.lower()
+        if any(sensitive in normalized for sensitive in SENSITIVE_CONFIG_KEYS):
+            return MASKED_VALUE if value else value
+        if isinstance(value, dict):
+            return {k: mask_value(k, v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [mask_value(key, item) if isinstance(item, dict) else item for item in value]
+        return value
+
+    return {k: mask_value(k, v) for k, v in config.items()}
+
+
+def merge_masked_notification_config(
+    existing: Optional[Dict[str, Any]],
+    incoming: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """前端提交脱敏占位符时保留原密钥。"""
+    if incoming is None:
+        return existing or {}
+    if existing is None:
+        existing = {}
+
+    def merge(old: Any, new: Any) -> Any:
+        if new == MASKED_VALUE:
+            return old
+        if isinstance(old, dict) and isinstance(new, dict):
+            merged = dict(old)
+            for key, value in new.items():
+                merged[key] = merge(old.get(key), value)
+            return merged
+        return new
+
+    return merge(existing, incoming)
+
 
 class NotificationConfigBase(BaseModel):
     """通知配置基础模型"""
@@ -60,7 +107,7 @@ class NotificationConfigUpdate(BaseModel):
 
 class NotificationConfigResponse(BaseModel):
     """通知配置响应"""
-    model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
@@ -85,6 +132,12 @@ class NotificationConfigResponse(BaseModel):
     def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
         """序列化datetime为ISO格式（带时区信息）"""
         return datetime_to_iso(dt)
+
+    @field_serializer('config')
+    def serialize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        return mask_notification_config(config)
+
+    model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')
 
 
 class NotificationTest(BaseModel):

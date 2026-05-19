@@ -52,7 +52,7 @@ class Conversation(Base):
     # 统计信息
     total_messages = Column(Integer, default=0)
     total_alerts = Column(Integer, default=0)
-    last_message_id = Column(BigInteger)
+    last_message_id = Column(Integer)
     last_message_at = Column(DateTime)
 
     # 元数据
@@ -73,3 +73,19 @@ class Conversation(Base):
 
     def __repr__(self):
         return f"<Conversation(id={self.id}, chat_id={self.chat_id}, title={self.title})>"
+
+    @property
+    def history_status(self):
+        return (self.extra or {}).get("history_status")
+
+    @property
+    def last_history_at(self):
+        return (self.extra or {}).get("last_history_at")
+
+    @property
+    def last_history_error(self):
+        return (self.extra or {}).get("last_history_error")
+
+    @property
+    def history_error_count(self):
+        return int((self.extra or {}).get("history_error_count") or 0)

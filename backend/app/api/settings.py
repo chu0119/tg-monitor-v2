@@ -1,5 +1,5 @@
 """系统设置管理 API"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
@@ -30,6 +30,10 @@ class SettingsResponse(BaseModel):
     enable_browser_notifications: bool = Field(default=True, description="浏览器通知")
     enable_sound_alerts: bool = Field(default=True, description="声音提示")
     minimum_alert_level: str = Field(default="low", description="最低告警级别")
+    enable_alert_notification_dedup: bool = Field(default=True, description="启用告警通知降噪")
+    alert_dedup_window_minutes: int = Field(default=10, description="同类告警通知降噪窗口（分钟）")
+    notification_queue_workers: int = Field(default=2, description="通知队列工作线程数")
+    notification_max_retries: int = Field(default=3, description="通知失败最大重试次数")
 
     # 代理设置
     http_proxy: Optional[str] = Field(default=None, description="HTTP 代理")
@@ -37,6 +41,9 @@ class SettingsResponse(BaseModel):
 
     # 安全设置
     data_retention_days: int = Field(default=30, description="数据保留天数")
+    max_message_records: int = Field(default=200_000_000, description="实时消息最大保留条数")
+    max_alert_records: int = Field(default=100_000_000, description="告警最大保留条数")
+    max_database_size_gb: int = Field(default=900, description="数据库容量上限（GB）")
     auto_cleanup_expired_data: bool = Field(default=True, description="自动清理过期数据")
 
 
@@ -52,6 +59,10 @@ class SettingsUpdate(BaseModel):
     enable_browser_notifications: Optional[bool] = Field(None, description="浏览器通知")
     enable_sound_alerts: Optional[bool] = Field(None, description="声音提示")
     minimum_alert_level: Optional[str] = Field(None, description="最低告警级别")
+    enable_alert_notification_dedup: Optional[bool] = Field(None, description="启用告警通知降噪")
+    alert_dedup_window_minutes: Optional[int] = Field(None, ge=0, le=1440, description="同类告警通知降噪窗口（分钟）")
+    notification_queue_workers: Optional[int] = Field(None, ge=1, le=10, description="通知队列工作线程数")
+    notification_max_retries: Optional[int] = Field(None, ge=0, le=10, description="通知失败最大重试次数")
 
     # 代理设置
     http_proxy: Optional[str] = Field(None, description="HTTP 代理")
@@ -59,24 +70,100 @@ class SettingsUpdate(BaseModel):
 
     # 安全设置
     data_retention_days: Optional[int] = Field(None, ge=1, le=365, description="数据保留天数")
+    max_message_records: Optional[int] = Field(None, ge=1000, le=1_500_000_000, description="实时消息最大保留条数")
+    max_alert_records: Optional[int] = Field(None, ge=1000, le=1_000_000_000, description="告警最大保留条数")
+    max_database_size_gb: Optional[int] = Field(None, ge=1, le=900, description="数据库容量上限（GB）")
     auto_cleanup_expired_data: Optional[bool] = Field(None, description="自动清理过期数据")
 
 
-# 全局设置存储（在实际应用中应该存储在数据库或配置文件中）
+# 全局设置缓存。真实来源为 settings 表，缓存用于后台任务快速读取。
 _global_settings = SettingsResponse()
+SYSTEM_SETTINGS_CATEGORY = "system"
 
 
-@router.get("", response_model=SettingsResponse)
-async def get_settings():
-    """获取系统设置"""
-    logger.debug(f"Getting settings: {_global_settings}")
+def _setting_category(key: str) -> str:
+    if key in {"http_proxy", "socks5_proxy"}:
+        return "proxy"
+    if key in {
+        "enable_browser_notifications", "enable_sound_alerts", "minimum_alert_level",
+        "enable_alert_notification_dedup", "alert_dedup_window_minutes",
+        "notification_queue_workers", "notification_max_retries",
+    }:
+        return "notification"
+    if key in {"data_retention_days", "max_message_records", "max_alert_records", "max_database_size_gb", "auto_cleanup_expired_data"}:
+        return "retention"
+    return SYSTEM_SETTINGS_CATEGORY
+
+
+def _encode_setting_value(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _decode_setting_value(raw_value: Optional[str]) -> Any:
+    if raw_value is None:
+        return None
+    try:
+        return json.loads(raw_value)
+    except Exception:
+        return raw_value
+
+
+async def load_settings_from_db(db: AsyncSession) -> SettingsResponse:
+    """从数据库加载系统设置，并刷新全局缓存。"""
+    global _global_settings
+
+    result = await db.execute(select(Settings))
+    rows = result.scalars().all()
+    values = SettingsResponse().model_dump()
+
+    for row in rows:
+        if row.key_name in values:
+            values[row.key_name] = _decode_setting_value(row.value)
+
+    _global_settings = SettingsResponse(**values)
     return _global_settings
 
 
+async def save_settings_to_db(db: AsyncSession, values: Dict[str, Any]) -> None:
+    """保存系统设置到数据库。"""
+    for key, value in values.items():
+        result = await db.execute(
+            select(Settings).where(Settings.key_name == key)
+        )
+        setting = result.scalar_one_or_none()
+        encoded = _encode_setting_value(value)
+        if setting:
+            setting.value = encoded
+            setting.category = _setting_category(key)
+        else:
+            db.add(Settings(
+                key_name=key,
+                value=encoded,
+                category=_setting_category(key),
+            ))
+
+
+async def get_settings_snapshot(db: Optional[AsyncSession] = None) -> SettingsResponse:
+    """后台服务读取设置时使用。db 为空时返回最近一次缓存。"""
+    if db is None:
+        return _global_settings
+    return await load_settings_from_db(db)
+
+
+@router.get("", response_model=SettingsResponse)
+async def get_settings(db: AsyncSession = Depends(get_db)):
+    """获取系统设置"""
+    settings_snapshot = await load_settings_from_db(db)
+    logger.debug(f"Getting settings: {settings_snapshot}")
+    return settings_snapshot
+
+
 @router.put("", response_model=SettingsResponse)
-async def update_settings(update_data: SettingsUpdate):
+async def update_settings(update_data: SettingsUpdate, db: AsyncSession = Depends(get_db)):
     """更新系统设置"""
+    global _global_settings
     logger.debug(f"Updating settings with data: {update_data}")
+    await load_settings_from_db(db)
 
     # 获取所有非 None 的字段进行更新
     update_dict = update_data.model_dump(exclude_none=True)
@@ -93,15 +180,19 @@ async def update_settings(update_data: SettingsUpdate):
         else:
             logger.warning(f"Unknown setting key: {key}")
 
+    await save_settings_to_db(db, _global_settings.model_dump())
+    await db.commit()
     logger.info(f"Settings updated: {update_dict}")
     return _global_settings
 
 
 @router.post("/reset", response_model=SettingsResponse)
-async def reset_settings():
+async def reset_settings(db: AsyncSession = Depends(get_db)):
     """重置系统设置为默认值"""
     global _global_settings
     _global_settings = SettingsResponse()
+    await save_settings_to_db(db, _global_settings.model_dump())
+    await db.commit()
     logger.info("Settings reset to defaults")
     return _global_settings
 
@@ -122,7 +213,7 @@ async def export_all_data(db: AsyncSession = Depends(get_db)) -> ExportData:
     """导出所有配置数据（系统设置、关键词、通知配置）"""
     try:
         # 导出系统设置
-        system_settings = _global_settings.model_dump()
+        system_settings = (await load_settings_from_db(db)).model_dump()
 
         # 导出关键词组
         keyword_groups_data = []
@@ -207,6 +298,7 @@ async def import_all_data(
             for key, value in data.system_settings.items():
                 if hasattr(_global_settings, key):
                     setattr(_global_settings, key, value)
+            await save_settings_to_db(db, _global_settings.model_dump())
             import_results["system_settings"] = {"success": True, "message": "系统设置已导入"}
             logger.info("System settings imported successfully")
         except Exception as e:
@@ -423,27 +515,42 @@ from pydantic import Field
 
 class CleanupStatsResponse(BaseModel):
     """清理统计响应"""
+    cleanup_mode: str = Field(default="count", description="清理模式")
     retention_days: int = Field(description="数据保留天数")
     cutoff_time: str = Field(description="截止时间")
+    limits: Dict[str, Any] = Field(default_factory=dict, description="数据量保留上限")
     expired: Dict[str, Any] = Field(description="过期数据统计")
     total: Dict[str, Any] = Field(description="总数据统计")
     database_size_bytes: int = Field(description="数据库大小（字节）")
     database_size_mb: float = Field(description="数据库大小（MB）")
+    database_size_gb: float = Field(default=0.0, description="数据库大小（GB）")
+    estimated_limit_size_bytes: int = Field(default=0, description="按当前平均行大小估算的上限容量")
+    estimated_limit_size_gb: float = Field(default=0.0, description="按当前平均行大小估算的上限容量（GB）")
+    estimated_bytes_per_row: Dict[str, Any] = Field(default_factory=dict, description="当前平均每行字节数")
+    within_database_limit: bool = Field(default=True, description="是否低于数据库容量上限")
 
 
 class CleanupRequest(BaseModel):
     """清理请求"""
     retention_days: Optional[int] = Field(None, ge=1, le=365, description="保留天数（可选，默认使用系统配置）")
+    max_messages: Optional[int] = Field(None, ge=1000, le=1_500_000_000, description="实时消息最大保留条数")
+    max_alerts: Optional[int] = Field(None, ge=1000, le=1_000_000_000, description="告警最大保留条数")
     dry_run: bool = Field(False, description="演练模式，不实际删除")
 
 
 @router.get("/cleanup/stats", response_model=CleanupStatsResponse)
-async def get_cleanup_stats():
+async def get_cleanup_stats(
+    max_messages: Optional[int] = Query(None, ge=1000, le=1_500_000_000),
+    max_alerts: Optional[int] = Query(None, ge=1000, le=1_000_000_000),
+):
     """获取数据清理统计"""
     from app.services.data_cleanup_service import data_cleanup_service
 
     try:
-        stats = await data_cleanup_service.get_cleanup_stats()
+        stats = await data_cleanup_service.get_cleanup_stats(
+            max_messages=max_messages,
+            max_alerts=max_alerts,
+        )
 
         if "error" in stats:
             raise HTTPException(status_code=500, detail=stats["error"])
@@ -462,6 +569,8 @@ async def run_cleanup(request: CleanupRequest):
     try:
         result = await data_cleanup_service.cleanup_all(
             retention_days=request.retention_days,
+            max_messages=request.max_messages,
+            max_alerts=request.max_alerts,
             dry_run=request.dry_run
         )
 
@@ -473,9 +582,9 @@ async def run_cleanup(request: CleanupRequest):
 
         # 添加可读的消息
         if request.dry_run:
-            result["message"] = f"[演练模式] 将删除 {result.get('total_deleted', 0)} 条过期数据"
+            result["message"] = f"[演练模式] 将删除 {result.get('total_deleted', 0)} 条超限数据"
         else:
-            result["message"] = f"清理完成，删除了 {result.get('total_deleted', 0)} 条过期数据"
+            result["message"] = f"清理完成，删除了 {result.get('total_deleted', 0)} 条超限数据"
 
         return result
     except HTTPException:
@@ -493,6 +602,7 @@ async def cleanup_alerts(request: CleanupRequest):
     try:
         result = await data_cleanup_service.cleanup_expired_alerts(
             retention_days=request.retention_days,
+            max_alerts=request.max_alerts,
             dry_run=request.dry_run
         )
 
@@ -503,9 +613,9 @@ async def cleanup_alerts(request: CleanupRequest):
             )
 
         if request.dry_run:
-            result["message"] = f"[演练模式] 将删除 {result.get('deleted_count', 0)} 条过期告警"
+            result["message"] = f"[演练模式] 将删除 {result.get('deleted_count', 0)} 条超限告警"
         else:
-            result["message"] = f"清理完成，删除了 {result.get('deleted_count', 0)} 条过期告警"
+            result["message"] = f"清理完成，删除了 {result.get('deleted_count', 0)} 条超限告警"
 
         return result
     except HTTPException:
@@ -523,6 +633,7 @@ async def cleanup_messages(request: CleanupRequest):
     try:
         result = await data_cleanup_service.cleanup_expired_messages(
             retention_days=request.retention_days,
+            max_messages=request.max_messages,
             dry_run=request.dry_run
         )
 
@@ -533,9 +644,9 @@ async def cleanup_messages(request: CleanupRequest):
             )
 
         if request.dry_run:
-            result["message"] = f"[演练模式] 将删除 {result.get('deleted_count', 0)} 条过期消息"
+            result["message"] = f"[演练模式] 将删除 {result.get('deleted_count', 0)} 条超限消息"
         else:
-            result["message"] = f"清理完成，删除了 {result.get('deleted_count', 0)} 条过期消息"
+            result["message"] = f"清理完成，删除了 {result.get('deleted_count', 0)} 条超限消息"
 
         return result
     except HTTPException:
@@ -788,4 +899,3 @@ async def check_initialized(db: AsyncSession = Depends(get_db)):
             "initialized": False,
             "error": str(e)
         }
-

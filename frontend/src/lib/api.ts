@@ -74,12 +74,7 @@ async function handleResponse(res: Response): Promise<any> {
     }
     throw new Error(errorMessage);
   }
-  // 安全地解析 JSON 响应，处理非 JSON 响应体（如空响应或 HTML 错误页面）
-  try {
-    return await res.json();
-  } catch {
-    return null;
-  }
+  return res.json();
 }
 
 export const api = {
@@ -250,6 +245,19 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
+    importPreview: (data: any) =>
+      fetch(`${API_BASE}/keywords/import-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }).then(handleResponse),
+    qualityReport: () => fetch(`${API_BASE}/keywords/quality-report`).then(handleResponse),
+    recentMatchPreview: (data: any, limit = 100) =>
+      fetch(`${API_BASE}/keywords/recent-match-preview?limit=${limit}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }).then(handleResponse),
     testMatch: (text: string, keywordIds: number[]) =>
       fetch(`${API_BASE}/keywords/test-match`, {
         method: "POST",
@@ -371,10 +379,12 @@ export const api = {
       ),
     getKeywordTrend: (days?: number, limit?: number) =>
       fetch(`${API_BASE}/dashboard/keyword-trend?days=${days || 7}&limit=${limit || 10}`).then(handleResponse),
-    getSenderRanking: (limit?: number) =>
-      fetch(`${API_BASE}/dashboard/sender-ranking?limit=${limit || 20}`).then(handleResponse),
+    getSenderRanking: (limit?: number, sortBy: "messages" | "alerts" = "messages") =>
+      fetch(`${API_BASE}/dashboard/sender-ranking?limit=${limit || 20}&sort_by=${sortBy}`).then(handleResponse),
     getConversationActivity: (limit?: number) =>
       fetch(`${API_BASE}/dashboard/conversation-activity?limit=${limit || 10}`).then(handleResponse),
+    getRecentAlerts: (limit?: number) =>
+      fetch(`${API_BASE}/dashboard/alerts/recent?limit=${limit || 20}`).then(handleResponse),
   },
 
   // 系统设置
@@ -519,6 +529,7 @@ export const api = {
   // 系统状态
   system: {
     getStatus: () => fetch(`${API_BASE}/system/status`).then(handleResponse),
+    getInfo: () => fetch(`${API_BASE}/system/info`).then(handleResponse),
     getUpdateStatus: () => fetch(`${API_BASE}/system/update-status`).then(handleResponse),
     checkUpdate: () => fetch(`${API_BASE}/system/check-update`).then(handleResponse),
     performUpdate: () =>

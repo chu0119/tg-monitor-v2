@@ -46,7 +46,7 @@ class ConversationBatchUpdate(BaseModel):
 
 class ConversationResponse(BaseModel):
     """会话响应"""
-    model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     chat_id: int
@@ -67,6 +67,10 @@ class ConversationResponse(BaseModel):
     total_alerts: Optional[int]
     last_message_id: Optional[int]
     last_message_at: Optional[datetime]
+    history_status: Optional[str] = None
+    last_history_at: Optional[str] = None
+    last_history_error: Optional[str] = None
+    history_error_count: Optional[int] = 0
     created_at: datetime
     updated_at: datetime
     note: Optional[str]
@@ -75,3 +79,5 @@ class ConversationResponse(BaseModel):
     def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
         """序列化datetime为ISO格式（带时区信息）"""
         return datetime_to_iso(dt)
+
+    model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')

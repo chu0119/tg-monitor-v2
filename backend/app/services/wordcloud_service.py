@@ -89,7 +89,8 @@ class WordCloudService:
         db: AsyncSession,
         conversation_id: Optional[int],
         sender_id: Optional[int],
-        days: int
+        days: int,
+        max_rows: int = 5000,
     ) -> List[str]:
         """获取消息文本"""
         start_date = datetime.now() - timedelta(days=days)
@@ -107,6 +108,7 @@ class WordCloudService:
         if sender_id:
             query = query.where(Message.sender_id == sender_id)
 
+        query = query.order_by(Message.date.desc()).limit(max_rows)
         result = await db.execute(query)
         texts = [row[0] for row in result.all()]
         return texts
@@ -168,7 +170,7 @@ class WordCloudService:
                 Message.date >= start_date,
                 Message.text.ilike(f'%{keyword}%')
             )
-        ).order_by(Message.date)
+        ).order_by(Message.date.desc()).limit(20000)
 
         result = await db.execute(query)
         messages = result.scalars().all()

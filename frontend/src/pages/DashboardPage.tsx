@@ -1,30 +1,31 @@
-import { useEffect, useState, useCallback, useRef, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import {
-  MessageSquare,
-  AlertTriangle,
   Activity,
-  Users,
+  AlertTriangle,
+  BarChart3,
+  BellRing,
+  Database,
   Eye,
-  TrendingUp,
-  Zap,
+  FileText,
+  Gauge,
+  Hash,
+  MessageSquare,
   Radio,
+  RefreshCcw,
   Shield,
+  TrendingUp,
+  Users,
+  Zap,
 } from "lucide-react";
 import {
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
   Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
+  Pie,
+  PieChart,
   ResponsiveContainer,
+  Tooltip,
 } from "recharts";
 
 interface DashboardStats {
@@ -48,74 +49,224 @@ interface DashboardStats {
 
 interface HealthStatus {
   status: string;
-  resources: { memory_mb: number; cpu_percent: number; memory_percent: number; memory_total_gb: number; memory_used_gb: number; disk_total_gb: number; disk_used_gb: number; disk_free_gb: number; disk_percent: number };
-  telegram: { clients_count: number; active_monitors: number };
-  websocket: { connections: number };
+  resources?: {
+    cpu_percent?: number;
+    memory_percent?: number;
+    memory_total_gb?: number;
+    memory_used_gb?: number;
+    disk_free_gb?: number;
+    disk_percent?: number;
+    process_memory_mb?: number;
+  };
+  telegram?: { clients_count?: number; active_monitors?: number; message_queue?: { queue_size?: number; dropped?: number } };
+  websocket?: { connections?: number };
+  alert_pipeline?: {
+    status?: string;
+    recent_alerts_1h?: number;
+    matched_without_alert_1h?: number;
+    notification_failures_24h?: number;
+    notification_queue?: { queue_size?: number; failed?: number; retried?: number; workers?: number };
+  };
 }
 
-const COLORS = ["#00f0ff", "#ff006e", "#b026ff", "#0aff00", "#ffaa00"];
+interface KeywordTrend {
+  keyword_group: string;
+  dates: string[];
+  counts: number[];
+  top_keywords: Array<{ word: string; count: number }>;
+}
 
-const LEVEL_MAP: Record<string, string> = {
-  critical: "严重",
-  high: "高危",
-  medium: "中危",
-  low: "低危",
-};
+interface SenderRanking {
+  sender_id: number;
+  username?: string;
+  first_name?: string;
+  message_count: number;
+  alert_count: number;
+  rank: number;
+}
 
-const LiveClock = memo(function LiveClock() {
+interface ConversationActivity {
+  conversation_id: number;
+  title: string;
+  chat_type: string;
+  message_count: number;
+  sender_count: number;
+  alert_count: number;
+  last_message_at?: string;
+}
+
+interface RecentAlert {
+  id: number;
+  keyword_text?: string;
+  keyword_group_name?: string;
+  alert_level?: string;
+  status?: string;
+  matched_text?: string;
+  created_at?: string;
+  conversation_title?: string;
+  sender_username?: string;
+}
+
+interface TopWord {
+  word: string;
+  count: number;
+}
+
+const COLORS = ["#38bdf8", "#f43f5e", "#a78bfa", "#22c55e", "#facc15", "#fb923c"];
+const LEVEL_MAP: Record<string, string> = { critical: "严重", high: "高危", medium: "中危", low: "低危" };
+const LEVEL_COLORS: Record<string, string> = { critical: "#f43f5e", high: "#fb923c", medium: "#facc15", low: "#22c55e" };
+
+function shortNumber(value?: number) {
+  if (!value) return "0";
+  if (value >= 100000000) return `${(value / 100000000).toFixed(1)}亿`;
+  if (value >= 10000) return `${(value / 10000).toFixed(1)}万`;
+  return value.toLocaleString();
+}
+
+function DashboardPanel({
+  title,
+  icon: Icon,
+  action,
+  children,
+  className = "",
+  contentClassName = "",
+}: {
+  title: string;
+  icon: any;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  contentClassName?: string;
+}) {
+  return (
+    <section className={`flex h-full flex-col rounded-xl border border-white/10 bg-white/[0.045] backdrop-blur-sm ${className}`}>
+      <div className="flex shrink-0 items-center justify-between border-b border-white/5 px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Icon size={17} className="text-cyber-blue" />
+          {title}
+        </div>
+        {action}
+      </div>
+      <div className={`min-h-0 flex-1 p-4 ${contentClassName}`}>{children}</div>
+    </section>
+  );
+}
+
+function StatCard({ title, value, icon: Icon, color, sub }: { title: string; value: number | string; icon: any; color: string; sub?: string }) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/5 p-4 transition hover:border-white/20">
+      <div className="absolute -right-5 -top-8 h-24 w-24 rounded-full opacity-10 blur-2xl" style={{ backgroundColor: color }} />
+      <div className="flex items-start justify-between">
+        <div className="min-w-0">
+          <p className="text-xs text-gray-400">{title}</p>
+          <p className="mt-2 truncate text-2xl font-bold text-white">{typeof value === "number" ? value.toLocaleString() : value}</p>
+          {sub && <p className="mt-1 truncate text-xs text-gray-500">{sub}</p>}
+        </div>
+        <div className="rounded-lg p-2" style={{ backgroundColor: `${color}18`, color }}>
+          <Icon size={20} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MiniProgress({ label, value, max, color, right }: { label: string; value: number; max: number; color: string; right?: string }) {
+  const width = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="truncate text-gray-400">{label}</span>
+        <span className="ml-2 shrink-0 font-mono text-gray-300">{right ?? shortNumber(value)}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+        <div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+}
+
+function MessageTrendChart({ data, height = 300 }: { data: Array<{ hour: string; count: number }>; height?: number }) {
+  const width = 760;
+  const chartHeight = 280;
+  const pad = { left: 54, right: 18, top: 18, bottom: 34 };
+  const max = Math.max(...data.map((item) => item.count), 1);
+  const points = data.map((item, index) => {
+    const x = pad.left + (data.length <= 1 ? 0 : (index / (data.length - 1)) * (width - pad.left - pad.right));
+    const y = pad.top + (1 - item.count / max) * (chartHeight - pad.top - pad.bottom);
+    return { x, y, ...item };
+  });
+  const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+  const areaPath = points.length
+    ? `M ${pad.left} ${chartHeight - pad.bottom} ${linePath.replace(/^M/, "L")} L ${points[points.length - 1].x.toFixed(1)} ${chartHeight - pad.bottom} Z`
+    : "";
+  const yTicks = [max, max * 0.75, max * 0.5, max * 0.25, 0];
+  const xStep = Math.max(1, Math.ceil(data.length / 8));
+
+  return (
+    <svg viewBox={`0 0 ${width} ${chartHeight}`} width="100%" height={height} preserveAspectRatio="none" role="img">
+      <defs>
+        <linearGradient id="dashboardTrendFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.34" />
+          <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      {yTicks.map((tick, index) => {
+        const y = pad.top + index * ((chartHeight - pad.top - pad.bottom) / (yTicks.length - 1));
+        return (
+          <g key={index}>
+            <line x1={pad.left} x2={width - pad.right} y1={y} y2={y} stroke="rgba(148,163,184,0.14)" strokeDasharray="4 5" />
+            <text x={pad.left - 10} y={y + 4} textAnchor="end" fill="#64748b" fontSize="11">{shortNumber(Math.round(tick))}</text>
+          </g>
+        );
+      })}
+      {data.map((item, index) => {
+        if (index % xStep !== 0 && index !== data.length - 1) return null;
+        const point = points[index];
+        return <text key={item.hour} x={point.x} y={chartHeight - 10} textAnchor="middle" fill="#64748b" fontSize="11">{item.hour}</text>;
+      })}
+      <line x1={pad.left} x2={pad.left} y1={pad.top} y2={chartHeight - pad.bottom} stroke="rgba(148,163,184,0.35)" />
+      <line x1={pad.left} x2={width - pad.right} y1={chartHeight - pad.bottom} y2={chartHeight - pad.bottom} stroke="rgba(148,163,184,0.35)" />
+      {areaPath && <path d={areaPath} fill="url(#dashboardTrendFill)" />}
+      {linePath && <path d={linePath} fill="none" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+    </svg>
+  );
+}
+
+function HorizontalBarChart({ data, height = 290 }: { data: Array<{ name: string; value: number }>; height?: number }) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+  return (
+    <div className="flex flex-col justify-center gap-3" style={{ minHeight: height }}>
+      {data.map((item, index) => (
+        <div key={`${item.name}-${index}`} className="grid grid-cols-[86px_1fr_54px] items-center gap-3">
+          <div className="truncate text-xs text-slate-400" title={item.name}>{item.name}</div>
+          <div className="h-3 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.max(2, Math.min(100, (item.value / max) * 100))}%`,
+                background: COLORS[index % COLORS.length],
+              }}
+            />
+          </div>
+          <div className="text-right font-mono text-xs text-slate-300">{shortNumber(item.value)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LiveClock() {
   const [currentTime, setCurrentTime] = useState(new Date());
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    return () => window.clearInterval(timer);
   }, []);
   return (
     <div className="text-left sm:text-right">
-      <p className="text-xl sm:text-2xl font-mono text-cyber-blue">
-        {currentTime.toLocaleTimeString("zh-CN", { hour12: false })}
-      </p>
+      <p className="font-mono text-xl text-cyber-blue sm:text-2xl">{currentTime.toLocaleTimeString("zh-CN", { hour12: false })}</p>
       <p className="text-xs text-muted-foreground">
-        {currentTime.toLocaleDateString("zh-CN", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          weekday: "short",
-        })}
+        {currentTime.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" })}
       </p>
-    </div>
-  );
-});
-
-function StatCard({
-  title,
-  value,
-  icon: Icon,
-  color,
-  sub,
-}: {
-  title: string;
-  value: number | string;
-  icon: any;
-  color: string;
-  sub?: string;
-}) {
-  return (
-    <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm p-4 sm:p-5 group hover:border-opacity-30 transition-all duration-300">
-      <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-cyber-blue to-transparent opacity-60" />
-      <div className="flex items-start justify-between">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs sm:text-sm text-gray-400 mb-1">{title}</p>
-          <p className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            {typeof value === "number" ? value.toLocaleString() : value}
-          </p>
-          {sub && <p className="text-[10px] sm:text-xs text-gray-500 mt-1 truncate">{sub}</p>}
-        </div>
-        <div
-          className="p-2 sm:p-3 rounded-lg shrink-0"
-          style={{ backgroundColor: `${color}15`, color }}
-        >
-          <Icon size={20} className="sm:w-6 sm:h-6" />
-        </div>
-      </div>
     </div>
   );
 }
@@ -123,37 +274,77 @@ function StatCard({
 export function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [keywordTrend, setKeywordTrend] = useState<KeywordTrend[]>([]);
+  const [senders, setSenders] = useState<SenderRanking[]>([]);
+  const [conversations, setConversations] = useState<ConversationActivity[]>([]);
+  const [recentAlerts, setRecentAlerts] = useState<RecentAlert[]>([]);
+  const [topWords, setTopWords] = useState<TopWord[]>([]);
+  const [dailyReport, setDailyReport] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const intervalRef = useRef<number | null>(null);
-
   const [error, setError] = useState<string | null>(null);
+  const intervalRef = useRef<number | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const [statsData, healthData] = await Promise.all([
+      const [statsData, healthData, keywordData, senderData, conversationData, alertData, wordsData, reportData] = await Promise.all([
         api.dashboard.getStats(),
-        fetch("/health").then((r) => r.ok ? r.json() : null).catch(() => null),
+        fetch("/health").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        api.dashboard.getKeywordTrend(7, 8).catch(() => []),
+        api.dashboard.getSenderRanking(12, "alerts").catch(() => []),
+        api.dashboard.getConversationActivity(12).catch(() => []),
+        api.dashboard.getRecentAlerts(12).catch(() => ({ items: [] })),
+        api.analysis.getTopWords(undefined, undefined, 1, 40).catch(() => ({ words: [] })),
+        api.analysis.getDailyReport().catch(() => null),
       ]);
+
       setStats(statsData);
       setHealth(healthData);
+      setKeywordTrend(keywordData || []);
+      setSenders(senderData || []);
+      setConversations(conversationData || []);
+      setRecentAlerts(alertData?.items || []);
+      setTopWords(wordsData?.words || []);
+      setDailyReport(reportData);
       setError(null);
     } catch (e) {
       console.error("Dashboard fetch error", e);
       setError("数据加载失败");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchData().then(() => setLoading(false));
+    fetchData();
     intervalRef.current = window.setInterval(fetchData, 30000);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current) window.clearInterval(intervalRef.current);
     };
   }, [fetchData]);
 
+  const alertsPieData = useMemo(
+    () => Object.entries(stats?.alerts_by_level || {}).map(([name, value]) => ({ key: name, name: LEVEL_MAP[name] || name, value })),
+    [stats?.alerts_by_level]
+  );
+
+  const keywordBars = useMemo(
+    () =>
+      keywordTrend.map((item) => ({
+        name: item.keyword_group?.length > 10 ? `${item.keyword_group.slice(0, 10)}...` : item.keyword_group,
+        value: item.counts?.reduce((sum, count) => sum + count, 0) || 0,
+      })),
+    [keywordTrend]
+  );
+
+  const wordMax = Math.max(...topWords.map((w) => w.count), 1);
+  const senderAlertMax = Math.max(...senders.map((s) => s.alert_count), 1);
+  const conversationMax = Math.max(...conversations.map((c) => c.message_count), 1);
+  const hourlyRate = stats ? Math.round(stats.today_messages / Math.max(new Date().getHours(), 1)) : 0;
+  const alertRate = stats ? ((stats.today_alerts / Math.max(stats.today_messages, 1)) * 100).toFixed(1) : "0.0";
+
   if (loading && !stats) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex items-center gap-3 text-cyber-blue">
           <Radio className="animate-pulse" size={20} />
           <span className="text-lg">加载系统数据...</span>
@@ -164,219 +355,204 @@ export function DashboardPage() {
 
   if (error && !stats) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-        <p className="text-red-400 text-lg">数据加载失败</p>
-        <Button variant="tech" onClick={() => { setLoading(true); fetchData().then(() => setLoading(false)); }}>重试</Button>
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
+        <p className="text-lg text-red-400">数据加载失败</p>
+        <Button variant="tech" onClick={fetchData}>重试</Button>
       </div>
     );
   }
 
   if (!stats) return null;
 
-  const alertsPieData = Object.entries(stats.alerts_by_level || {}).map(
-    ([name, value]) => ({ name: LEVEL_MAP[name] || name, value })
-  );
-  const messagesTrend = stats.messages_24h || [];
-
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* 顶部时间 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-foreground">系统总览</h2>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            实时监控系统运行状态
-          </p>
+          <h2 className="text-2xl font-bold text-foreground">系统仪表盘</h2>
+          <p className="mt-1 text-sm text-muted-foreground">监控态势、告警分析、关键词热度、对象排行与系统健康</p>
         </div>
-        <LiveClock />
+        <div className="flex items-center gap-3">
+          <Button variant="outline" onClick={fetchData} className="min-h-[40px]">
+            <RefreshCcw size={16} className="mr-2" />
+            刷新
+          </Button>
+          <LiveClock />
+        </div>
       </div>
 
-      {/* 核心指标 */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
-        <StatCard
-          title="监控账号"
-          value={stats.active_accounts}
-          icon={Users}
-          color="#00f0ff"
-          sub={`共 ${stats.total_accounts} 个`}
-        />
-        <StatCard
-          title="监控频道"
-          value={stats.active_conversations}
-          icon={MessageSquare}
-          color="#b026ff"
-          sub={`共 ${stats.total_conversations} 个`}
-        />
-        <StatCard
-          title="今日消息"
-          value={stats.today_messages}
-          icon={Activity}
-          color="#0aff00"
-          sub={`累计 ${stats.total_messages.toLocaleString()}`}
-        />
-        <StatCard
-          title="待处理告警"
-          value={stats.pending_alerts}
-          icon={AlertTriangle}
-          color="#ff006e"
-          sub={`今日 ${stats.today_alerts}`}
-        />
-        <StatCard
-          title="活跃关键词"
-          value={stats.active_keywords}
-          icon={Zap}
-          color="#ffaa00"
-          sub={`${stats.keyword_groups} 个分组`}
-        />
-        <StatCard
-          title="系统资源"
-          value={
-            health
-              ? `CPU ${health.resources?.cpu_percent?.toFixed(1) || 0}%`
-              : "--"
-          }
-          icon={Shield}
-          color="#00f0ff"
-          sub={
-            health
-              ? `内存 ${health.resources?.memory_used_gb?.toFixed(1)}/${health.resources?.memory_total_gb?.toFixed(1)}GB (${health.resources?.memory_percent?.toFixed(0)}%) · 硬盘 ${health.resources?.disk_free_gb?.toFixed(0)}GB 可用`
-              : ""
-          }
-        />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <StatCard title="今日消息" value={stats.today_messages} icon={MessageSquare} color="#38bdf8" sub={`累计 ${shortNumber(stats.total_messages)}`} />
+        <StatCard title="今日告警" value={stats.today_alerts} icon={BellRing} color="#f43f5e" sub={`命中率 ${alertRate}%`} />
+        <StatCard title="待处理告警" value={stats.pending_alerts} icon={AlertTriangle} color="#fb923c" sub={`总告警 ${shortNumber(stats.total_alerts)}`} />
+        <StatCard title="活跃会话" value={stats.active_conversations} icon={Radio} color="#a78bfa" sub={`总会话 ${stats.total_conversations}`} />
+        <StatCard title="消息速率" value={hourlyRate} icon={Zap} color="#facc15" sub="条 / 小时" />
+        <StatCard title="发送者画像" value={stats.total_senders} icon={Users} color="#22c55e" sub={`${stats.active_keywords} 个活跃关键词`} />
       </div>
 
-      {/* 图表区域 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        {/* 24h 消息趋势 */}
-        <div className="lg:col-span-2 rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm p-4 sm:p-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
-            <h3 className="text-base sm:text-lg font-semibold text-foreground flex items-center gap-2">
-              <TrendingUp size={18} className="text-cyber-blue shrink-0" />
-              24小时消息趋势
-            </h3>
-            <span className="text-xs text-muted-foreground">
-              {stats.today_messages.toLocaleString()} 条今日消息
-            </span>
-          </div>
-          <ResponsiveContainer width="100%" height={240} className="sm:h-[280px]">
-            <AreaChart data={messagesTrend} >
-              <defs>
-                <linearGradient id="msgGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#00f0ff" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#00f0ff" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="hour" name="时间" stroke="#666" fontSize={10} tick={{ fontSize: 10 }} />
-              <YAxis stroke="#666" fontSize={10} tick={{ fontSize: 10}} />
-              <Tooltip
-                contentStyle={{
-                  background: "rgba(10,10,30,0.9)",
-                  border: "1px solid rgba(0,240,255,0.3)",
-                  borderRadius: "8px",
-                  color: "#fff",
-                  fontSize: "12px",
-                }}
-                formatter={(value: any, name: any) => [value, name === "count" ? "消息数" : name === "hour" ? "时间" : name]}
-                labelFormatter={(label) => `时间: ${label}`}
-              />
-              <Area
-                type="monotone"
-                dataKey="count"
-                name="消息数"
-                stroke="#00f0ff"
-                strokeWidth={2}
-                fill="url(#msgGradient)"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <DashboardPanel title="24小时消息趋势" icon={TrendingUp} className="xl:col-span-2">
+          <MessageTrendChart data={stats.messages_24h || []} height={300} />
+        </DashboardPanel>
 
-        {/* 告警级别分布 */}
-        <div className="rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm p-4 sm:p-5">
-          <h3 className="text-base sm:text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
-            <AlertTriangle size={18} className="text-cyber-pink shrink-0" />
-            告警级别分布
-          </h3>
-          <ResponsiveContainer width="100%" height={240} className="sm:h-[280px]">
-            <PieChart >
-              <Pie
-                data={alertsPieData}
-                cx="50%"
-                cy="45%"
-                innerRadius={45}
-                outerRadius={70}
-                paddingAngle={5}
-                dataKey="value"
-                stroke="none"
-              >
-                {alertsPieData.map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+        <DashboardPanel title="告警级别分布" icon={AlertTriangle}>
+          <ResponsiveContainer width="100%" height={230}>
+            <PieChart>
+              <Pie data={alertsPieData} cx="50%" cy="48%" innerRadius={55} outerRadius={82} paddingAngle={4} dataKey="value" stroke="none" isAnimationActive={false}>
+                {alertsPieData.map((item, i) => (
+                  <Cell key={item.key} fill={LEVEL_COLORS[item.key] || COLORS[i % COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip
-                contentStyle={{
-                  background: "rgba(10,10,30,0.95)",
-                  border: "1px solid rgba(0,240,255,0.3)",
-                  borderRadius: "8px",
-                  color: "#ffffff",
-                  fontSize: "13px",
-                  fontWeight: "bold",
-                }}
-                formatter={(value: any, name: any) => [<span style={{ color: "#fff" }}>{value}</span>, <span style={{ color: "#fff" }}>{name}</span>]}
-              />
+              <Tooltip contentStyle={{ background: "rgba(10,10,30,0.95)", border: "1px solid rgba(244,63,94,0.28)", borderRadius: 8, color: "#fff" }} />
             </PieChart>
           </ResponsiveContainer>
-          <div className="flex flex-wrap justify-center gap-2 sm:gap-4 mt-2">
+          <div className="grid grid-cols-2 gap-2">
             {alertsPieData.map((item, i) => (
-              <div key={item.name} className="flex items-center gap-1.5 text-xs">
-                <div
-                  className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                />
-                <span className="text-gray-400 truncate">
-                  {item.name}: {item.value}
+              <div key={item.key} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2 text-xs">
+                <span className="flex items-center gap-2 text-gray-300">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: LEVEL_COLORS[item.key] || COLORS[i % COLORS.length] }} />
+                  {item.name}
                 </span>
+                <span className="font-mono text-white">{shortNumber(item.value)}</span>
               </div>
             ))}
           </div>
-        </div>
+        </DashboardPanel>
       </div>
 
-      {/* 底部状态栏 */}
-      {health && (
-        <div className="rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm p-3 sm:p-4">
-          <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-xs sm:text-sm">
-            <div className="flex items-center gap-2">
-              <div
-                className={`w-2 sm:w-2.5 h-2 sm:h-2.5 rounded-full ${
-                  health.status === "healthy"
-                    ? "bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.6)]"
-                    : "bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.6)]"
-                }`}
-              />
-              <span className="text-gray-300">
-                系统状态: {health.status === "healthy" ? "正常" : "异常"}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-gray-400">
-              <Radio size={14} className="text-cyber-blue shrink-0" />
-              TG 客户端: {health.telegram?.clients_count || 0}
-            </div>
-            <div className="flex items-center gap-2 text-gray-400">
-              <Eye size={14} className="text-cyber-purple shrink-0" />
-              活跃监控: {health.telegram?.active_monitors || 0}
-            </div>
-            <div className="flex items-center gap-2 text-gray-400">
-              <Activity size={14} className="text-cyber-green shrink-0" />
-              WebSocket: {health.websocket?.connections || 0} 连接
-            </div>
-            <div className="text-gray-500 text-[10px] sm:text-xs ml-auto w-full sm:w-auto text-center sm:text-right">
-              数据更新: {stats.updated_at || "--"}
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <DashboardPanel title="关键词组 7 日热度" icon={BarChart3}>
+          <HorizontalBarChart data={keywordBars} height={290} />
+        </DashboardPanel>
+
+        <DashboardPanel title="高频词云数据" icon={Hash}>
+          <div className="flex min-h-[290px] flex-wrap content-start gap-2">
+            {topWords.slice(0, 36).map((word, i) => {
+              const scale = 0.78 + Math.min(1.3, word.count / wordMax) * 1.25;
+              return (
+                <span
+                  key={`${word.word}-${i}`}
+                  className="rounded-full border border-cyan-300/10 bg-cyan-300/10 px-3 py-1 text-cyan-100"
+                  style={{ fontSize: `${scale}rem`, opacity: 0.62 + Math.min(0.35, word.count / wordMax) }}
+                  title={`${word.word}: ${word.count}`}
+                >
+                  {word.word}
+                </span>
+              );
+            })}
+          </div>
+        </DashboardPanel>
+
+        <DashboardPanel title="系统健康与链路状态" icon={Shield}>
+          <div className="space-y-4">
+            <MiniProgress label="CPU 使用率" value={health?.resources?.cpu_percent || 0} max={100} color="#22c55e" right={`${health?.resources?.cpu_percent?.toFixed(1) || 0}%`} />
+            <MiniProgress label="内存使用率" value={health?.resources?.memory_percent || 0} max={100} color="#38bdf8" right={`${health?.resources?.memory_used_gb?.toFixed(1) || 0}/${health?.resources?.memory_total_gb?.toFixed(1) || 0}GB`} />
+            <MiniProgress label="硬盘使用率" value={health?.resources?.disk_percent || 0} max={100} color="#a78bfa" right={`剩余 ${health?.resources?.disk_free_gb?.toFixed(0) || 0}GB`} />
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="rounded-lg bg-white/[0.04] p-3">
+                <p className="text-xs text-gray-500">告警链路</p>
+                <p className={`mt-1 text-lg font-semibold ${health?.alert_pipeline?.status === "healthy" ? "text-emerald-300" : "text-amber-300"}`}>
+                  {health?.alert_pipeline?.status === "healthy" ? "正常" : "需关注"}
+                </p>
+              </div>
+              <div className="rounded-lg bg-white/[0.04] p-3">
+                <p className="text-xs text-gray-500">通知队列</p>
+                <p className="mt-1 font-mono text-lg text-cyan-100">{health?.alert_pipeline?.notification_queue?.queue_size || 0}</p>
+              </div>
+              <div className="rounded-lg bg-white/[0.04] p-3">
+                <p className="text-xs text-gray-500">1小时告警</p>
+                <p className="mt-1 font-mono text-lg text-rose-200">{health?.alert_pipeline?.recent_alerts_1h || 0}</p>
+              </div>
+              <div className="rounded-lg bg-white/[0.04] p-3">
+                <p className="text-xs text-gray-500">链路异常</p>
+                <p className="mt-1 font-mono text-lg text-amber-200">{health?.alert_pipeline?.matched_without_alert_1h || 0}</p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        </DashboardPanel>
+      </div>
+
+      <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-3">
+        <DashboardPanel title="高风险对象排行" icon={Users} className="self-stretch" contentClassName="flex flex-col">
+          <div className="flex h-full flex-col justify-between gap-3">
+            {senders.slice(0, 8).map((sender) => {
+              const name = sender.username || sender.first_name || `用户 ${sender.sender_id}`;
+              return (
+                <div key={sender.sender_id} className="grid min-h-[58px] grid-cols-[32px_1fr_auto] items-center gap-3 rounded-lg bg-white/[0.025] px-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyber-blue/15 font-mono text-xs text-cyber-blue">{sender.rank}</div>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-gray-200">{name}</div>
+                    <MiniProgress label="" value={sender.alert_count} max={senderAlertMax} color="#f43f5e" />
+                  </div>
+                  <div className="text-right">
+                    <div className="font-mono text-sm text-white">{shortNumber(sender.message_count)}</div>
+                    <div className="text-xs text-rose-300">{sender.alert_count} 告警</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DashboardPanel>
+
+        <DashboardPanel title="会话活跃度" icon={Radio} className="self-stretch" contentClassName="flex flex-col">
+          <div className="flex h-full flex-col justify-between gap-3">
+            {conversations.slice(0, 8).map((conversation) => (
+              <div key={conversation.conversation_id} className="min-h-[58px] rounded-lg bg-white/[0.035] px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-gray-200">{conversation.title || `会话 ${conversation.conversation_id}`}</div>
+                    <div className="mt-1 text-xs text-gray-500">{conversation.chat_type} · {conversation.sender_count} 发送者 · {conversation.alert_count} 告警</div>
+                  </div>
+                  <div className="font-mono text-sm text-cyber-blue">{shortNumber(conversation.message_count)}</div>
+                </div>
+                <div className="mt-2">
+                  <MiniProgress label="" value={conversation.message_count} max={conversationMax} color="#a78bfa" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </DashboardPanel>
+
+        <DashboardPanel title="最新告警流" icon={AlertTriangle} className="self-stretch" contentClassName="flex flex-col">
+          <div className="flex h-full flex-col gap-3">
+            {recentAlerts.slice(0, 8).map((alert) => {
+              const color = LEVEL_COLORS[alert.alert_level || "low"] || "#38bdf8";
+              return (
+                <div key={alert.id} className="min-h-[72px] rounded-lg border border-white/5 bg-white/[0.035] px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-2 text-sm" style={{ color }}>
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                      {LEVEL_MAP[alert.alert_level || ""] || "告警"}
+                    </span>
+                    <span className="text-xs text-gray-500">{alert.created_at ? new Date(alert.created_at).toLocaleTimeString("zh-CN", { hour12: false }) : "--"}</span>
+                  </div>
+                  <div className="mt-1 truncate text-sm text-gray-200">{alert.keyword_text || "--"} <span className="text-xs text-gray-500">{alert.keyword_group_name || ""}</span></div>
+                  <div className="truncate text-xs text-gray-500">{alert.conversation_title || "未知会话"} · {alert.sender_username || "未知发送者"}</div>
+                </div>
+              );
+            })}
+          </div>
+        </DashboardPanel>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <DashboardPanel title="日报摘要" icon={FileText}>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard title="日报消息" value={dailyReport?.summary?.total_messages ?? stats.today_messages} icon={MessageSquare} color="#38bdf8" />
+            <StatCard title="日报告警" value={dailyReport?.summary?.total_alerts ?? stats.today_alerts} icon={AlertTriangle} color="#f43f5e" />
+            <StatCard title="活跃会话" value={dailyReport?.summary?.active_conversations ?? stats.active_conversations} icon={Radio} color="#a78bfa" />
+            <StatCard title="浏览器连接" value={health?.websocket?.connections || 0} icon={Eye} color="#22c55e" />
+          </div>
+        </DashboardPanel>
+
+        <DashboardPanel title="运行指标" icon={Gauge}>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard title="TG 客户端" value={health?.telegram?.clients_count || 0} icon={Radio} color="#38bdf8" />
+            <StatCard title="监控会话" value={health?.telegram?.active_monitors || 0} icon={Activity} color="#a78bfa" />
+            <StatCard title="消息队列" value={health?.telegram?.message_queue?.queue_size || 0} icon={Database} color="#facc15" />
+            <StatCard title="进程内存" value={`${health?.resources?.process_memory_mb || 0}M`} icon={Shield} color="#22c55e" />
+          </div>
+        </DashboardPanel>
+      </div>
     </div>
   );
 }
