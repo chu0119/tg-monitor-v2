@@ -1,97 +1,233 @@
-# 听风追影 - Telegram 群组数据预警分析系统
+<p align="center">
+  <a href="./README.zh-CN.md">Read this README in Chinese</a>
+</p>
 
-`tg-monitor-v2` 是一套面向 Telegram 群组、频道和公开会话的实时监控、关键词告警、数据分析和可视化大屏系统。当前仓库已同步生产环境稳定版本，代码中不包含数据库、日志、Telegram session、导出包、备份包和任何真实密钥。
+<p align="center">
+  <img src="./docs/assets/hero-cyberpunk.svg" alt="Tingfeng Zhuiying cyberpunk project banner" width="100%" />
+</p>
 
-## 当前能力
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11+-5EF3FF?style=for-the-badge&labelColor=050713" />
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.115+-00D4A6?style=for-the-badge&labelColor=050713" />
+  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&labelColor=050713" />
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-4C7DFF?style=for-the-badge&labelColor=050713" />
+  <img alt="MySQL" src="https://img.shields.io/badge/MySQL-8-FFB84D?style=for-the-badge&labelColor=050713" />
+</p>
 
-- Telegram 多账号实时监听，支持新消息与编辑消息处理。
-- 会话管理、历史消息拉取、发送者画像和消息检索。
-- 关键词组、关键词规则、告警等级、告警处理状态和通知降噪。
-- 告警链路健康检查、诊断接口、通知队列和系统资源监控。
-- 仪表盘：消息趋势、告警分布、关键词热度、词云、高风险对象、会话活跃度、最新告警流。
-- 监控大屏：面向展示屏的态势指标、告警结构、关键词热度、重点对象和实时告警流。
-- 数据保留策略：按消息/告警记录数量上限清理，默认不超过 900GB 数据库容量预算。
-- 备份、导出、导入、系统设置持久化和一键部署脚本。
+# Tingfeng Zhuiying
 
-## 技术栈
+**Tingfeng Zhuiying** is a cyberpunk-style Telegram monitoring, keyword intelligence, alert triage, analytics, and command-screen system. It is designed for teams that need to collect high-volume Telegram group/channel activity, match configurable keyword rules in real time, turn matches into structured alerts, and present operational intelligence through dashboards and large-screen visualizations.
 
-| 模块 | 技术 |
+The repository contains the synchronized production codebase without runtime data. Databases, logs, Telegram session files, exported files, backup packages, uploaded files, and real secrets are intentionally excluded.
+
+## Screenshots
+
+The screenshots below are captured from a live deployment and redacted before being committed. Exact message content, sensitive object names, live timestamps, and selected metrics are hidden while preserving the interface layout and visual style.
+
+### Analytics Dashboard
+
+![Analytics dashboard with redacted metrics](./docs/assets/dashboard-overview.png)
+
+### Command Screen
+
+![Cyber command screen with redacted alert stream](./docs/assets/bigscreen-command-center.png)
+
+### Alert Workbench
+
+![Alert management workbench with redacted alert content](./docs/assets/alert-workbench.png)
+
+## What It Solves
+
+Telegram monitoring often fails in the same places: real-time capture works, but alerts are late or incomplete; keyword rules become hard to maintain; dashboards show raw counts but not operational context; storage grows without a predictable budget; and large-screen views look impressive but do not help decision makers understand risk.
+
+This project addresses those issues as one system:
+
+- **Real-time message ingestion** from Telegram groups, channels, and public conversations.
+- **Configurable keyword intelligence** with keyword groups, match levels, message context, and alert aggregation.
+- **Alert lifecycle management** for pending, handled, ignored, and historical alerts.
+- **Operational dashboards** for analysts who need drill-down, ranking, trend, heat, and health views.
+- **Large-screen command visualization** for leadership briefings and monitoring rooms.
+- **Storage governance** based on record-count and capacity budgets instead of only time-based retention.
+- **Deployment and recovery tooling** for repeatable installation, service management, health checks, and backup workflows.
+
+## Core Capabilities
+
+| Area | Capability |
 | --- | --- |
-| 前端 | React 19, TypeScript, Vite, Tailwind CSS, Recharts |
-| 后端 | FastAPI, SQLAlchemy 2.x, Telethon, Pydantic |
-| 数据库 | MySQL 8.x |
-| 部署 | systemd, shell scripts, optional Nginx/reverse proxy |
+| Telegram collection | Multi-account monitoring, session management, connection state tracking, new-message handling, edited-message handling, conversation synchronization |
+| Keyword engine | Keyword groups, level mapping, category tagging, phrase matching, sender/conversation context, alert deduplication support |
+| Alert center | Search, filters, severity levels, pending state, batch operations, CSV export, alert stream display, alert diagnostics |
+| Dashboard | 24-hour message trend, alert distribution, keyword heat, word cloud, high-risk object ranking, conversation activity, system health |
+| Command screen | Leadership-friendly KPI cards, animated numbers, message trend, alert composition, runtime health, alert feed, responsive scaling |
+| Data governance | Message and alert count limits, database capacity budget, cleanup service, backup/export/import utilities |
+| Operations | systemd units, install scripts, restart scripts, health check script, watchdog script, log rotation config |
+| Security posture | Environment templates, secret exclusion rules, protected branch workflow, CODEOWNERS, CI checks |
 
-## 仓库结构
+## Architecture
+
+```mermaid
+flowchart LR
+  TG[Telegram Groups and Channels] --> TC[Telethon Clients]
+  TC --> MON[Monitoring Service]
+  MON --> MSG[(Messages)]
+  MON --> KM[Keyword Matcher]
+  KM --> AS[Alert Service]
+  AS --> ALT[(Alerts)]
+  AS --> NOTIFY[Notification Queue]
+  MSG --> API[FastAPI Backend]
+  ALT --> API
+  API --> FE[React Analyst Console]
+  API --> WALL[Command Screen]
+  API --> OPS[Diagnostics and Health APIs]
+  CLEAN[Data Cleanup Service] --> MSG
+  CLEAN --> ALT
+  BACKUP[Backup and Export Services] --> MSG
+  BACKUP --> ALT
+```
+
+## Frontend Modules
+
+The frontend is a React + TypeScript + Vite application with a dark, glass, neon command-center style. It is optimized for both daily analyst work and large-screen display.
+
+| Page | Purpose |
+| --- | --- |
+| Dashboard | Main analyst overview with trends, alert structure, keyword heat, word cloud, rankings, and health status |
+| Real-time Monitoring | Live message and monitoring state view |
+| Alert Center | Alert search, filtering, triage, handling, and CSV export |
+| Proxy Management | Proxy configuration and runtime proxy status |
+| Keyword Management | Keyword groups, categories, levels, and rule maintenance |
+| Conversation Management | Telegram group/channel/session conversation management |
+| Notification Configuration | Notification channels, queue status, and delivery configuration |
+| Account Management | Telegram account/client management |
+| System Settings | Retention, storage, cleanup, and operational settings |
+| Command Screen | Large-screen, leadership-friendly monitoring wall |
+
+## Backend Modules
+
+The backend is a FastAPI application organized around API routers, SQLAlchemy models, Pydantic schemas, and service modules.
+
+```text
+backend/
+├── app/api/              # REST API routers
+├── app/core/             # configuration and database bootstrap
+├── app/models/           # SQLAlchemy entities
+├── app/schemas/          # Pydantic request/response models
+├── app/services/         # alert, cleanup, backup, export, notification and report services
+├── app/telegram/         # Telethon client and monitoring pipeline
+└── init_db.py            # database initialization helper
+```
+
+Important service areas:
+
+- `alert_service.py` creates and aggregates alerts from keyword matches.
+- `keyword_matcher.py` centralizes matching behavior and category/level mapping.
+- `data_cleanup_service.py` enforces record-count and storage-capacity retention policies.
+- `notification_service.py` handles notification delivery and queue state.
+- `backup_service.py`, `export_service.py`, and `import_service.py` support operational recovery and data movement.
+- `wordcloud_service.py`, `sentiment_service.py`, and `report_service.py` support analytics views.
+
+## Data Retention Strategy
+
+The system is designed to avoid uncontrolled database growth. Instead of relying only on “keep N days,” retention is governed by record-count limits and a total storage budget.
+
+Recommended policy:
+
+- Message data is retained by maximum record count and database capacity.
+- Alert data is retained by maximum alert count and operational usefulness.
+- Cleanup runs periodically and deletes the oldest records beyond the configured limits.
+- The deployment target should keep the monitored database below the configured capacity budget, with the current production recommendation staying under **900 GB**.
+
+The exact record limits should be tuned to the deployment’s message volume, alert density, disk capacity, and query performance requirements.
+
+## Security Model
+
+This repository deliberately excludes runtime secrets and private operational data.
+
+Never commit:
+
+- `.env` files.
+- Telegram API ID/API hash values.
+- JWT secret keys.
+- SMTP, webhook, proxy, or database passwords.
+- Telegram session files such as `*.session`.
+- Logs, exports, backups, database files, uploaded files, or raw screenshots containing real message content.
+
+The repository includes:
+
+- `.env.example`, `backend/.env.example`, and `frontend/.env.example`.
+- `.gitignore` rules for runtime data and build artifacts.
+- `SECURITY.md` with reporting and handling guidance.
+- `CODEOWNERS` so repository ownership review can be enforced.
+- GitHub Actions CI for backend syntax checks and frontend production builds.
+- Protected `main` branch policy requiring pull requests, review, and status checks.
+
+## Repository Layout
 
 ```text
 .
-├── backend/                  # FastAPI 后端、Telegram 监听和业务服务
-├── frontend/                 # React 前端
-├── install.sh                # 一键安装脚本
-├── install-services.sh       # systemd 服务安装
-├── monitorctl.sh             # 运维控制脚本
-├── start.sh                  # 启动与环境初始化脚本
-├── tg-monitor-*.service      # systemd 服务模板
-├── .env.example              # 根环境变量模板
-├── DEPLOYMENT.md             # 部署与迁移说明
-├── CONTRIBUTING.md           # 协作和提交规范
-└── SECURITY.md               # 安全说明
+├── .github/
+│   ├── CODEOWNERS
+│   ├── pull_request_template.md
+│   └── workflows/ci.yml
+├── backend/
+├── frontend/
+├── docs/assets/
+├── install.sh
+├── install-services.sh
+├── monitorctl.sh
+├── service.sh
+├── start.sh
+├── health-check.sh
+├── health-check-cron.sh
+├── tg_watchdog.py
+├── tg-monitor-backend.service
+├── tg-monitor-frontend.service
+├── DEPLOYMENT.md
+├── CONTRIBUTING.md
+└── SECURITY.md
 ```
 
-## 快速部署
+## Quick Deployment
 
-推荐在 Ubuntu 22.04/24.04 或 Debian 12 上部署。
+Recommended operating systems:
+
+- Ubuntu 22.04 LTS
+- Ubuntu 24.04 LTS
+- Debian 12
+
+Clone the repository:
 
 ```bash
 git clone https://github.com/chu0119/tg-monitor-v2.git
 cd tg-monitor-v2
+```
+
+Create configuration:
+
+```bash
 cp .env.example .env
 vim .env
+```
+
+Run the installer:
+
+```bash
 bash install.sh
 ```
 
-安装完成后通常访问：
+Typical endpoints after deployment:
 
-- 前端：`http://服务器IP:3000`
-- 后端 API：`http://服务器IP:8000/api/v1`
-- 健康检查：`http://服务器IP:8000/health`
+| Service | URL |
+| --- | --- |
+| Frontend | `http://SERVER_IP:3000` |
+| Backend API | `http://SERVER_IP:8000/api/v1` |
+| Health check | `http://SERVER_IP:8000/health` |
 
-更详细的安装、升级、迁移和回退流程见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+For a fuller deployment, migration, rollback, and backup guide, read [DEPLOYMENT.md](./DEPLOYMENT.md).
 
-## 手动开发
+## Required Configuration
 
-后端：
-
-```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python init_db.py
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-前端：
-
-```bash
-cd frontend
-npm ci
-npm run dev -- --host 0.0.0.0 --port 5173
-```
-
-生产构建：
-
-```bash
-cd frontend
-npm ci
-npm run build
-```
-
-## 必填配置
-
-复制 `.env.example` 为 `.env` 后至少填写：
+At minimum, configure database credentials, Telegram API credentials, and a long random JWT secret.
 
 ```env
 MYSQL_HOST=localhost
@@ -106,55 +242,106 @@ TELEGRAM_API_HASH=change_me
 JWT_SECRET_KEY=change_me_to_a_long_random_value
 ```
 
-Telegram API 凭证从 <https://my.telegram.org/apps> 获取。
+Telegram API credentials can be created from the Telegram developer portal.
 
-## 数据与密钥
+## Local Development
 
-以下内容不应提交到仓库：
-
-- `.env`、真实 API ID/API Hash、JWT 密钥、SMTP 密码、Webhook Token。
-- `backend/sessions/`、`*.session`、Telegram 登录态。
-- `logs/`、`exports/`、`backups/`、数据库文件、上传文件。
-- `frontend/dist/`、`node_modules/`、Python `venv/`。
-
-仓库已经通过 `.gitignore` 排除这些路径。提交前建议运行：
+Backend:
 
 ```bash
-git status --short
-git diff --cached --name-only
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python init_db.py
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-## 常用运维命令
+Frontend:
 
 ```bash
-# 查看状态
-./monitorctl.sh status
+cd frontend
+npm ci
+npm run dev -- --host 0.0.0.0 --port 5173
+```
 
-# 启动/停止/重启
+Production frontend build:
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
+## Operations
+
+Common commands:
+
+```bash
+./monitorctl.sh status
 ./monitorctl.sh start
 ./monitorctl.sh stop
 ./monitorctl.sh restart
-
-# 查看日志
 ./monitorctl.sh logs
-
-# 健康检查
 ./health-check.sh
 ```
 
-## 近期重点更新
+Service templates:
 
-- 修复实时消息能入库但告警统计/排行不准确的问题。
-- 大屏重点对象排行改为按真实告警数聚合。
-- 仪表盘增加词云、关键词热度、系统健康、对象排行和告警流。
-- 大屏改为 3 秒刷新，数字随数据变化滚动，支持全屏比例缩放。
-- 数据清理策略从按天改为按记录数量和数据库容量预算控制。
-- 增加告警链路诊断、通知队列健康状态和敏感配置脱敏。
+- `tg-monitor-backend.service`
+- `tg-monitor-frontend.service`
 
-## 协作规则
+Operational helpers:
 
-`main` 分支用于稳定版本。后续提交应通过 Pull Request 合并，并由仓库所有者审核。详细规则见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+- `auto-restart.sh` for restart automation.
+- `health-check-cron.sh` for scheduled health checks.
+- `tg_watchdog.py` for process-level watchdog behavior.
+- `logrotate.conf` for log retention.
 
-## 许可
+## Recent Production Updates
 
-当前仓库未声明开源许可证。未经仓库所有者明确授权，不得用于二次分发或商业化再发布。
+- Fixed alert statistics and ranking mismatches when real-time messages were being captured correctly but alert views looked sparse or inconsistent.
+- Reworked high-risk object ranking so alert counts are aggregated from real alert data.
+- Expanded the dashboard with word cloud, keyword heat, system health, object ranking, conversation activity, and alert feed sections.
+- Improved command-screen layout, animation, refresh cadence, responsive scaling, and leadership-facing information density.
+- Changed data cleanup from day-only retention to record-count and storage-budget retention.
+- Added alert-chain diagnostics, notification queue visibility, and masked sensitive configuration responses.
+- Added GitHub repository governance, branch protection, CODEOWNERS review, and CI verification.
+- Patched vulnerable frontend and backend dependencies.
+
+## CI and Branch Protection
+
+The default branch is protected. Changes should be merged through pull requests.
+
+Current expectations:
+
+- Pull request required before merging.
+- At least one approval required.
+- CODEOWNERS review required.
+- Stale approvals are dismissed after new commits.
+- Required status check: `build-and-check`.
+- Force push and branch deletion are disabled.
+
+The CI workflow performs:
+
+- Python dependency installation.
+- Backend syntax compilation.
+- Node dependency installation.
+- Frontend production build.
+
+## Roadmap Ideas
+
+Potential next improvements:
+
+- Add backend unit tests for keyword matching, alert aggregation, and cleanup limits.
+- Add frontend smoke tests for core pages and command-screen rendering.
+- Add database migration validation in CI.
+- Add optional Docker Compose deployment profile.
+- Add role-based access control for analyst, maintainer, and viewer roles.
+- Add structured audit logs for configuration changes and alert handling actions.
+- Add more configurable command-screen themes for different display rooms.
+
+## License
+
+No open-source license is currently declared. Without explicit permission from the repository owner, redistribution, commercial reuse, and derivative publication are not granted.

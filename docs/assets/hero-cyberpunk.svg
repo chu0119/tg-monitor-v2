@@ -1,0 +1,54 @@
+<svg width="1400" height="420" viewBox="0 0 1400 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tingfeng Zhuiying cyberpunk project banner">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1400" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#050713"/>
+      <stop offset="0.42" stop-color="#071426"/>
+      <stop offset="0.72" stop-color="#101026"/>
+      <stop offset="1" stop-color="#220919"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5EF3FF"/>
+      <stop offset="1" stop-color="#4C7DFF"/>
+    </linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FF3FA8"/>
+      <stop offset="1" stop-color="#FFB84D"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.36 0 0 0 0 0.95 0 0 0 0 1 0 0 0 0.75 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" stroke="#1C3550" stroke-opacity="0.55" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1400" height="420" rx="28" fill="url(#bg)"/>
+  <rect width="1400" height="420" rx="28" fill="url(#grid)" opacity="0.52"/>
+  <path d="M0 325C165 270 240 292 390 310C585 334 690 250 850 230C1038 206 1150 276 1400 214V420H0V325Z" fill="#071B2F" opacity="0.74"/>
+  <path d="M0 330C165 275 240 297 390 315C585 339 690 255 850 235C1038 211 1150 281 1400 219" stroke="#5EF3FF" stroke-opacity="0.42" stroke-width="2"/>
+  <circle cx="1110" cy="128" r="150" fill="#FF3FA8" opacity="0.11"/>
+  <circle cx="1120" cy="136" r="94" stroke="url(#pink)" stroke-width="3" opacity="0.72" filter="url(#glow)"/>
+  <circle cx="1120" cy="136" r="58" stroke="#5EF3FF" stroke-width="2" stroke-dasharray="10 10" opacity="0.82"/>
+  <path d="M1088 136L1110 158L1155 101" stroke="#5EF3FF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <rect x="64" y="60" width="126" height="126" rx="28" fill="#0A1830" stroke="#5EF3FF" stroke-opacity="0.8" stroke-width="2"/>
+  <path d="M127 86L161 100V126C161 152 146 171 127 178C108 171 93 152 93 126V100L127 86Z" stroke="#5EF3FF" stroke-width="7" stroke-linejoin="round" filter="url(#glow)"/>
+  <text x="220" y="113" fill="#E9FBFF" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="44" font-weight="800" letter-spacing="1">TINGFENG ZHUIYING</text>
+  <text x="220" y="167" fill="url(#cyan)" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="62" font-weight="900">Telegram Monitoring &amp; Early Warning Center</text>
+  <text x="223" y="219" fill="#A8C7D7" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24">Real-time collection · keyword intelligence · alert triage · analytics cockpit · cyber command wall</text>
+  <g font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20" font-weight="700">
+    <rect x="220" y="264" width="166" height="44" rx="22" fill="#091B2C" stroke="#5EF3FF" stroke-opacity="0.75"/>
+    <text x="244" y="293" fill="#DDFBFF">FastAPI</text>
+    <rect x="408" y="264" width="154" height="44" rx="22" fill="#101225" stroke="#FF3FA8" stroke-opacity="0.75"/>
+    <text x="433" y="293" fill="#FFE6F4">React</text>
+    <rect x="584" y="264" width="170" height="44" rx="22" fill="#091B2C" stroke="#5EF3FF" stroke-opacity="0.75"/>
+    <text x="609" y="293" fill="#DDFBFF">Telethon</text>
+    <rect x="776" y="264" width="145" height="44" rx="22" fill="#101225" stroke="#FFB84D" stroke-opacity="0.75"/>
+    <text x="802" y="293" fill="#FFF1D4">MySQL</text>
+  </g>
+  <path d="M66 360H1334" stroke="url(#cyan)" stroke-width="2" stroke-opacity="0.62"/>
+  <path d="M66 360H402" stroke="url(#pink)" stroke-width="4" stroke-linecap="round"/>
+</svg>
