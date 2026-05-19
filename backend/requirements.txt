@@ -2,7 +2,7 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 websockets==14.1
-python-multipart==0.0.20
+python-multipart==0.0.27
 
 # Telegram MTProto
 Telethon==1.40.0
@@ -10,22 +10,22 @@ Telethon==1.40.0
 # 数据库
 sqlalchemy==2.0.36
 alembic==1.14.0
-aiomysql==0.2.0
+aiomysql==0.3.0
 
 # 认证和安全
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 
 # HTTP 客户端
 httpx==0.28.1
-aiohttp==3.11.11
+aiohttp==3.13.3
 
 # YAML 解析（代理配置需要）
 pyyaml>=6.0
 
 # 通知推送
-requests==2.32.3
+requests==2.32.4
 pydantic==2.10.4
 pydantic-settings==2.7.1
 
