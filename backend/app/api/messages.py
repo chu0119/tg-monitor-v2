@@ -162,6 +162,10 @@ async def list_messages(
     db: AsyncSession = Depends(get_db),
 ):
     """获取消息列表 - 返回分页数据"""
+    # 全局搜索时限制每页数量，避免大表全扫超时
+    if not conversation_id and keyword and page_size > 50:
+        page_size = 50
+
     # 构建查询条件
     conditions = []
 
@@ -181,10 +185,29 @@ async def list_messages(
             select(Sender.id).where(Sender.phone.isnot(None), Sender.phone != '')
         ))
     if keyword:
-        conditions.append(or_(
-            Message.text.ilike(f"%{keyword}%"),
-            Message.caption.ilike(f"%{keyword}%")
-        ))
+        if conversation_id:
+            # 单会话：用 ILIKE（数据量小）
+            conditions.append(or_(
+                Message.text.ilike(f"%{keyword}%"),
+                Message.caption.ilike(f"%{keyword}%")
+            ))
+        else:
+            # 全局搜索：优先用 FULLTEXT 索引，降级用 ILIKE
+            from sqlalchemy import text as sa_text
+            try:
+                # 测试 FULLTEXT 索引是否可用
+                await db.execute(sa_text(
+                    "SELECT 1 FROM messages WHERE MATCH(text) AGAINST(:kw IN BOOLEAN MODE) LIMIT 1"
+                ).bindparams(kw=keyword))
+                conditions.append(
+                    sa_text("MATCH(text) AGAINST(:kw IN BOOLEAN MODE)").bindparams(kw=keyword)
+                )
+            except Exception:
+                # FULLTEXT 不可用，降级为 ILIKE
+                conditions.append(or_(
+                    Message.text.ilike(f"%{keyword}%"),
+                    Message.caption.ilike(f"%{keyword}%")
+                ))
 
     # 日期过滤
     if start_date:

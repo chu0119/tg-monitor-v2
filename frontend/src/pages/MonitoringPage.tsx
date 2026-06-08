@@ -68,11 +68,13 @@ interface MonitoringStatus {
 
 export function MonitoringPage() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<number | null>(null);
   const [filter, setFilter] = useState("");
   const [phoneFilter, setPhoneFilter] = useState(false);
+  const [globalSearch, setGlobalSearch] = useState(false);
   const [messageTypeFilter, setMessageTypeFilter] = useState<string>("all");
   const [alertFilter, setAlertFilter] = useState<string>("all");
   const [autoScroll, setAutoScroll] = useState(true);
@@ -198,7 +200,7 @@ export function MonitoringPage() {
           const newMessage = wsMessage.data as Message;
 
           // 只有当新消息属于当前选中的会话时才添加到列表
-          if (selectedConversation && newMessage.conversation_id === selectedConversation) {
+          if (selectedConversation && !globalSearch && newMessage.conversation_id === selectedConversation) {
             setMessages((prev) => {
               // 检查消息是否已存在（防止重复）
               if (prev.some((m) => m.id === newMessage.id)) {
@@ -272,10 +274,10 @@ export function MonitoringPage() {
 
       const interval = setInterval(async () => {
         // 轮询当前选中的会话消息
-        if (selectedConversation) {
+        if (selectedConversation && !globalSearch) {
           try {
             const params: any = {
-              conversation_id: selectedConversation,
+              ...(globalSearch ? {} : { conversation_id: selectedConversation }),
               page: 1,
               page_size: 10, // 只获取最新的10条消息
             };
@@ -319,7 +321,7 @@ export function MonitoringPage() {
         setIsPolling(false);
       }
     };
-  }, [isConnected, selectedConversation, pollingInterval]);
+  }, [isConnected, selectedConversation, pollingInterval, globalSearch]);
 
   const fetchGlobalStats = async () => {
     try {
@@ -508,10 +510,12 @@ export function MonitoringPage() {
   };
 
   const fetchMessages = async () => {
-    if (!selectedConversation) return;
+    if (!globalSearch && !selectedConversation) return;
+    if (globalSearch && !filter) return;
     try {
+      if (globalSearch) setSearchLoading(true);
       const params: any = {
-        conversation_id: selectedConversation,
+        ...(globalSearch ? {} : { conversation_id: selectedConversation }),
         page: currentPage,
         page_size: pageSize,
       };
@@ -540,6 +544,8 @@ export function MonitoringPage() {
       }, 50);
     } catch (error) {
       console.error("Failed to fetch messages:", error);
+    } finally {
+      setSearchLoading(false);
     }
   };
 
@@ -875,6 +881,20 @@ export function MonitoringPage() {
                   />
                   <span>📱 有手机号</span>
                 </label>
+                <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyber-blue/10 border border-cyber-blue/20 cursor-pointer min-h-[44px] text-xs sm:text-sm">
+                  <input
+                    type="checkbox"
+                    checked={globalSearch}
+                    onChange={(e) => {
+                      setGlobalSearch(e.target.checked);
+                      setMessages([]);
+                      setTotalCount(0);
+                      setCurrentPage(1);
+                    }}
+                    className="rounded w-4 h-4"
+                  />
+                  <span>🌐 全局</span>
+                </label>
                 <select
                   value={pageSize}
                   onChange={(e) => {
@@ -897,6 +917,7 @@ export function MonitoringPage() {
                     setAlertFilter("all");
                     setPhoneFilter(false);
                     setCurrentPage(1);
+                    setGlobalSearch(false);
                   }}
                   className="min-h-[44px]"
                 >
@@ -910,9 +931,18 @@ export function MonitoringPage() {
             <div className="space-y-4">
               {/* 消息列表 */}
               <div ref={messageListRef} className="max-h-[400px] sm:max-h-[600px] overflow-y-auto tech-scrollbar pr-0 sm:pr-2">
-                {!selectedConversation ? (
+                {!selectedConversation && !globalSearch ? (
                   <div className="flex items-center justify-center h-64 text-muted-foreground">
                     请选择一个会话开始监控
+                  </div>
+                ) : globalSearch && !filter ? (
+                  <div className="flex items-center justify-center h-64 text-muted-foreground">
+                    请输入关键词进行全局搜索
+                  </div>
+                ) : searchLoading ? (
+                  <div className="flex items-center justify-center h-64 text-muted-foreground">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyber-blue mr-3"></div>
+                    全局搜索中，请稍候...
                   </div>
                 ) : filteredMessages.length === 0 ? (
                   <div className="flex items-center justify-center h-64 text-muted-foreground">
