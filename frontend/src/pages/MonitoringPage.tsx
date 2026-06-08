@@ -230,8 +230,8 @@ export function MonitoringPage() {
               return newBadge;
             });
           } else {
-            // 如果新消息不属于当前选中的会话，添加新消息提示
-            playNotificationSound();
+            // 如果新消息不属于当前选中的会话，添加新消息提示（全局搜索时静音）
+            if (!globalSearch) playNotificationSound();
             setConversationsWithNewMessages((prev) => new Set([...prev, newMessage.conversation_id]));
             setShowNewMessageBadge((prev) => ({
               ...prev,

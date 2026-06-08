@@ -165,6 +165,7 @@ async def list_messages(
     # 全局搜索时限制每页数量，避免大表全扫超时
     if not conversation_id and keyword and page_size > 50:
         page_size = 50
+        page = 1  # 重置页码，避免翻页后结果为空
 
     # 构建查询条件
     conditions = []
@@ -194,14 +195,28 @@ async def list_messages(
         else:
             # 全局搜索：优先用 FULLTEXT 索引，降级用 ILIKE
             from sqlalchemy import text as sa_text
+            # 用双引号包裹关键词，确保作为字面文本匹配而非 FULLTEXT 运算符
+            safe_kw = chr(34) + keyword + chr(34)
             try:
-                # 测试 FULLTEXT 索引是否可用
-                await db.execute(sa_text(
-                    "SELECT 1 FROM messages WHERE MATCH(text) AGAINST(:kw IN BOOLEAN MODE) LIMIT 1"
-                ).bindparams(kw=keyword))
-                conditions.append(
-                    sa_text("MATCH(text) AGAINST(:kw IN BOOLEAN MODE)").bindparams(kw=keyword)
-                )
+                # 检查 FULLTEXT 索引是否可用（带缓存，避免每次查询都探测）
+                if not hasattr(list_messages, '_fulltext_available'):
+                    try:
+                        await db.execute(sa_text(
+                            "SELECT 1 FROM messages WHERE MATCH(text) AGAINST(:kw IN BOOLEAN MODE) LIMIT 1"
+                        ).bindparams(kw="test"))
+                        list_messages._fulltext_available = True
+                    except Exception:
+                        list_messages._fulltext_available = False
+
+                if list_messages._fulltext_available:
+                    conditions.append(
+                        sa_text("MATCH(text) AGAINST(:kw IN BOOLEAN MODE)").bindparams(kw=safe_kw)
+                    )
+                else:
+                    conditions.append(or_(
+                        Message.text.ilike(f"%{keyword}%"),
+                        Message.caption.ilike(f"%{keyword}%")
+                    ))
             except Exception:
                 # FULLTEXT 不可用，降级为 ILIKE
                 conditions.append(or_(
