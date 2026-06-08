@@ -958,7 +958,7 @@ export function MonitoringPage() {
               </div>
 
               {/* 分页控件 */}
-              {selectedConversation && totalCount > 0 && (
+              {(selectedConversation || globalSearch) && totalCount > 0 && (
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-cyber-blue/10">
                   <div className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
                     共 {totalCount} 条消息，第 {currentPage} 页

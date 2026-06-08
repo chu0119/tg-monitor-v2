@@ -49,6 +49,7 @@ class KeywordMatcher:
                 "match_type": keyword.match_type or group.match_type,
                 "case_sensitive": keyword.case_sensitive if keyword.case_sensitive is not None else group.case_sensitive,
                 "alert_level": keyword.alert_level or group.alert_level,
+                "synonyms": keyword.synonyms if hasattr(keyword, 'synonyms') and keyword.synonyms else [],
             })
 
         self._rules_cache[key] = {"created_at": time.time(), "rules": rules}
@@ -177,6 +178,7 @@ class KeywordMatcher:
                 groups_map = {g.id: g for g in groups_result.scalars().all()}
 
             matched = []
+            matched_ids = set()
             for keyword in keywords:
                 group = groups_map.get(keyword.group_id)
 
@@ -184,13 +186,23 @@ class KeywordMatcher:
                     match_type = keyword.match_type or group.match_type
                     case_sensitive = keyword.case_sensitive if keyword.case_sensitive is not None else group.case_sensitive
 
-                    if self._match(text, keyword.word, match_type, case_sensitive):
-                        matched.append({
-                            "keyword_id": keyword.id,
-                            "word": keyword.word,
-                            "group_id": group.id,
-                            "group_name": group.name,
-                            "match_type": match_type,
-                        })
+                    # 主词 + 同义词
+                    words_to_check = [keyword.word]
+                    synonyms = getattr(keyword, 'synonyms', None) or []
+                    if synonyms:
+                        words_to_check.extend(synonyms)
+
+                    for w in words_to_check:
+                        if self._match(text, w, match_type, case_sensitive):
+                            if keyword.id not in matched_ids:
+                                matched_ids.add(keyword.id)
+                                matched.append({
+                                    "keyword_id": keyword.id,
+                                    "word": keyword.word,
+                                    "group_id": group.id,
+                                    "group_name": group.name,
+                                    "match_type": match_type,
+                                })
+                            break
 
             return matched

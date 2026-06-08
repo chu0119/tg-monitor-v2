@@ -304,10 +304,27 @@ class MessageMonitor:
                                 last_msg_time = self._session_last_message_time[conv_id]
                                 time_since_last_msg = (datetime.now() - last_msg_time).total_seconds()
 
-                                # 如果超过10分钟没有消息,记录警告
+                                # 如果超过10分钟没有消息,尝试自动恢复
                                 if time_since_last_msg > 600:  # 10分钟
-                                    logger.warning(f"会话 {conv_id} 超过 {int(time_since_last_msg/60)} 分钟没有收到消息,可能监控失效")
-                                    # 可以在这里添加通知机制(如发送到前端)
+                                    logger.warning(f"会话 {conv_id} 超过 {int(time_since_last_msg/60)} 分钟没有收到消息,尝试自动恢复")
+                                    # 自动恢复：重启该会话所属账号的监控（带冷却时间）
+                                    if not hasattr(self, '_recovery_cooldown'):
+                                        self._recovery_cooldown = {}
+                                    now_ts = datetime.now().timestamp()
+                                    last_recovery = self._recovery_cooldown.get(conv_id, 0)
+                                    if now_ts - last_recovery > 600:  # 10分钟冷却
+                                        try:
+                                            async with AsyncSessionLocal() as db:
+                                                result = await db.execute(
+                                                    select(Conversation.account_id).where(Conversation.id == conv_id)
+                                                )
+                                                acc_id = result.scalar_one_or_none()
+                                                if acc_id:
+                                                    await self.restart_monitors_for_account(acc_id)
+                                                    self._recovery_cooldown[conv_id] = now_ts
+                                                    logger.info(f"会话 {conv_id} 自动恢复完成")
+                                        except Exception as e:
+                                            logger.error(f"会话 {conv_id} 自动恢复失败: {e}")
 
             except asyncio.CancelledError:
                 break

@@ -583,3 +583,24 @@ async def get_alert_trend(
     """获取告警趋势统计"""
     trend = await alert_aggregation_service.get_alert_trend(db, days=days, group_by=group_by)
     return {"items": trend, "days": days, "group_by": group_by}
+
+
+@router.put("/{alert_id}/assign")
+async def assign_alert(
+    alert_id: int,
+    assignee: str,
+    note: str = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """指派告警给其他人"""
+    from app.models.alert import Alert
+    from app.utils import now_utc
+    result = await db.execute(select(Alert).where(Alert.id == alert_id))
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail=告警不存在)
+    alert.assignee = assignee
+    alert.assignee_note = note
+    alert.assigned_at = now_utc()
+    await db.commit()
+    return {"message": f"告警已指派给 {assignee}"}

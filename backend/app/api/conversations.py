@@ -864,3 +864,34 @@ async def add_all_channels_from_account(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@router.get("/tags/list")
+async def list_all_tags(db: AsyncSession = Depends(get_db)):
+    """获取所有标签（去重）"""
+    result = await db.execute(
+        select(Conversation.tags).where(Conversation.tags.isnot(None))
+    )
+    all_tags = set()
+    for row in result.scalars().all():
+        if row and isinstance(row, list):
+            all_tags.update(row)
+    return sorted(all_tags)
+
+
+@router.put("/{conversation_id}/tags")
+async def update_conversation_tags(
+    conversation_id: int,
+    tags: List[str],
+    db: AsyncSession = Depends(get_db),
+):
+    """更新会话标签"""
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail=会话不存在)
+    conv.tags = tags
+    await db.commit()
+    return {message: 标签已更新, tags: tags}

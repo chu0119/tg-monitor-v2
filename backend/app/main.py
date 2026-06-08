@@ -305,6 +305,27 @@ async def lifespan(app: FastAPI):
     background_tasks.add(backup_task)
     logger.info("自动备份任务已启动（后台运行）")
 
+    # 启动告警自动升级任务（每30分钟检查一次）
+    from app.services.alert_aggregation_service import alert_aggregation_service
+
+    async def run_escalation_task():
+        """后台运行告警自动升级任务"""
+        while True:
+            try:
+                await asyncio.sleep(1800)  # 每30分钟
+                async with AsyncSessionLocal() as db:
+                    result = await alert_aggregation_service.escalate_stale_alerts(db)
+                    if result.get("escalated_count", 0) > 0:
+                        logger.info(f"告警自动升级完成: {result['message']}")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"告警自动升级任务异常: {e}")
+
+    escalation_task = asyncio.create_task(run_escalation_task())
+    background_tasks.add(escalation_task)
+    logger.info("告警自动升级任务已启动（每30分钟）")
+
     yield
 
     # 关闭时执行
