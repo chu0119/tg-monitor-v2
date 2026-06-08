@@ -95,13 +95,13 @@ async def get_sender_detail(
     sender_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    获取发送者详情
+    """获取发送者详情"""
     from app.models.message import Message
     result = await db.execute(select(Sender).where(Sender.id == sender_id))
     sender = result.scalar_one_or_none()
     if not sender:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail=发送者不存在)
+        raise HTTPException(status_code=404, detail="发送者不存在")
 
     # 实时统计告警数
     alert_count_result = await db.execute(
@@ -118,19 +118,19 @@ async def get_sender_detail(
     message_types = {row[0]: row[1] for row in type_result.all()}
 
     return {
-        id: sender.id,
-        user_id: sender.user_id,
-        username: sender.username,
-        first_name: sender.first_name,
-        last_name: sender.last_name,
-        phone: sender.phone,
-        is_bot: sender.is_bot,
-        is_verified: sender.is_verified,
-        is_premium: sender.is_premium,
-        message_count: sender.message_count,
-        alert_count: alert_count,
-        message_types: message_types,
-        created_at: sender.created_at.isoformat() if sender.created_at else None,
+        "id": sender.id,
+        "user_id": sender.user_id,
+        "username": sender.username,
+        "first_name": sender.first_name,
+        "last_name": sender.last_name,
+        "phone": sender.phone,
+        "is_bot": sender.is_bot,
+        "is_verified": sender.is_verified,
+        "is_premium": sender.is_premium,
+        "message_count": sender.message_count,
+        "alert_count": alert_count,
+        "message_types": message_types,
+        "created_at": sender.created_at.isoformat() if sender.created_at else None,
     }
 
 
@@ -141,7 +141,7 @@ async def get_sender_messages(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    获取发送者的消息历史
+    """获取发送者的消息历史"""
     from app.models.message import Message
     from app.models.conversation import Conversation
 
@@ -149,7 +149,7 @@ async def get_sender_messages(
     sender_result = await db.execute(select(Sender).where(Sender.id == sender_id))
     if not sender_result.scalar_one_or_none():
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail=发送者不存在)
+        raise HTTPException(status_code=404, detail="发送者不存在")
 
     # 总数
     count_result = await db.execute(
@@ -172,23 +172,23 @@ async def get_sender_messages(
     items = []
     for msg, conv_title in rows:
         items.append({
-            id: msg.id,
-            conversation_id: msg.conversation_id,
-            conversation_title: conv_title,
-            message_type: msg.message_type,
-            text: msg.text,
-            caption: msg.caption,
-            date: msg.date.isoformat() if msg.date else None,
-            views: msg.views,
-            forwards: msg.forwards,
-            has_media: msg.has_media,
-            is_reply: msg.is_reply,
+            "id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "conversation_title": conv_title,
+            "message_type": msg.message_type,
+            "text": msg.text,
+            "caption": msg.caption,
+            "date": msg.date.isoformat() if msg.date else None,
+            "views": msg.views,
+            "forwards": msg.forwards,
+            "has_media": msg.has_media,
+            "is_reply": msg.is_reply,
         })
 
     return {
-        items: items,
-        total: total,
-        page: page,
-        page_size: page_size,
-        total_pages: (total + page_size - 1) // page_size if total else 0,
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size if total else 0,
     }

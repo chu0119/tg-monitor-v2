@@ -48,6 +48,9 @@ class KeywordGroup(Base):
     total_keywords = Column(Integer, default=0, comment="关键词数量")
     total_matches = Column(Integer, default=0, comment="总匹配次数")
 
+    # 同义词扩展
+    synonyms = Column(JSON, comment="同义词列表")
+
     # 元数据
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")

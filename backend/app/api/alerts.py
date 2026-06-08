@@ -598,7 +598,7 @@ async def assign_alert(
     result = await db.execute(select(Alert).where(Alert.id == alert_id))
     alert = result.scalar_one_or_none()
     if not alert:
-        raise HTTPException(status_code=404, detail=告警不存在)
+        raise HTTPException(status_code=404, detail="告警不存在")
     alert.assignee = assignee
     alert.assignee_note = note
     alert.assigned_at = now_utc()

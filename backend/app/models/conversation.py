@@ -58,6 +58,9 @@ class Conversation(Base):
     # 元数据
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    # 标签
+    tags = Column(JSON, comment="标签列表")
+
     note = Column(Text)
     extra = Column(JSON)
 

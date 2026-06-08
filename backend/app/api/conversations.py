@@ -869,13 +869,22 @@ async def add_all_channels_from_account(
 @router.get("/tags/list")
 async def list_all_tags(db: AsyncSession = Depends(get_db)):
     """获取所有标签（去重）"""
+    from sqlalchemy import text
     result = await db.execute(
-        select(Conversation.tags).where(Conversation.tags.isnot(None))
+        text("SELECT tags FROM conversations WHERE tags IS NOT NULL AND tags != 'null'")
     )
     all_tags = set()
-    for row in result.scalars().all():
-        if row and isinstance(row, list):
-            all_tags.update(row)
+    for row in result.all():
+        tags = row[0]
+        if tags:
+            import json
+            try:
+                if isinstance(tags, str):
+                    tags = json.loads(tags)
+                if isinstance(tags, list):
+                    all_tags.update(tags)
+            except (json.JSONDecodeError, TypeError):
+                pass
     return sorted(all_tags)
 
 
@@ -891,7 +900,7 @@ async def update_conversation_tags(
     )
     conv = result.scalar_one_or_none()
     if not conv:
-        raise HTTPException(status_code=404, detail=会话不存在)
+        raise HTTPException(status_code=404, detail="会话不存在")
     conv.tags = tags
     await db.commit()
-    return {message: 标签已更新, tags: tags}
+    return {"message": "标签已更新", "tags": tags}
