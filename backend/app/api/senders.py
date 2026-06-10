@@ -16,6 +16,8 @@ router = APIRouter(prefix="/senders", tags=["发送者查询"])
 async def list_senders(
     has_phone: Optional[bool] = Query(None, description="筛选有手机号的发送者"),
     keyword: Optional[str] = Query(None, description="搜索用户名或手机号"),
+    country: Optional[str] = Query(None, description="按国家筛选"),
+    phone_location: Optional[str] = Query(None, description="按归属地筛选"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -34,6 +36,10 @@ async def list_senders(
                 Sender.phone.ilike(f"%{keyword}%"),
             )
         )
+    if country:
+        conditions.append(Sender.country == country)
+    if phone_location:
+        conditions.append(Sender.phone_location.ilike(f"%{phone_location}%"))
 
     # 总数
     count_query = select(func.count(Sender.id))
@@ -78,6 +84,9 @@ async def list_senders(
             "is_premium": s.is_premium,
             "message_count": s.message_count,
             "alert_count": real_alert_count or 0,
+            "country": s.country or "",
+            "country_code": s.country_code or "",
+            "phone_location": s.phone_location or "",
             "created_at": s.created_at.isoformat() if s.created_at else None,
         })
 
@@ -192,3 +201,32 @@ async def get_sender_messages(
         "page_size": page_size,
         "total_pages": (total + page_size - 1) // page_size if total else 0,
     }
+
+
+@router.get("/countries/list")
+async def list_countries(db: AsyncSession = Depends(get_db)):
+    """获取所有国家/地区列表（去重）"""
+    from sqlalchemy import text
+    result = await db.execute(
+        text("SELECT DISTINCT country, COUNT(*) as cnt FROM senders WHERE country IS NOT NULL AND country != '' GROUP BY country ORDER BY cnt DESC")
+    )
+    return [{"name": row[0], "count": row[1]} for row in result.all()]
+
+
+@router.get("/locations/list")
+async def list_locations(
+    country: Optional[str] = Query(None, description="按国家筛选"),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取归属地列表（去重）"""
+    from sqlalchemy import text
+    if country:
+        result = await db.execute(
+            text("SELECT DISTINCT phone_location, COUNT(*) as cnt FROM senders WHERE phone_location IS NOT NULL AND phone_location != '' AND country = :country GROUP BY phone_location ORDER BY cnt DESC"),
+            {"country": country}
+        )
+    else:
+        result = await db.execute(
+            text("SELECT DISTINCT phone_location, COUNT(*) as cnt FROM senders WHERE phone_location IS NOT NULL AND phone_location != '' GROUP BY phone_location ORDER BY cnt DESC")
+        )
+    return [{"name": row[0], "count": row[1]} for row in result.all()]
