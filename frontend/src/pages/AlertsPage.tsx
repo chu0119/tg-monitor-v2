@@ -68,6 +68,17 @@ export function AlertsPage() {
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
   const keywordGroupDropdownRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
+  // 手机号国家/归属地筛选
+  const [countries, setCountries] = useState<{name: string; count: number}[]>([]);
+  const [locations, setLocations] = useState<{name: string; count: number}[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState("");
+  const [selectedLocation, setSelectedLocation] = useState("");
+  const [countrySearch, setCountrySearch] = useState("");
+  const [locationSearch, setLocationSearch] = useState("");
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const countryDropdownRef = useRef<HTMLDivElement>(null);
+  const locationDropdownRef = useRef<HTMLDivElement>(null);
 
   // 分页状态
   const [currentPage, setCurrentPage] = useState(1);
@@ -79,6 +90,41 @@ export function AlertsPage() {
   const isFirstMountRef = useRef(true);
 
   // 点击外部关闭下拉菜单
+  // 获取国家列表
+  useEffect(() => {
+    fetch("/api/v1/senders/countries/list")
+      .then(r => r.json())
+      .then(data => setCountries(data))
+      .catch(() => {});
+  }, []);
+
+  // 当国家变化时，获取归属地列表
+  useEffect(() => {
+    if (selectedCountry) {
+      fetch(`/api/v1/senders/locations/list?country=${encodeURIComponent(selectedCountry)}`)
+        .then(r => r.json())
+        .then(data => setLocations(data))
+        .catch(() => {});
+    } else {
+      setLocations([]);
+      setSelectedLocation("");
+    }
+  }, [selectedCountry]);
+
+  // 点击外部关闭下拉框
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (countryDropdownRef.current && !countryDropdownRef.current.contains(e.target as Node)) {
+        setShowCountryDropdown(false);
+      }
+      if (locationDropdownRef.current && !locationDropdownRef.current.contains(e.target as Node)) {
+        setShowLocationDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (showKeywordGroupDropdown && keywordGroupDropdownRef.current) {
@@ -119,7 +165,7 @@ export function AlertsPage() {
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [filter, selectedKeywordGroups, currentPage, pageSize]);
+  }, [filter, selectedKeywordGroups, currentPage, pageSize, selectedCountry, selectedLocation]);
 
   const fetchKeywordGroups = async () => {
     try {
@@ -141,6 +187,8 @@ export function AlertsPage() {
       if (filter.level) params.alert_level = filter.level;
       if (filter.keyword) params.keyword = filter.keyword;
       if (filter.has_phone) params.has_phone = true;
+      if (selectedCountry) params.sender_country = selectedCountry;
+      if (selectedLocation) params.sender_location = selectedLocation;
       if (selectedKeywordGroups.length > 0) {
         // 多个关键词组使用 OR 查询
         params.keyword_group_id = selectedKeywordGroups[0]; // API只支持单个，后续可以扩展
@@ -344,6 +392,93 @@ export function AlertsPage() {
                 />
                 <span className="text-sm">仅显示有手机号</span>
               </label>
+              {/* 国家筛选下拉框 */}
+              <div className="relative" ref={countryDropdownRef}>
+                <button
+                  onClick={() => setShowCountryDropdown(!showCountryDropdown)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border min-h-[44px] text-sm whitespace-nowrap ${selectedCountry ? "border-cyber-blue bg-cyber-blue/10 text-cyber-blue" : "border-border bg-secondary/50"}`}
+                >
+                  🌍 {selectedCountry || "国家"}
+                  {selectedCountry && <span className="text-xs opacity-60">✕</span>}
+                </button>
+                {showCountryDropdown && (
+                  <div className="absolute z-50 mt-1 w-64 bg-card border border-border rounded-lg shadow-lg max-h-80 overflow-hidden">
+                    <div className="p-2 border-b border-border">
+                      <input
+                        type="text"
+                        placeholder="搜索国家..."
+                        value={countrySearch}
+                        onChange={(e) => setCountrySearch(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded bg-secondary/50 border border-border text-sm"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="overflow-y-auto max-h-64">
+                      {countries
+                        .filter(c => !countrySearch || c.name.includes(countrySearch))
+                        .map(c => (
+                          <button
+                            key={c.name}
+                            onClick={() => {
+                              setSelectedCountry(selectedCountry === c.name ? "" : c.name);
+                              setSelectedLocation("");
+                              setShowCountryDropdown(false);
+                              setCountrySearch("");
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary/50 ${selectedCountry === c.name ? "bg-cyber-blue/10 text-cyber-blue" : ""}`}
+                          >
+                            <span>{c.name}</span>
+                            <span className="text-xs text-muted-foreground">{c.count}</span>
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* 归属地下拉框（仅选了国家后显示） */}
+              {selectedCountry && (
+                <div className="relative" ref={locationDropdownRef}>
+                  <button
+                    onClick={() => setShowLocationDropdown(!showLocationDropdown)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border min-h-[44px] text-sm whitespace-nowrap ${selectedLocation ? "border-cyber-blue bg-cyber-blue/10 text-cyber-blue" : "border-border bg-secondary/50"}`}
+                  >
+                    📍 {selectedLocation || "归属地"}
+                    {selectedLocation && <span className="text-xs opacity-60">✕</span>}
+                  </button>
+                  {showLocationDropdown && (
+                    <div className="absolute z-50 mt-1 w-72 bg-card border border-border rounded-lg shadow-lg max-h-80 overflow-hidden">
+                      <div className="p-2 border-b border-border">
+                        <input
+                          type="text"
+                          placeholder="搜索城市/省份..."
+                          value={locationSearch}
+                          onChange={(e) => setLocationSearch(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded bg-secondary/50 border border-border text-sm"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="overflow-y-auto max-h-64">
+                        {locations
+                          .filter(l => !locationSearch || l.name.includes(locationSearch))
+                          .map(l => (
+                            <button
+                              key={l.name}
+                              onClick={() => {
+                                setSelectedLocation(selectedLocation === l.name ? "" : l.name);
+                                setShowLocationDropdown(false);
+                                setLocationSearch("");
+                              }}
+                              className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary/50 ${selectedLocation === l.name ? "bg-cyber-blue/10 text-cyber-blue" : ""}`}
+                            >
+                              <span>{l.name}</span>
+                              <span className="text-xs text-muted-foreground">{l.count}</span>
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="relative" ref={keywordGroupDropdownRef}>
                 <Button
                   variant="outline"
@@ -419,7 +554,7 @@ export function AlertsPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  setFilter({ status: "", level: "", keyword: "", has_phone: false });
+                  setFilter({ status: "", level: "", keyword: "", has_phone: false }); setSelectedCountry(""); setSelectedLocation("");
                   setSearch("");
                   setSelectedKeywordGroups([]);
                 }}
@@ -515,7 +650,7 @@ export function AlertsPage() {
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setFilter({ status: "", level: "", keyword: "", has_phone: false });
+                    setFilter({ status: "", level: "", keyword: "", has_phone: false }); setSelectedCountry(""); setSelectedLocation("");
                     setSearch("");
                     setSelectedKeywordGroups([]);
                   }}

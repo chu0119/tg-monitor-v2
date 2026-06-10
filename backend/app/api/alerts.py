@@ -41,6 +41,8 @@ async def list_alerts(
     sender_id: int = Query(None),
     keyword: str = Query(None),
     has_phone: bool = Query(None),
+    sender_country: str = Query(None, description="按发送者国家筛选"),
+    sender_location: str = Query(None, description="按发送者归属地筛选"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -51,6 +53,12 @@ async def list_alerts(
     params = {}
     if has_phone:
         where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE phone IS NOT NULL AND phone != '')")
+    if sender_country:
+        where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE country = :sender_country)")
+        params["sender_country"] = sender_country
+    if sender_location:
+        where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE phone_location LIKE :sender_location)")
+        params["sender_location"] = f"%{sender_location}%"
     if status:
         where_clauses.append("a.status = :status")
         params["status"] = status
