@@ -1,0 +1,45 @@
+[
+  {
+    "timestamp": "2026-07-07T00:56:00.599Z",
+    "label": "scan",
+    "total": 0,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "kev": 0,
+    "ids": []
+  },
+  {
+    "timestamp": "2026-07-07T00:56:19.396Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:105",
+      "concurrency:fire-forget:monitor_worker.py:140",
+      "concurrency:fire-forget:monitor_worker.py:179",
+      "concurrency:fire-forget:monitor_worker.py:202"
+    ]
+  },
+  {
+    "timestamp": "2026-07-07T00:57:41.832Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:105",
+      "concurrency:fire-forget:monitor_worker.py:140",
+      "concurrency:fire-forget:monitor_worker.py:179",
+      "concurrency:fire-forget:monitor_worker.py:202"
+    ]
+  }
+]

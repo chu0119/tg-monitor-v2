@@ -1,0 +1,208 @@
+{
+  "scanId": "3372a886-b10a-4c7c-8ffe-e3ce8b035972",
+  "startedAt": "2026-07-07T00:55:48.025Z",
+  "durationMs": 96,
+  "scanned": {
+    "files": 6,
+    "lines": 0
+  },
+  "findings": [
+    {
+      "id": "c8ba11159950d827",
+      "kind": "logic",
+      "severity": "high",
+      "vuln": "Sensitive Directory Path Construction",
+      "cwe": "CWE-22",
+      "stride": "Information Disclosure",
+      "file": "worker_config.py",
+      "line": 95,
+      "snippet": "log_file = os.path.join(",
+      "fix": {
+        "description": "Restrict file paths to a specific allowed directory; reject '..' and absolute paths.",
+        "code": "const safe = path.resolve('./uploads', file);\nif (!safe.startsWith(path.resolve('./uploads'))) throw 403;"
+      },
+      "blastRadius": {
+        "scope": "all-users",
+        "dataAtRisk": [
+          "config"
+        ],
+        "userCount": 50,
+        "industry": "generic",
+        "jurisdictions": [],
+        "controlsApplied": [],
+        "dollarBest": 23250,
+        "dollarLikely": 136250,
+        "dollarWorst": 775000,
+        "dollarLow": 23250,
+        "dollarHigh": 775000,
+        "components": {
+          "incidentResponse": {
+            "low": 8000,
+            "likely": 50000,
+            "high": 250000
+          },
+          "legal": {
+            "low": 10000,
+            "likely": 75000,
+            "high": 500000
+          },
+          "crisisPR": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "notification": {
+            "low": 5000,
+            "likely": 10000,
+            "high": 15000
+          },
+          "creditMonitoring": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "regulatoryFines": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "directDamage": {
+            "low": 250,
+            "likely": 1250,
+            "high": 10000
+          },
+          "classAction": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "lostBusiness": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          }
+        },
+        "dominantDriver": "legal counsel",
+        "comparable": "Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil",
+        "confidence": "low",
+        "narrative": "Sensitive Directory Path Construction on `worker_config.py:95` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil."
+      },
+      "parser": "LOGIC",
+      "family": null
+    }
+  ],
+  "bundles": [],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/v1",
+      "framework": "API",
+      "file": "config.py",
+      "line": 18,
+      "hasAuth": false,
+      "hasFileUpload": false,
+      "params": [],
+      "classifications": [],
+      "classifiedFields": {}
+    }
+  ],
+  "components": [],
+  "suppressedCount": 0,
+  "blastRadiusSignals": {
+    "industry": "generic",
+    "industryConfidence": "low",
+    "jurisdictions": [],
+    "controls": [],
+    "estimatedUsers": 50,
+    "revenueIndicator": "pre-revenue",
+    "hasStripe": false,
+    "hasAuth": false,
+    "hasUserTable": false,
+    "hasPII": false,
+    "hasPHI": false,
+    "hasS3": false
+  },
+  "_v3": {
+    "counterfactual": {
+      "spofControls": [],
+      "note": "no-controls-detected"
+    },
+    "threatModel": {
+      "summary": {
+        "assetCount": 2,
+        "boundaryCount": 0,
+        "strideCounts": {
+          "spoofing": 0,
+          "tampering": 0,
+          "repudiation": 0,
+          "informationDisclosure": 0,
+          "denialOfService": 0,
+          "elevationOfPrivilege": 0
+        }
+      },
+      "assets": [
+        {
+          "name": "session",
+          "file": "database.py",
+          "line": 64,
+          "category": "session",
+          "exposure": "internal"
+        },
+        {
+          "name": "session",
+          "file": "database.py",
+          "line": 67,
+          "category": "session",
+          "exposure": "internal"
+        }
+      ],
+      "trustBoundaries": [],
+      "stride": {
+        "spoofing": [],
+        "tampering": [],
+        "repudiation": [],
+        "informationDisclosure": [],
+        "denialOfService": [],
+        "elevationOfPrivilege": []
+      }
+    },
+    "trustBoundaryDiagram": {
+      "mermaid": "flowchart LR\n  INTERNET((Internet))\n  APP[\"Application\"]\n  asset_session_session[/\"session: session\"/]\n  APP -->|asset| asset_session_session\n  APP -->|asset| asset_session_session\n  classDef sev_critical fill:#ffcccc,stroke:#a00,stroke-width:2px;\n  classDef sev_high fill:#ffe0b2,stroke:#c60,stroke-width:2px;\n  classDef sev_medium fill:#fff3cd,stroke:#a80;\n  classDef sev_low fill:#e8eaf6,stroke:#557;",
+      "nodes": [
+        {
+          "id": "INTERNET",
+          "kind": "external",
+          "label": "Internet"
+        },
+        {
+          "id": "APP",
+          "kind": "app",
+          "label": "Application"
+        },
+        {
+          "id": "asset_session_session",
+          "kind": "asset",
+          "label": "session: session"
+        }
+      ],
+      "edges": [
+        {
+          "from": "APP",
+          "to": "asset_session_session",
+          "kind": "asset"
+        },
+        {
+          "from": "APP",
+          "to": "asset_session_session",
+          "kind": "asset"
+        }
+      ],
+      "decorations": []
+    },
+    "calibrationDrift": {
+      "alarms": [],
+      "note": "no-feedback-data"
+    }
+  },
+  "annotatorErrors": []
+}

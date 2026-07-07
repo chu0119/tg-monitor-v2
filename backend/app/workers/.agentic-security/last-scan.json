@@ -1,0 +1,1221 @@
+{
+  "scanId": "4ab6b940-f4cb-4c25-9f19-78c2b6b689cd",
+  "startedAt": "2026-07-07T00:57:41.761Z",
+  "durationMs": 71,
+  "scanned": {
+    "files": 3,
+    "lines": 0
+  },
+  "findings": [
+    {
+      "id": "cf4aab4b53df2cbf",
+      "kind": "logic",
+      "severity": "high",
+      "vuln": "Sensitive Directory Path Construction",
+      "cwe": "CWE-22",
+      "stride": "Information Disclosure",
+      "file": "api_worker.py",
+      "line": 26,
+      "snippet": "log_file = os.path.join(log_dir, f'api_worker_{worker_id}.log')",
+      "fix": {
+        "description": "Restrict file paths to a specific allowed directory; reject '..' and absolute paths.",
+        "code": "const safe = path.resolve('./uploads', file);\nif (!safe.startsWith(path.resolve('./uploads'))) throw 403;"
+      },
+      "blastRadius": {
+        "scope": "all-users",
+        "dataAtRisk": [
+          "config"
+        ],
+        "userCount": 50,
+        "industry": "generic",
+        "jurisdictions": [],
+        "controlsApplied": [],
+        "dollarBest": 23250,
+        "dollarLikely": 136250,
+        "dollarWorst": 775000,
+        "dollarLow": 23250,
+        "dollarHigh": 775000,
+        "components": {
+          "incidentResponse": {
+            "low": 8000,
+            "likely": 50000,
+            "high": 250000
+          },
+          "legal": {
+            "low": 10000,
+            "likely": 75000,
+            "high": 500000
+          },
+          "crisisPR": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "notification": {
+            "low": 5000,
+            "likely": 10000,
+            "high": 15000
+          },
+          "creditMonitoring": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "regulatoryFines": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "directDamage": {
+            "low": 250,
+            "likely": 1250,
+            "high": 10000
+          },
+          "classAction": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "lostBusiness": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          }
+        },
+        "dominantDriver": "legal counsel",
+        "comparable": "Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil",
+        "confidence": "low",
+        "narrative": "Sensitive Directory Path Construction on `api_worker.py:26` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil."
+      },
+      "parser": "LOGIC",
+      "family": null
+    },
+    {
+      "id": "f5ed4d2fef639591",
+      "kind": "logic",
+      "severity": "high",
+      "vuln": "Sensitive Directory Path Construction",
+      "cwe": "CWE-22",
+      "stride": "Information Disclosure",
+      "file": "monitor_worker.py",
+      "line": 32,
+      "snippet": "log_file = os.path.join(log_dir, f'monitor_worker_{worker_id}.log')",
+      "fix": {
+        "description": "Restrict file paths to a specific allowed directory; reject '..' and absolute paths.",
+        "code": "const safe = path.resolve('./uploads', file);\nif (!safe.startsWith(path.resolve('./uploads'))) throw 403;"
+      },
+      "blastRadius": {
+        "scope": "all-users",
+        "dataAtRisk": [
+          "config"
+        ],
+        "userCount": 50,
+        "industry": "generic",
+        "jurisdictions": [],
+        "controlsApplied": [],
+        "dollarBest": 23250,
+        "dollarLikely": 136250,
+        "dollarWorst": 775000,
+        "dollarLow": 23250,
+        "dollarHigh": 775000,
+        "components": {
+          "incidentResponse": {
+            "low": 8000,
+            "likely": 50000,
+            "high": 250000
+          },
+          "legal": {
+            "low": 10000,
+            "likely": 75000,
+            "high": 500000
+          },
+          "crisisPR": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "notification": {
+            "low": 5000,
+            "likely": 10000,
+            "high": 15000
+          },
+          "creditMonitoring": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "regulatoryFines": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "directDamage": {
+            "low": 250,
+            "likely": 1250,
+            "high": 10000
+          },
+          "classAction": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "lostBusiness": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          }
+        },
+        "dominantDriver": "legal counsel",
+        "comparable": "Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil",
+        "confidence": "low",
+        "narrative": "Sensitive Directory Path Construction on `monitor_worker.py:32` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil."
+      },
+      "parser": "LOGIC",
+      "family": null
+    },
+    {
+      "id": "concurrency:fire-forget:monitor_worker.py:105",
+      "kind": "sast",
+      "severity": "low",
+      "vuln": "Concurrency: fire-and-forget async call in start_monitors() — result not awaited",
+      "cwe": null,
+      "owaspLlm": null,
+      "stride": null,
+      "file": "monitor_worker.py",
+      "line": 105,
+      "snippet": "",
+      "fix": null,
+      "reachable": null,
+      "triage": null,
+      "dataClasses": [],
+      "chain": null,
+      "confidence": 0.4,
+      "toxicity": 33,
+      "toxicityFactors": [
+        "unauth-route-reachable"
+      ],
+      "toxicityLabel": "Medium",
+      "sources": null,
+      "epssScore": null,
+      "epssPercentile": null,
+      "epssCve": null,
+      "exploitedNow": false,
+      "tags": null,
+      "blastRadius": {
+        "scope": "all-users",
+        "dataAtRisk": [
+          "config"
+        ],
+        "userCount": 50,
+        "industry": "generic",
+        "jurisdictions": [],
+        "controlsApplied": [],
+        "dollarBest": 23250,
+        "dollarLikely": 136250,
+        "dollarWorst": 775000,
+        "dollarLow": 23250,
+        "dollarHigh": 775000,
+        "components": {
+          "incidentResponse": {
+            "low": 8000,
+            "likely": 50000,
+            "high": 250000
+          },
+          "legal": {
+            "low": 10000,
+            "likely": 75000,
+            "high": 500000
+          },
+          "crisisPR": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "notification": {
+            "low": 5000,
+            "likely": 10000,
+            "high": 15000
+          },
+          "creditMonitoring": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "regulatoryFines": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "directDamage": {
+            "low": 250,
+            "likely": 1250,
+            "high": 10000
+          },
+          "classAction": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "lostBusiness": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          }
+        },
+        "dominantDriver": "legal counsel",
+        "comparable": "Generic finding — likely cost driven by user count + jurisdiction stack",
+        "confidence": "low",
+        "narrative": "Concurrency: fire-and-forget async call in start_monitors() — result not awaited on `monitor_worker.py:105` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
+      },
+      "stableId": null,
+      "confidenceTier": null,
+      "exploitability": null,
+      "exploitabilityTier": null,
+      "exploitabilityFactors": null,
+      "clusterSize": null,
+      "unreachable": false,
+      "validator_verdict": "unvalidated",
+      "llm_confidence": null,
+      "unvalidated": true,
+      "cross_language": false,
+      "family": "concurrency-bug",
+      "parser": null,
+      "_unsigned": false,
+      "_passThroughSigning": false,
+      "signatureStatus": "verified",
+      "regression_test": null,
+      "poc": null,
+      "calibrated_confidence": null,
+      "calibrated_confidence_ci": null,
+      "calibrated_n": 0,
+      "calibration_reason": null,
+      "verifier_verdict": null,
+      "verifier_reason": null,
+      "verifier_runner": null,
+      "narration": null,
+      "mitigationVerdict": null,
+      "mitigationsApplied": null,
+      "mitigatedByWaf": false,
+      "wafRuleId": null,
+      "mitigatedByAuth": false,
+      "authMechanism": null,
+      "mitigatedByNetwork": false,
+      "networkExposure": null,
+      "featureFlag": null,
+      "featureFlagState": null,
+      "featureFlagRollout": null,
+      "exposedInProd": false,
+      "unreachableInProd": false,
+      "coldPath": false,
+      "hotPath": false,
+      "prodRequestCount": null,
+      "crownJewelScore": null,
+      "crownJewelTier": null,
+      "crownJewelFactors": null,
+      "cloneClusterId": null,
+      "cloneClusterSize": null,
+      "provenance": null,
+      "provenanceScore": null,
+      "typeNarrowed": null,
+      "strideCategory": null,
+      "personaScores": null,
+      "personaTopTwo": null,
+      "personaMaxName": null,
+      "personaMaxScore": null,
+      "reverseExposure": null,
+      "specMined": null,
+      "whyFired": {
+        "detector": "sast/concurrency-bug",
+        "ruleId": "concurrency-bug",
+        "parser": "pattern",
+        "evidence": {
+          "sinkSnippet": null,
+          "sourceSnippet": null,
+          "pathSteps": [],
+          "sanitizers": [],
+          "guards": []
+        },
+        "considered": {
+          "suppressionsApplied": [],
+          "suppressionsSkipped": [],
+          "reachabilityFilter": "unaffected",
+          "clusterCollapsed": false,
+          "typeNarrowed": false,
+          "crownJewelTier": null,
+          "mitigationVerdict": null
+        },
+        "scanner": {
+          "rulesetVersion": null,
+          "packHash": null,
+          "modelId": null
+        }
+      },
+      "adversaryTranscript": null,
+      "predictedBountyUsd": null,
+      "bountyConfidence": null,
+      "attackPlaybook": null
+    },
+    {
+      "id": "concurrency:fire-forget:monitor_worker.py:140",
+      "kind": "sast",
+      "severity": "low",
+      "vuln": "Concurrency: fire-and-forget async call in run_monitor_worker() — result not awaited",
+      "cwe": null,
+      "owaspLlm": null,
+      "stride": null,
+      "file": "monitor_worker.py",
+      "line": 140,
+      "snippet": "",
+      "fix": null,
+      "reachable": null,
+      "triage": null,
+      "dataClasses": [],
+      "chain": null,
+      "confidence": 0.4,
+      "toxicity": 33,
+      "toxicityFactors": [
+        "unauth-route-reachable"
+      ],
+      "toxicityLabel": "Medium",
+      "sources": null,
+      "epssScore": null,
+      "epssPercentile": null,
+      "epssCve": null,
+      "exploitedNow": false,
+      "tags": null,
+      "blastRadius": {
+        "scope": "all-users",
+        "dataAtRisk": [
+          "config"
+        ],
+        "userCount": 50,
+        "industry": "generic",
+        "jurisdictions": [],
+        "controlsApplied": [],
+        "dollarBest": 23250,
+        "dollarLikely": 136250,
+        "dollarWorst": 775000,
+        "dollarLow": 23250,
+        "dollarHigh": 775000,
+        "components": {
+          "incidentResponse": {
+            "low": 8000,
+            "likely": 50000,
+            "high": 250000
+          },
+          "legal": {
+            "low": 10000,
+            "likely": 75000,
+            "high": 500000
+          },
+          "crisisPR": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "notification": {
+            "low": 5000,
+            "likely": 10000,
+            "high": 15000
+          },
+          "creditMonitoring": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "regulatoryFines": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "directDamage": {
+            "low": 250,
+            "likely": 1250,
+            "high": 10000
+          },
+          "classAction": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "lostBusiness": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          }
+        },
+        "dominantDriver": "legal counsel",
+        "comparable": "Generic finding — likely cost driven by user count + jurisdiction stack",
+        "confidence": "low",
+        "narrative": "Concurrency: fire-and-forget async call in run_monitor_worker() — result not awaited on `monitor_worker.py:140` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
+      },
+      "stableId": null,
+      "confidenceTier": null,
+      "exploitability": null,
+      "exploitabilityTier": null,
+      "exploitabilityFactors": null,
+      "clusterSize": null,
+      "unreachable": false,
+      "validator_verdict": "unvalidated",
+      "llm_confidence": null,
+      "unvalidated": true,
+      "cross_language": false,
+      "family": "concurrency-bug",
+      "parser": null,
+      "_unsigned": false,
+      "_passThroughSigning": false,
+      "signatureStatus": "verified",
+      "regression_test": null,
+      "poc": null,
+      "calibrated_confidence": null,
+      "calibrated_confidence_ci": null,
+      "calibrated_n": 0,
+      "calibration_reason": null,
+      "verifier_verdict": null,
+      "verifier_reason": null,
+      "verifier_runner": null,
+      "narration": null,
+      "mitigationVerdict": null,
+      "mitigationsApplied": null,
+      "mitigatedByWaf": false,
+      "wafRuleId": null,
+      "mitigatedByAuth": false,
+      "authMechanism": null,
+      "mitigatedByNetwork": false,
+      "networkExposure": null,
+      "featureFlag": null,
+      "featureFlagState": null,
+      "featureFlagRollout": null,
+      "exposedInProd": false,
+      "unreachableInProd": false,
+      "coldPath": false,
+      "hotPath": false,
+      "prodRequestCount": null,
+      "crownJewelScore": null,
+      "crownJewelTier": null,
+      "crownJewelFactors": null,
+      "cloneClusterId": null,
+      "cloneClusterSize": null,
+      "provenance": null,
+      "provenanceScore": null,
+      "typeNarrowed": null,
+      "strideCategory": null,
+      "personaScores": null,
+      "personaTopTwo": null,
+      "personaMaxName": null,
+      "personaMaxScore": null,
+      "reverseExposure": null,
+      "specMined": null,
+      "whyFired": {
+        "detector": "sast/concurrency-bug",
+        "ruleId": "concurrency-bug",
+        "parser": "pattern",
+        "evidence": {
+          "sinkSnippet": null,
+          "sourceSnippet": null,
+          "pathSteps": [],
+          "sanitizers": [],
+          "guards": []
+        },
+        "considered": {
+          "suppressionsApplied": [],
+          "suppressionsSkipped": [],
+          "reachabilityFilter": "unaffected",
+          "clusterCollapsed": false,
+          "typeNarrowed": false,
+          "crownJewelTier": null,
+          "mitigationVerdict": null
+        },
+        "scanner": {
+          "rulesetVersion": null,
+          "packHash": null,
+          "modelId": null
+        }
+      },
+      "adversaryTranscript": null,
+      "predictedBountyUsd": null,
+      "bountyConfidence": null,
+      "attackPlaybook": null
+    },
+    {
+      "id": "concurrency:fire-forget:monitor_worker.py:179",
+      "kind": "sast",
+      "severity": "low",
+      "vuln": "Concurrency: fire-and-forget async call in create_status_app() — result not awaited",
+      "cwe": null,
+      "owaspLlm": null,
+      "stride": null,
+      "file": "monitor_worker.py",
+      "line": 179,
+      "snippet": "",
+      "fix": null,
+      "reachable": null,
+      "triage": null,
+      "dataClasses": [],
+      "chain": null,
+      "confidence": 0.4,
+      "toxicity": 33,
+      "toxicityFactors": [
+        "unauth-route-reachable"
+      ],
+      "toxicityLabel": "Medium",
+      "sources": null,
+      "epssScore": null,
+      "epssPercentile": null,
+      "epssCve": null,
+      "exploitedNow": false,
+      "tags": null,
+      "blastRadius": {
+        "scope": "all-users",
+        "dataAtRisk": [
+          "config"
+        ],
+        "userCount": 50,
+        "industry": "generic",
+        "jurisdictions": [],
+        "controlsApplied": [],
+        "dollarBest": 23250,
+        "dollarLikely": 136250,
+        "dollarWorst": 775000,
+        "dollarLow": 23250,
+        "dollarHigh": 775000,
+        "components": {
+          "incidentResponse": {
+            "low": 8000,
+            "likely": 50000,
+            "high": 250000
+          },
+          "legal": {
+            "low": 10000,
+            "likely": 75000,
+            "high": 500000
+          },
+          "crisisPR": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "notification": {
+            "low": 5000,
+            "likely": 10000,
+            "high": 15000
+          },
+          "creditMonitoring": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "regulatoryFines": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "directDamage": {
+            "low": 250,
+            "likely": 1250,
+            "high": 10000
+          },
+          "classAction": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "lostBusiness": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          }
+        },
+        "dominantDriver": "legal counsel",
+        "comparable": "Generic finding — likely cost driven by user count + jurisdiction stack",
+        "confidence": "low",
+        "narrative": "Concurrency: fire-and-forget async call in create_status_app() — result not awaited on `monitor_worker.py:179` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
+      },
+      "stableId": null,
+      "confidenceTier": null,
+      "exploitability": null,
+      "exploitabilityTier": null,
+      "exploitabilityFactors": null,
+      "clusterSize": null,
+      "unreachable": false,
+      "validator_verdict": "unvalidated",
+      "llm_confidence": null,
+      "unvalidated": true,
+      "cross_language": false,
+      "family": "concurrency-bug",
+      "parser": null,
+      "_unsigned": false,
+      "_passThroughSigning": false,
+      "signatureStatus": "verified",
+      "regression_test": null,
+      "poc": null,
+      "calibrated_confidence": null,
+      "calibrated_confidence_ci": null,
+      "calibrated_n": 0,
+      "calibration_reason": null,
+      "verifier_verdict": null,
+      "verifier_reason": null,
+      "verifier_runner": null,
+      "narration": null,
+      "mitigationVerdict": null,
+      "mitigationsApplied": null,
+      "mitigatedByWaf": false,
+      "wafRuleId": null,
+      "mitigatedByAuth": false,
+      "authMechanism": null,
+      "mitigatedByNetwork": false,
+      "networkExposure": null,
+      "featureFlag": null,
+      "featureFlagState": null,
+      "featureFlagRollout": null,
+      "exposedInProd": false,
+      "unreachableInProd": false,
+      "coldPath": false,
+      "hotPath": false,
+      "prodRequestCount": null,
+      "crownJewelScore": null,
+      "crownJewelTier": null,
+      "crownJewelFactors": null,
+      "cloneClusterId": null,
+      "cloneClusterSize": null,
+      "provenance": null,
+      "provenanceScore": null,
+      "typeNarrowed": null,
+      "strideCategory": null,
+      "personaScores": null,
+      "personaTopTwo": null,
+      "personaMaxName": null,
+      "personaMaxScore": null,
+      "reverseExposure": null,
+      "specMined": null,
+      "whyFired": {
+        "detector": "sast/concurrency-bug",
+        "ruleId": "concurrency-bug",
+        "parser": "pattern",
+        "evidence": {
+          "sinkSnippet": null,
+          "sourceSnippet": null,
+          "pathSteps": [],
+          "sanitizers": [],
+          "guards": []
+        },
+        "considered": {
+          "suppressionsApplied": [],
+          "suppressionsSkipped": [],
+          "reachabilityFilter": "unaffected",
+          "clusterCollapsed": false,
+          "typeNarrowed": false,
+          "crownJewelTier": null,
+          "mitigationVerdict": null
+        },
+        "scanner": {
+          "rulesetVersion": null,
+          "packHash": null,
+          "modelId": null
+        }
+      },
+      "adversaryTranscript": null,
+      "predictedBountyUsd": null,
+      "bountyConfidence": null,
+      "attackPlaybook": null
+    },
+    {
+      "id": "concurrency:fire-forget:monitor_worker.py:202",
+      "kind": "sast",
+      "severity": "low",
+      "vuln": "Concurrency: fire-and-forget async call in main() — result not awaited",
+      "cwe": null,
+      "owaspLlm": null,
+      "stride": null,
+      "file": "monitor_worker.py",
+      "line": 202,
+      "snippet": "",
+      "fix": null,
+      "reachable": null,
+      "triage": null,
+      "dataClasses": [],
+      "chain": null,
+      "confidence": 0.4,
+      "toxicity": 33,
+      "toxicityFactors": [
+        "unauth-route-reachable"
+      ],
+      "toxicityLabel": "Medium",
+      "sources": null,
+      "epssScore": null,
+      "epssPercentile": null,
+      "epssCve": null,
+      "exploitedNow": false,
+      "tags": null,
+      "blastRadius": {
+        "scope": "all-users",
+        "dataAtRisk": [
+          "config"
+        ],
+        "userCount": 50,
+        "industry": "generic",
+        "jurisdictions": [],
+        "controlsApplied": [],
+        "dollarBest": 23250,
+        "dollarLikely": 136250,
+        "dollarWorst": 775000,
+        "dollarLow": 23250,
+        "dollarHigh": 775000,
+        "components": {
+          "incidentResponse": {
+            "low": 8000,
+            "likely": 50000,
+            "high": 250000
+          },
+          "legal": {
+            "low": 10000,
+            "likely": 75000,
+            "high": 500000
+          },
+          "crisisPR": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "notification": {
+            "low": 5000,
+            "likely": 10000,
+            "high": 15000
+          },
+          "creditMonitoring": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "regulatoryFines": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "directDamage": {
+            "low": 250,
+            "likely": 1250,
+            "high": 10000
+          },
+          "classAction": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "lostBusiness": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          }
+        },
+        "dominantDriver": "legal counsel",
+        "comparable": "Generic finding — likely cost driven by user count + jurisdiction stack",
+        "confidence": "low",
+        "narrative": "Concurrency: fire-and-forget async call in main() — result not awaited on `monitor_worker.py:202` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
+      },
+      "stableId": null,
+      "confidenceTier": null,
+      "exploitability": null,
+      "exploitabilityTier": null,
+      "exploitabilityFactors": null,
+      "clusterSize": null,
+      "unreachable": false,
+      "validator_verdict": "unvalidated",
+      "llm_confidence": null,
+      "unvalidated": true,
+      "cross_language": false,
+      "family": "concurrency-bug",
+      "parser": null,
+      "_unsigned": false,
+      "_passThroughSigning": false,
+      "signatureStatus": "verified",
+      "regression_test": null,
+      "poc": null,
+      "calibrated_confidence": null,
+      "calibrated_confidence_ci": null,
+      "calibrated_n": 0,
+      "calibration_reason": null,
+      "verifier_verdict": null,
+      "verifier_reason": null,
+      "verifier_runner": null,
+      "narration": null,
+      "mitigationVerdict": null,
+      "mitigationsApplied": null,
+      "mitigatedByWaf": false,
+      "wafRuleId": null,
+      "mitigatedByAuth": false,
+      "authMechanism": null,
+      "mitigatedByNetwork": false,
+      "networkExposure": null,
+      "featureFlag": null,
+      "featureFlagState": null,
+      "featureFlagRollout": null,
+      "exposedInProd": false,
+      "unreachableInProd": false,
+      "coldPath": false,
+      "hotPath": false,
+      "prodRequestCount": null,
+      "crownJewelScore": null,
+      "crownJewelTier": null,
+      "crownJewelFactors": null,
+      "cloneClusterId": null,
+      "cloneClusterSize": null,
+      "provenance": null,
+      "provenanceScore": null,
+      "typeNarrowed": null,
+      "strideCategory": null,
+      "personaScores": null,
+      "personaTopTwo": null,
+      "personaMaxName": null,
+      "personaMaxScore": null,
+      "reverseExposure": null,
+      "specMined": null,
+      "whyFired": {
+        "detector": "sast/concurrency-bug",
+        "ruleId": "concurrency-bug",
+        "parser": "pattern",
+        "evidence": {
+          "sinkSnippet": null,
+          "sourceSnippet": null,
+          "pathSteps": [],
+          "sanitizers": [],
+          "guards": []
+        },
+        "considered": {
+          "suppressionsApplied": [],
+          "suppressionsSkipped": [],
+          "reachabilityFilter": "unaffected",
+          "clusterCollapsed": false,
+          "typeNarrowed": false,
+          "crownJewelTier": null,
+          "mitigationVerdict": null
+        },
+        "scanner": {
+          "rulesetVersion": null,
+          "packHash": null,
+          "modelId": null
+        }
+      },
+      "adversaryTranscript": null,
+      "predictedBountyUsd": null,
+      "bountyConfidence": null,
+      "attackPlaybook": null
+    }
+  ],
+  "bundles": [],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/",
+      "framework": "FastAPI",
+      "file": "api_worker.py",
+      "line": 106,
+      "hasAuth": false,
+      "hasFileUpload": false,
+      "params": [],
+      "classifications": [],
+      "classifiedFields": {}
+    },
+    {
+      "method": "GET",
+      "path": "/status",
+      "framework": "FastAPI",
+      "file": "monitor_worker.py",
+      "line": 185,
+      "hasAuth": false,
+      "hasFileUpload": false,
+      "params": [],
+      "classifications": [],
+      "classifiedFields": {}
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "framework": "FastAPI",
+      "file": "monitor_worker.py",
+      "line": 195,
+      "hasAuth": false,
+      "hasFileUpload": false,
+      "params": [],
+      "classifications": [],
+      "classifiedFields": {}
+    }
+  ],
+  "components": [],
+  "suppressedCount": 0,
+  "blastRadiusSignals": {
+    "industry": "generic",
+    "industryConfidence": "low",
+    "jurisdictions": [],
+    "controls": [],
+    "estimatedUsers": 50,
+    "revenueIndicator": "pre-revenue",
+    "hasStripe": false,
+    "hasAuth": false,
+    "hasUserTable": false,
+    "hasPII": false,
+    "hasPHI": false,
+    "hasS3": false
+  },
+  "_v3": {
+    "counterfactual": {
+      "spofControls": [],
+      "note": "no-controls-detected"
+    },
+    "threatModel": {
+      "summary": {
+        "assetCount": 0,
+        "boundaryCount": 8,
+        "strideCounts": {
+          "spoofing": 0,
+          "tampering": 0,
+          "repudiation": 0,
+          "informationDisclosure": 0,
+          "denialOfService": 0,
+          "elevationOfPrivilege": 0
+        }
+      },
+      "assets": [],
+      "trustBoundaries": [
+        {
+          "type": "http-route",
+          "file": "api_worker.py",
+          "line": 106,
+          "label": "/"
+        },
+        {
+          "type": "http-route-py",
+          "file": "api_worker.py",
+          "line": 106,
+          "label": "/"
+        },
+        {
+          "type": "http-route",
+          "file": "monitor_worker.py",
+          "line": 185,
+          "label": "/status"
+        },
+        {
+          "type": "http-route",
+          "file": "monitor_worker.py",
+          "line": 195,
+          "label": "/health"
+        },
+        {
+          "type": "http-route-py",
+          "file": "monitor_worker.py",
+          "line": 185,
+          "label": "/status"
+        },
+        {
+          "type": "http-route-py",
+          "file": "monitor_worker.py",
+          "line": 195,
+          "label": "/health"
+        },
+        {
+          "type": "db-edge",
+          "file": "monitor_worker.py",
+          "line": 70,
+          "label": null
+        },
+        {
+          "type": "db-edge",
+          "file": "monitor_worker.py",
+          "line": 111,
+          "label": null
+        }
+      ],
+      "stride": {
+        "spoofing": [],
+        "tampering": [],
+        "repudiation": [],
+        "informationDisclosure": [],
+        "denialOfService": [],
+        "elevationOfPrivilege": []
+      }
+    },
+    "trustBoundaryDiagram": {
+      "mermaid": "flowchart LR\n  INTERNET((Internet))\n  APP[\"Application\"]\n  route__[\"/\"]\n  route__status[\"/status\"]\n  route__health[\"/health\"]\n  db_monitor_worker_py_70[(\"db@monitor_worker.py:70\")]\n  db_monitor_worker_py_111[(\"db@monitor_worker.py:111\")]\n  INTERNET -->|http| route__\n  route__ -->|invoke| APP\n  INTERNET -->|http| route__\n  route__ -->|invoke| APP\n  INTERNET -->|http| route__status\n  route__status -->|invoke| APP\n  INTERNET -->|http| route__health\n  route__health -->|invoke| APP\n  INTERNET -->|http| route__status\n  route__status -->|invoke| APP\n  INTERNET -->|http| route__health\n  route__health -->|invoke| APP\n  APP -->|db| db_monitor_worker_py_70\n  APP -->|db| db_monitor_worker_py_111\n  class route__status sev_low;\n  class route__health sev_low;\n  class db_monitor_worker_py_111 sev_low;\n  classDef sev_critical fill:#ffcccc,stroke:#a00,stroke-width:2px;\n  classDef sev_high fill:#ffe0b2,stroke:#c60,stroke-width:2px;\n  classDef sev_medium fill:#fff3cd,stroke:#a80;\n  classDef sev_low fill:#e8eaf6,stroke:#557;",
+      "nodes": [
+        {
+          "id": "INTERNET",
+          "kind": "external",
+          "label": "Internet"
+        },
+        {
+          "id": "APP",
+          "kind": "app",
+          "label": "Application"
+        },
+        {
+          "kind": "route",
+          "id": "route__",
+          "label": "/"
+        },
+        {
+          "kind": "route",
+          "id": "route__status",
+          "label": "/status"
+        },
+        {
+          "kind": "route",
+          "id": "route__health",
+          "label": "/health"
+        },
+        {
+          "kind": "db",
+          "id": "db_monitor_worker_py_70",
+          "label": "db@monitor_worker.py:70"
+        },
+        {
+          "kind": "db",
+          "id": "db_monitor_worker_py_111",
+          "label": "db@monitor_worker.py:111"
+        }
+      ],
+      "edges": [
+        {
+          "from": "INTERNET",
+          "to": "route__",
+          "kind": "http"
+        },
+        {
+          "from": "route__",
+          "to": "APP",
+          "kind": "invoke"
+        },
+        {
+          "from": "INTERNET",
+          "to": "route__",
+          "kind": "http"
+        },
+        {
+          "from": "route__",
+          "to": "APP",
+          "kind": "invoke"
+        },
+        {
+          "from": "INTERNET",
+          "to": "route__status",
+          "kind": "http"
+        },
+        {
+          "from": "route__status",
+          "to": "APP",
+          "kind": "invoke"
+        },
+        {
+          "from": "INTERNET",
+          "to": "route__health",
+          "kind": "http"
+        },
+        {
+          "from": "route__health",
+          "to": "APP",
+          "kind": "invoke"
+        },
+        {
+          "from": "INTERNET",
+          "to": "route__status",
+          "kind": "http"
+        },
+        {
+          "from": "route__status",
+          "to": "APP",
+          "kind": "invoke"
+        },
+        {
+          "from": "INTERNET",
+          "to": "route__health",
+          "kind": "http"
+        },
+        {
+          "from": "route__health",
+          "to": "APP",
+          "kind": "invoke"
+        },
+        {
+          "from": "APP",
+          "to": "db_monitor_worker_py_70",
+          "kind": "db"
+        },
+        {
+          "from": "APP",
+          "to": "db_monitor_worker_py_111",
+          "kind": "db"
+        }
+      ],
+      "decorations": [
+        {
+          "nodeId": "route__status",
+          "severity": "low",
+          "vuln": "Concurrency: fire-and-forget async call in create_status_app",
+          "file": "monitor_worker.py",
+          "line": 179
+        },
+        {
+          "nodeId": "route__status",
+          "severity": "low",
+          "vuln": "Concurrency: fire-and-forget async call in main() — result n",
+          "file": "monitor_worker.py",
+          "line": 202
+        },
+        {
+          "nodeId": "route__health",
+          "severity": "low",
+          "vuln": "Concurrency: fire-and-forget async call in create_status_app",
+          "file": "monitor_worker.py",
+          "line": 179
+        },
+        {
+          "nodeId": "route__health",
+          "severity": "low",
+          "vuln": "Concurrency: fire-and-forget async call in main() — result n",
+          "file": "monitor_worker.py",
+          "line": 202
+        },
+        {
+          "nodeId": "route__status",
+          "severity": "low",
+          "vuln": "Concurrency: fire-and-forget async call in create_status_app",
+          "file": "monitor_worker.py",
+          "line": 179
+        },
+        {
+          "nodeId": "route__status",
+          "severity": "low",
+          "vuln": "Concurrency: fire-and-forget async call in main() — result n",
+          "file": "monitor_worker.py",
+          "line": 202
+        },
+        {
+          "nodeId": "route__health",
+          "severity": "low",
+          "vuln": "Concurrency: fire-and-forget async call in create_status_app",
+          "file": "monitor_worker.py",
+          "line": 179
+        },
+        {
+          "nodeId": "route__health",
+          "severity": "low",
+          "vuln": "Concurrency: fire-and-forget async call in main() — result n",
+          "file": "monitor_worker.py",
+          "line": 202
+        },
+        {
+          "nodeId": "db_monitor_worker_py_111",
+          "severity": "low",
+          "vuln": "Concurrency: fire-and-forget async call in start_monitors() ",
+          "file": "monitor_worker.py",
+          "line": 105
+        }
+      ]
+    },
+    "calibrationDrift": {
+      "alarms": [],
+      "note": "no-feedback-data"
+    }
+  },
+  "annotatorErrors": []
+}

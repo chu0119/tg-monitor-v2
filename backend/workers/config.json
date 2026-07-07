@@ -1,0 +1,22 @@
+{
+  "api_workers": 2,
+  "monitor_workers": 3,
+  "accounts_per_worker": 5,
+  "worker_ports": {
+    "api": [8000, 8001],
+    "monitor": [8010, 8011, 8012]
+  },
+  "session_dir": "sessions",
+  "log_dir": "logs",
+  "database": {
+    "pool_size": 20,
+    "max_overflow": 30
+  },
+  "monitor": {
+    "queue_maxsize": 2000,
+    "batch_size": 50,
+    "semaphore_limit": 10,
+    "heartbeat_interval": 30,
+    "startup_timeout": 5.0
+  }
+}
