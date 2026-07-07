@@ -25,11 +25,15 @@ def setup_logging(worker_id: int):
 
     log_file = os.path.join(log_dir, f'api_worker_{worker_id}.log')
 
+    # 使用函数格式化日志，避免占位符问题
+    def format_record(record):
+        return f"{record['time'].strftime('%Y-%m-%d %H:%M:%S')} | {record['level'].name: <8} | API-{worker_id} | {record['function']}:{record['line']} - {record['message']}"
+
     logger.remove()
     logger.add(
         sys.stdout,
         level=settings.LOG_LEVEL,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>API-{worker_id}</cyan> | <cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | API Worker | {function}:{line} - {message}"
     )
     logger.add(
         log_file,

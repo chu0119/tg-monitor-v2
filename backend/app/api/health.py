@@ -11,7 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from app.api.deps import get_db
-from app.utils.redis_cache import redis_cache
+
+# Redis缓存（可选）
+try:
+    from app.utils.redis_cache import redis_cache
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    redis_cache = None
 
 router = APIRouter(prefix="/health", tags=["健康检查"])
 
@@ -42,21 +49,24 @@ async def detailed_health_check(db: AsyncSession = Depends(get_db)):
         overall_status = "unhealthy"
 
     # 2. Redis检查
-    try:
-        start = time.time()
-        redis_cache.client.ping()
-        redis_latency = round((time.time() - start) * 1000, 2)
-        redis_info = redis_cache.client.info("memory")
-        checks["redis"] = {
-            "status": "healthy",
-            "latency_ms": redis_latency,
-            "memory_used": redis_info.get("used_memory_human", "unknown"),
-            "memory_max": redis_info.get("maxmemory_human", "unknown"),
-            "keys": redis_cache.client.dbsize()
-        }
-    except Exception as e:
-        checks["redis"] = {"status": "unhealthy", "error": str(e)}
-        overall_status = "degraded"
+    if REDIS_AVAILABLE and redis_cache is not None:
+        try:
+            start = time.time()
+            redis_cache.client.ping()
+            redis_latency = round((time.time() - start) * 1000, 2)
+            redis_info = redis_cache.client.info("memory")
+            checks["redis"] = {
+                "status": "healthy",
+                "latency_ms": redis_latency,
+                "memory_used": redis_info.get("used_memory_human", "unknown"),
+                "memory_max": redis_info.get("maxmemory_human", "unknown"),
+                "keys": redis_cache.client.dbsize()
+            }
+        except Exception as e:
+            checks["redis"] = {"status": "unhealthy", "error": str(e)}
+            overall_status = "degraded"
+    else:
+        checks["redis"] = {"status": "skipped", "reason": "Redis not configured"}
 
     # 3. 系统资源检查
     try:
@@ -122,16 +132,19 @@ async def get_metrics(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         db_stats = {"error": str(e)}
 
-    try:
-        info = redis_cache.client.info("stats")
-        redis_stats = {
-            "keys": redis_cache.client.dbsize(),
-            "memory_used": redis_cache.client.info("memory").get("used_memory_human"),
-            "hits": info.get("keyspace_hits", 0),
-            "misses": info.get("keyspace_misses", 0)
-        }
-    except Exception as e:
-        redis_stats = {"error": str(e)}
+    if REDIS_AVAILABLE and redis_cache is not None:
+        try:
+            info = redis_cache.client.info("stats")
+            redis_stats = {
+                "keys": redis_cache.client.dbsize(),
+                "memory_used": redis_cache.client.info("memory").get("used_memory_human"),
+                "hits": info.get("keyspace_hits", 0),
+                "misses": info.get("keyspace_misses", 0)
+            }
+        except Exception as e:
+            redis_stats = {"error": str(e)}
+    else:
+        redis_stats = {"status": "skipped", "reason": "Redis not configured"}
 
     try:
         system_metrics = {

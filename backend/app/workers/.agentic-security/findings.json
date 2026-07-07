@@ -1,7 +1,7 @@
 {
-  "scanId": "4ab6b940-f4cb-4c25-9f19-78c2b6b689cd",
-  "startedAt": "2026-07-07T00:57:41.761Z",
-  "durationMs": 71,
+  "scanId": "965dc570-b3ba-4fed-9421-33e0d7432469",
+  "startedAt": "2026-07-07T01:02:08.298Z",
+  "durationMs": 60,
   "scanned": {
     "files": 3,
     "lines": 0
@@ -909,7 +909,7 @@
       "path": "/",
       "framework": "FastAPI",
       "file": "api_worker.py",
-      "line": 106,
+      "line": 110,
       "hasAuth": false,
       "hasFileUpload": false,
       "params": [],
@@ -980,13 +980,13 @@
         {
           "type": "http-route",
           "file": "api_worker.py",
-          "line": 106,
+          "line": 110,
           "label": "/"
         },
         {
           "type": "http-route-py",
           "file": "api_worker.py",
-          "line": 106,
+          "line": 110,
           "label": "/"
         },
         {

@@ -35,7 +35,7 @@ def setup_logging(worker_id: int):
     logger.add(
         sys.stdout,
         level=settings.LOG_LEVEL,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>Monitor-{worker_id}</cyan> | <cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | Monitor Worker | {function}:{line} - {message}"
     )
     logger.add(
         log_file,

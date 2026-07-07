@@ -1,0 +1,20 @@
+{
+  "firstScanDate": "2026-07-07T01:02:30.149Z",
+  "lastScanDate": "2026-07-07T01:08:05.662Z",
+  "totalScans": 9,
+  "daysCleanCritical": 1,
+  "lastCleanDate": "2026-07-07",
+  "lastCriticalDate": null,
+  "hasEverHadCritical": false,
+  "bestDaysCleanCritical": 1,
+  "totalFindingsAtFirstScan": 161,
+  "totalFindingsAtLastScan": 170,
+  "totalFixesInferred": 0,
+  "lastGrade": "B-",
+  "bestGrade": "B-",
+  "launchCheckPassedAt": null,
+  "achievements": [
+    "first-scan"
+  ],
+  "previousGrade": "B-"
+}

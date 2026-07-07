@@ -41,5 +41,37 @@
       "concurrency:fire-forget:monitor_worker.py:179",
       "concurrency:fire-forget:monitor_worker.py:202"
     ]
+  },
+  {
+    "timestamp": "2026-07-07T01:01:47.708Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:105",
+      "concurrency:fire-forget:monitor_worker.py:140",
+      "concurrency:fire-forget:monitor_worker.py:179",
+      "concurrency:fire-forget:monitor_worker.py:202"
+    ]
+  },
+  {
+    "timestamp": "2026-07-07T01:02:08.358Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:105",
+      "concurrency:fire-forget:monitor_worker.py:140",
+      "concurrency:fire-forget:monitor_worker.py:179",
+      "concurrency:fire-forget:monitor_worker.py:202"
+    ]
   }
 ]

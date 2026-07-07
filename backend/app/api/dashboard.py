@@ -21,7 +21,14 @@ from app.models import (
     KeywordGroup, Keyword, Alert
 )
 from app.utils import start_of_day_local, end_of_day_local, to_local, to_utc, now_local, to_local_naive, now_utc
-from app.utils.redis_cache import redis_cache
+
+# Redis缓存（可选）
+try:
+    from app.utils.redis_cache import redis_cache
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    redis_cache = None
 
 router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
 # 缓存变量
@@ -39,6 +46,8 @@ CACHE_TTL = 30  # 优化：增加缓存时间到30秒
 
 async def get_cached_stats():
     """获取缓存的统计数据（Redis）"""
+    if not REDIS_AVAILABLE or redis_cache is None:
+        return None
     try:
         cached = redis_cache.get("dashboard_stats")
         return cached
@@ -49,6 +58,8 @@ async def get_cached_stats():
 
 async def set_cached_stats(data):
     """设置缓存（Redis）"""
+    if not REDIS_AVAILABLE or redis_cache is None:
+        return
     try:
         # 将data转换为字典
         if hasattr(data, 'dict'):
@@ -382,9 +393,10 @@ async def get_sender_ranking(
     """获取发送者排行（带Redis缓存）"""
     # 检查Redis缓存
     cache_key = f"sender_ranking_{limit}_{sort_by}"
-    cached = redis_cache.get(cache_key)
-    if cached is not None:
-        return [SenderRanking(**item) for item in cached]
+    if REDIS_AVAILABLE and redis_cache is not None:
+        cached = redis_cache.get(cache_key)
+        if cached is not None:
+            return [SenderRanking(**item) for item in cached]
     
     if sort_by not in {"messages", "alerts"}:
         sort_by = "messages"
@@ -419,8 +431,9 @@ async def get_sender_ranking(
         ))
 
     # 保存到Redis缓存
-    redis_cache.set(cache_key, [r.dict() for r in rankings], CACHE_TTL_SLOW)
-    
+    if REDIS_AVAILABLE and redis_cache is not None:
+        redis_cache.set(cache_key, [r.dict() for r in rankings], CACHE_TTL_SLOW)
+
     return rankings
 
 
@@ -432,9 +445,10 @@ async def get_conversation_activity(
     """获取会话活跃度（带缓存）"""
     # 检查Redis缓存
     cache_key = "conv_activity_top12"  # 固定缓存key
-    cached = redis_cache.get(cache_key)
-    if cached is not None:
-        return [ConversationActivity(**item) for item in cached]
+    if REDIS_AVAILABLE and redis_cache is not None:
+        cached = redis_cache.get(cache_key)
+        if cached is not None:
+            return [ConversationActivity(**item) for item in cached]
     
     # 一次性获取所有会话和它们的活跃发送者统计
     result = await db.execute(
@@ -467,11 +481,9 @@ async def get_conversation_activity(
         ))
 
     # 保存到Redis缓存
-    redis_cache.set(cache_key, [a.dict() for a in activities], CACHE_TTL_SLOW)
-    
-    # 保存到Redis缓存
-    redis_cache.set(cache_key, [a.dict() for a in activities], CACHE_TTL_SLOW)
-    
+    if REDIS_AVAILABLE and redis_cache is not None:
+        redis_cache.set(cache_key, [a.dict() for a in activities], CACHE_TTL_SLOW)
+
     return activities
 
 
