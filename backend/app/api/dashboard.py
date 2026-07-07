@@ -456,29 +456,28 @@ async def get_conversation_activity(
 ):
     """获取会话活跃度（带缓存）"""
     # 检查Redis缓存
-    cache_key = "conv_activity_top12"  # 固定缓存key
+    cache_key = "conv_activity_top12"
     if REDIS_AVAILABLE and redis_cache is not None:
         cached = redis_cache.get(cache_key)
         if cached is not None:
             return [ConversationActivity(**item) for item in cached]
-    
-    # 一次性获取所有会话和它们的活跃发送者统计
-    result = await db.execute(
-        select(
-            Conversation.id,
-            Conversation.title,
-            Conversation.chat_type,
-            Conversation.total_messages,
-            Conversation.total_alerts,
-            Conversation.last_message_at,
-            func.count(func.distinct(Message.sender_id)).label('sender_count')
-        )
-        .outerjoin(Message, Conversation.id == Message.conversation_id)
-        .group_by(Conversation.id)
-        .order_by(Conversation.total_messages.desc())
-        .limit(limit)
-    )
-    rows = result.all()
+
+    # 优化：直接使用预计算的sender_count字段
+    sql = text("""
+        SELECT
+            id,
+            title,
+            chat_type,
+            total_messages,
+            total_alerts,
+            last_message_at,
+            sender_count
+        FROM conversations
+        ORDER BY total_messages DESC
+        LIMIT :limit
+    """)
+    result = await db.execute(sql, {"limit": limit})
+    rows = result.fetchall()
 
     activities = []
     for row in rows:
