@@ -83,43 +83,68 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         return cached
 
     now_local_dt = now_local()
-    # 获取今天本地时间的开始时间（用于"今日"统计）
-    # 本地今天 00:00 对应的 UTC 时间
     from datetime import timezone as tz
-    today_local_start_tz = start_of_day_local(now_local_dt)  # 本地今天 00:00（带时区）
-    today_local_start_utc = to_utc(today_local_start_tz).replace(tzinfo=None)  # 转换为UTC naive，用于查询数据库
+    today_local_start_tz = start_of_day_local(now_local_dt)
+    today_local_start_utc = to_utc(today_local_start_tz).replace(tzinfo=None)
 
-    # 账号统计 - 合并为单条查询
-    accounts_result = await db.execute(text(
-        "SELECT COUNT(*), SUM(CASE WHEN is_active = 1 AND is_authorized = 1 THEN 1 ELSE 0 END) FROM telegram_accounts"
-    ))
-    accounts_row = accounts_result.fetchone()
-    total_accounts = accounts_row[0]
-    active_accounts = accounts_row[1] or 0
+    # 优化：使用information_schema获取近似行数（毫秒级）
+    approx_sql = text("""
+        SELECT
+            table_name,
+            table_rows
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+        AND table_name IN ('telegram_accounts', 'conversations', 'messages', 'alerts', 'keywords', 'keyword_groups', 'senders')
+    """)
+    approx_result = await db.execute(approx_sql)
+    approx_rows = {row[0]: row[1] for row in approx_result.fetchall()}
 
-    # 会话统计 - 合并为单条查询
-    convs_result = await db.execute(text(
-        "SELECT COUNT(*), SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) FROM conversations"
-    ))
-    convs_row = convs_result.fetchone()
-    total_conversations = convs_row[0]
-    active_conversations = convs_row[1] or 0
+    # 精确统计小表（毫秒级）
+    small_tables_sql = text("""
+        SELECT
+            (SELECT COUNT(*) FROM telegram_accounts) as total_accounts,
+            (SELECT COUNT(*) FROM telegram_accounts WHERE is_active = 1 AND is_authorized = 1) as active_accounts,
+            (SELECT COUNT(*) FROM conversations) as total_conversations,
+            (SELECT COUNT(*) FROM conversations WHERE status = 'active') as active_conversations,
+            (SELECT COUNT(*) FROM keywords) as total_keywords,
+            (SELECT COUNT(*) FROM keywords WHERE match_count > 0) as active_keywords,
+            (SELECT COUNT(*) FROM keyword_groups) as keyword_groups,
+            (SELECT COUNT(*) FROM senders) as total_senders
+    """)
+    small_result = await db.execute(small_tables_sql)
+    small_row = small_result.fetchone()
 
-    # 消息统计 + 今日消息 - 合并为单条查询
-    msgs_result = await db.execute(text(
-        "SELECT COUNT(*), SUM(CASE WHEN created_at >= :today THEN 1 ELSE 0 END) FROM messages"
-    ), {"today": today_local_start_utc})
-    msgs_row = msgs_result.fetchone()
-    total_messages = msgs_row[0]
-    today_messages = msgs_row[1] or 0
+    total_accounts = small_row[0]
+    active_accounts = small_row[1] or 0
+    total_conversations = small_row[2]
+    active_conversations = small_row[3] or 0
+    total_keywords = small_row[4]
+    active_keywords = small_row[5] or 0
+    keyword_groups = small_row[6] or 0
+    total_senders = small_row[7]
 
-    # 24小时消息分布 - 单条 GROUP BY 查询替代循环24次
+    # 使用近似值（大表）或精确值（小表）
+    total_messages = approx_rows.get('messages', 0)
+    total_alerts = approx_rows.get('alerts', 0)
+
+    # 今日统计使用精确查询（有索引，较快）
+    today_sql = text("""
+        SELECT
+            (SELECT COUNT(*) FROM messages WHERE created_at >= :today) as today_messages,
+            (SELECT COUNT(*) FROM alerts WHERE created_at >= :today) as today_alerts,
+            (SELECT COUNT(*) FROM alerts WHERE status = 'pending') as pending_alerts
+    """)
+    today_result = await db.execute(today_sql, {"today": today_local_start_utc})
+    today_row = today_result.fetchone()
+    today_messages = today_row[0] or 0
+    today_alerts = today_row[1] or 0
+    pending_alerts = today_row[2] or 0
+
+    # 24小时消息分布
     messages_24h = []
-    from datetime import timezone as tz
     now_utc_time = datetime.now(tz.utc).replace(tzinfo=None)
     start_24h_utc = now_utc_time - timedelta(hours=24)
 
-    # MySQL: HOUR() 返回 0-23 的UTC小时，按此分组
     hour_result = await db.execute(
         select(func.hour(Message.date), func.count(Message.id))
         .where(Message.date >= start_24h_utc, Message.date < now_utc_time)
@@ -127,7 +152,6 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     )
     hour_counts = {row[0]: row[1] for row in hour_result.all()}
 
-    # 生成从早到晚的24小时分布，标签使用本地时间
     now_local_naive = to_local_naive(now_local_dt)
     for i in range(23, -1, -1):
         hour_end_utc = now_utc_time - timedelta(hours=i)
@@ -138,33 +162,12 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
             "count": hour_counts.get(utc_hour, 0)
         })
 
-    # 告警统计 - 合并为单条查询
-    alerts_result = await db.execute(text(
-        "SELECT COUNT(*), SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), "
-        "SUM(CASE WHEN created_at >= :today THEN 1 ELSE 0 END) FROM alerts"
-    ), {"today": today_local_start_utc})
-    alerts_row = alerts_result.fetchone()
-    total_alerts = alerts_row[0]
-    pending_alerts = alerts_row[1] or 0
-    today_alerts = alerts_row[2] or 0
-
+    # 告警级别统计
     alerts_by_level_result = await db.execute(
         select(Alert.alert_level, func.count(Alert.id))
         .group_by(Alert.alert_level)
     )
     alerts_by_level = {row[0]: row[1] for row in alerts_by_level_result.all()}
-
-    # 关键词统计 - 合并为单条查询
-    kws_result = await db.execute(text(
-        "SELECT COUNT(*), SUM(CASE WHEN match_count > 0 THEN 1 ELSE 0 END) FROM keywords"
-    ))
-    kws_row = kws_result.fetchone()
-    total_keywords = kws_row[0]
-    active_keywords = kws_row[1] or 0
-    keyword_groups = (await db.execute(text("SELECT COUNT(*) FROM keyword_groups"))).scalar()
-
-    # 发送者统计
-    total_senders = (await db.execute(text("SELECT COUNT(*) FROM senders"))).scalar()
 
     result = DashboardStats(
         total_accounts=total_accounts,
@@ -397,27 +400,36 @@ async def get_sender_ranking(
         cached = redis_cache.get(cache_key)
         if cached is not None:
             return [SenderRanking(**item) for item in cached]
-    
+
     if sort_by not in {"messages", "alerts"}:
         sort_by = "messages"
-    alert_count_expr = func.count(Alert.id).label("alert_count")
-    order_by = (
-        [alert_count_expr.desc(), Sender.message_count.desc()]
-        if sort_by == "alerts"
-        else [Sender.message_count.desc()]
-    )
-    result = await db.execute(
-        select(
-            Sender.id, Sender.username, Sender.first_name,
-            Sender.message_count,
-            alert_count_expr,
-        )
-        .outerjoin(Alert, Alert.sender_id == Sender.id)
-        .group_by(Sender.id, Sender.username, Sender.first_name, Sender.message_count)
-        .order_by(*order_by)
-        .limit(limit)
-    )
-    rows = result.all()
+
+    # 优化：使用原生SQL子查询，避免大表JOIN
+    if sort_by == "alerts":
+        # 按告警数排序：先统计告警数，再关联发送者信息
+        sql = text("""
+            SELECT s.id, s.username, s.first_name, s.message_count, COALESCE(a.alert_count, 0) as alert_count
+            FROM senders s
+            LEFT JOIN (
+                SELECT sender_id, COUNT(*) as alert_count
+                FROM alerts
+                GROUP BY sender_id
+            ) a ON s.id = a.sender_id
+            ORDER BY alert_count DESC, s.message_count DESC
+            LIMIT :limit
+        """)
+        result = await db.execute(sql, {"limit": limit})
+    else:
+        # 按消息数排序：直接使用索引
+        sql = text("""
+            SELECT id, username, first_name, message_count, 0 as alert_count
+            FROM senders
+            ORDER BY message_count DESC
+            LIMIT :limit
+        """)
+        result = await db.execute(sql, {"limit": limit})
+
+    rows = result.fetchall()
 
     rankings = []
     for i, row in enumerate(rows, 1):
