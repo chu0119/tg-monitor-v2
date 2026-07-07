@@ -1,0 +1,310 @@
+{
+  "scanId": "f0e6e040-19aa-4b29-9a9d-b75ec17a9f38",
+  "startedAt": "2026-07-07T01:49:46.832Z",
+  "durationMs": 81,
+  "scanned": {
+    "files": 6,
+    "lines": 0
+  },
+  "findings": [
+    {
+      "id": "toctou-fs:file_cache.py:19",
+      "kind": "sast",
+      "severity": "medium",
+      "vuln": "TOCTOU: file existence/permission check before open",
+      "cwe": "CWE-367",
+      "owaspLlm": null,
+      "stride": "Tampering",
+      "file": "file_cache.py",
+      "line": 19,
+      "snippet": "if os.path.exists(cache_file):",
+      "fix": null,
+      "reachable": false,
+      "triage": 22,
+      "dataClasses": [],
+      "chain": null,
+      "confidence": 0.7,
+      "toxicity": 8,
+      "toxicityFactors": [],
+      "toxicityLabel": "Low",
+      "sources": null,
+      "epssScore": null,
+      "epssPercentile": null,
+      "epssCve": null,
+      "exploitedNow": false,
+      "tags": null,
+      "blastRadius": {
+        "scope": "all-users",
+        "dataAtRisk": [
+          "config"
+        ],
+        "userCount": 50,
+        "industry": "generic",
+        "jurisdictions": [],
+        "controlsApplied": [],
+        "dollarBest": 23250,
+        "dollarLikely": 136250,
+        "dollarWorst": 775000,
+        "dollarLow": 23250,
+        "dollarHigh": 775000,
+        "components": {
+          "incidentResponse": {
+            "low": 8000,
+            "likely": 50000,
+            "high": 250000
+          },
+          "legal": {
+            "low": 10000,
+            "likely": 75000,
+            "high": 500000
+          },
+          "crisisPR": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "notification": {
+            "low": 5000,
+            "likely": 10000,
+            "high": 15000
+          },
+          "creditMonitoring": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "regulatoryFines": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "directDamage": {
+            "low": 250,
+            "likely": 1250,
+            "high": 10000
+          },
+          "classAction": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          },
+          "lostBusiness": {
+            "low": 0,
+            "likely": 0,
+            "high": 0
+          }
+        },
+        "dominantDriver": "legal counsel",
+        "comparable": "Generic finding — likely cost driven by user count + jurisdiction stack",
+        "confidence": "low",
+        "narrative": "TOCTOU: file existence/permission check before open on `file_cache.py:19` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
+      },
+      "stableId": "f0b83c8daf14e591",
+      "confidenceTier": "medium",
+      "exploitability": 0.2,
+      "exploitabilityTier": "low",
+      "exploitabilityFactors": [
+        "sev:medium",
+        "unreachable"
+      ],
+      "clusterSize": null,
+      "unreachable": false,
+      "validator_verdict": "unvalidated",
+      "llm_confidence": null,
+      "unvalidated": true,
+      "cross_language": false,
+      "family": "toctou-file-existence-permission-check-b",
+      "parser": "TOCTOU",
+      "_unsigned": false,
+      "_passThroughSigning": false,
+      "signatureStatus": "verified",
+      "regression_test": null,
+      "poc": null,
+      "calibrated_confidence": null,
+      "calibrated_confidence_ci": null,
+      "calibrated_n": 0,
+      "calibration_reason": "no-history",
+      "verifier_verdict": "cannot-verify",
+      "verifier_reason": "no-poc-no-sanitizer-rule",
+      "verifier_runner": null,
+      "narration": null,
+      "mitigationVerdict": "unreachable-in-prod",
+      "mitigationsApplied": [],
+      "mitigatedByWaf": false,
+      "wafRuleId": null,
+      "mitigatedByAuth": false,
+      "authMechanism": null,
+      "mitigatedByNetwork": false,
+      "networkExposure": null,
+      "featureFlag": null,
+      "featureFlagState": null,
+      "featureFlagRollout": null,
+      "exposedInProd": false,
+      "unreachableInProd": true,
+      "coldPath": false,
+      "hotPath": false,
+      "prodRequestCount": null,
+      "crownJewelScore": 0,
+      "crownJewelTier": "unknown",
+      "crownJewelFactors": [],
+      "cloneClusterId": "b5cf36892b00ce03",
+      "cloneClusterSize": 1,
+      "provenance": "human-likely",
+      "provenanceScore": 0,
+      "typeNarrowed": null,
+      "strideCategory": "tampering",
+      "personaScores": {
+        "script-kiddie": {
+          "score": 0.4,
+          "tier": "medium",
+          "factors": [
+            "sev:medium"
+          ]
+        },
+        "opportunistic-criminal": {
+          "score": 0.4,
+          "tier": "medium",
+          "factors": [
+            "sev:medium"
+          ]
+        },
+        "apt-nation-state": {
+          "score": 0.4,
+          "tier": "medium",
+          "factors": [
+            "sev:medium"
+          ]
+        },
+        "supply-chain-attacker": {
+          "score": 0.4,
+          "tier": "medium",
+          "factors": [
+            "sev:medium"
+          ]
+        },
+        "malicious-insider": {
+          "score": 0.4,
+          "tier": "medium",
+          "factors": [
+            "sev:medium"
+          ]
+        }
+      },
+      "personaTopTwo": [
+        "script-kiddie",
+        "opportunistic-criminal"
+      ],
+      "personaMaxName": "script-kiddie",
+      "personaMaxScore": 0.4,
+      "reverseExposure": null,
+      "specMined": null,
+      "whyFired": {
+        "detector": "sast/toctou-file-existence-permission-check-b",
+        "ruleId": "CWE-367",
+        "parser": "TOCTOU",
+        "evidence": {
+          "sinkSnippet": "if os.path.exists(cache_file):",
+          "sourceSnippet": null,
+          "pathSteps": [],
+          "sanitizers": [],
+          "guards": []
+        },
+        "considered": {
+          "suppressionsApplied": [],
+          "suppressionsSkipped": [],
+          "reachabilityFilter": "unaffected",
+          "clusterCollapsed": false,
+          "typeNarrowed": false,
+          "crownJewelTier": "unknown",
+          "mitigationVerdict": "unreachable-in-prod"
+        },
+        "scanner": {
+          "rulesetVersion": null,
+          "packHash": null,
+          "modelId": null
+        }
+      },
+      "adversaryTranscript": null,
+      "predictedBountyUsd": null,
+      "bountyConfidence": null,
+      "attackPlaybook": null
+    }
+  ],
+  "bundles": [],
+  "routes": [],
+  "components": [],
+  "suppressedCount": 0,
+  "blastRadiusSignals": {
+    "industry": "generic",
+    "industryConfidence": "low",
+    "jurisdictions": [],
+    "controls": [],
+    "estimatedUsers": 50,
+    "revenueIndicator": "pre-revenue",
+    "hasStripe": false,
+    "hasAuth": false,
+    "hasUserTable": false,
+    "hasPII": false,
+    "hasPHI": false,
+    "hasS3": false
+  },
+  "_v3": {
+    "counterfactual": {
+      "spofControls": [],
+      "note": "no-controls-detected"
+    },
+    "threatModel": {
+      "summary": {
+        "assetCount": 0,
+        "boundaryCount": 0,
+        "strideCounts": {
+          "spoofing": 0,
+          "tampering": 1,
+          "repudiation": 0,
+          "informationDisclosure": 0,
+          "denialOfService": 0,
+          "elevationOfPrivilege": 0
+        }
+      },
+      "assets": [],
+      "trustBoundaries": [],
+      "stride": {
+        "spoofing": [],
+        "tampering": [
+          {
+            "vuln": "TOCTOU: file existence/permission check before open",
+            "file": "file_cache.py",
+            "line": 19,
+            "severity": "medium"
+          }
+        ],
+        "repudiation": [],
+        "informationDisclosure": [],
+        "denialOfService": [],
+        "elevationOfPrivilege": []
+      }
+    },
+    "trustBoundaryDiagram": {
+      "mermaid": "flowchart LR\n  INTERNET((Internet))\n  APP[\"Application\"]\n  classDef sev_critical fill:#ffcccc,stroke:#a00,stroke-width:2px;\n  classDef sev_high fill:#ffe0b2,stroke:#c60,stroke-width:2px;\n  classDef sev_medium fill:#fff3cd,stroke:#a80;\n  classDef sev_low fill:#e8eaf6,stroke:#557;",
+      "nodes": [
+        {
+          "id": "INTERNET",
+          "kind": "external",
+          "label": "Internet"
+        },
+        {
+          "id": "APP",
+          "kind": "app",
+          "label": "Application"
+        }
+      ],
+      "edges": [],
+      "decorations": []
+    },
+    "calibrationDrift": {
+      "alarms": [],
+      "note": "no-feedback-data"
+    }
+  },
+  "annotatorErrors": []
+}

@@ -1,0 +1,18 @@
+[Unit]
+Description=TG Monitor Worker 0 (Accounts 1-5)
+After=network.target mysql.service redis.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/test/tg-monitor/backend
+ExecStart=/usr/bin/python3 -m app.workers.monitor_worker
+Restart=always
+RestartSec=10
+MemoryMax=2G
+Environment=WORKER_ID=0
+Environment=WORKER_TYPE=monitor
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
