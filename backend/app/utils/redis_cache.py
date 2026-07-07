@@ -57,7 +57,7 @@ class RedisCache:
             return None
         except redis.ConnectionError as e:
             logger.error(f"Redis连接错误: {e}")
-            return False
+            return None
         except Exception as e:
             logger.error(f"Redis获取缓存异常: key={key}, error={e}")
             return None

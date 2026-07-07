@@ -82,21 +82,24 @@ async def connect_accounts(worker_id: int, account_ids: list):
 
     logger.info(f"Worker {worker_id} 找到 {len(accounts)} 个账号需要连接")
 
-    # 并行连接账号
+    # 并行连接账号（限制并发数，避免Telegram限流）
+    sem = asyncio.Semaphore(5)
+
     async def connect_one(account):
-        try:
-            client = await asyncio.wait_for(
-                client_manager.get_client(account.id),
-                timeout=30
-            )
-            if client:
-                logger.info(f"Worker {worker_id} 账号已连接: {account.phone}")
-            else:
-                logger.warning(f"Worker {worker_id} 账号连接失败: {account.phone}")
-        except asyncio.TimeoutError:
-            logger.warning(f"Worker {worker_id} 账号连接超时: {account.phone}")
-        except Exception as e:
-            logger.error(f"Worker {worker_id} 账号连接异常: {account.phone} - {e}")
+        async with sem:
+            try:
+                client = await asyncio.wait_for(
+                    client_manager.get_client(account.id),
+                    timeout=30
+                )
+                if client:
+                    logger.info(f"Worker {worker_id} 账号已连接: {account.phone}")
+                else:
+                    logger.warning(f"Worker {worker_id} 账号连接失败: {account.phone}")
+            except asyncio.TimeoutError:
+                logger.warning(f"Worker {worker_id} 账号连接超时: {account.phone}")
+            except Exception as e:
+                logger.error(f"Worker {worker_id} 账号连接异常: {account.phone} - {e}")
 
     tasks = [connect_one(acc) for acc in accounts]
     await asyncio.gather(*tasks)
@@ -124,17 +127,24 @@ async def start_monitors(worker_id: int, account_ids: list):
     logger.info(f"Worker {worker_id} 找到 {len(conversations)} 个会话需要监控")
 
     # 启动监控
+    success_count = 0
+    failed_count = 0
+
     for conv in conversations:
         try:
             await asyncio.wait_for(
                 message_monitor.start_monitor(conv.id),
                 timeout=10
             )
-            logger.debug(f"Worker {worker_id} 会话监控已启动: {conv.id}")
+            success_count += 1
         except asyncio.TimeoutError:
+            failed_count += 1
             logger.warning(f"Worker {worker_id} 会话监控启动超时: {conv.id}")
         except Exception as e:
+            failed_count += 1
             logger.error(f"Worker {worker_id} 会话监控启动失败: {conv.id} - {e}")
+
+    logger.info(f"Worker {worker_id} 监控启动完成: 成功 {success_count}, 失败 {failed_count}, 共 {len(conversations)}")
 
 
 async def run_monitor_worker(worker_id: int, account_ids: list):
@@ -163,14 +173,29 @@ async def run_monitor_worker(worker_id: int, account_ids: list):
 
     logger.info(f"Monitor Worker {worker_id} 启动完成")
 
-    # 保持运行
-    try:
-        while True:
-            await asyncio.sleep(60)
-    except asyncio.CancelledError:
+    # 保持运行，等待停止信号
+    stop_event = asyncio.Event()
+
+    def _signal_handler():
         logger.info(f"Worker {worker_id} 收到停止信号")
+        stop_event.set()
+
+    # 注册信号处理器（仅Linux/macOS）
+    try:
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _signal_handler)
+    except (NotImplementedError, AttributeError):
+        # Windows不支持add_signal_handler
+        pass
+
+    try:
+        await stop_event.wait()
+    except asyncio.CancelledError:
+        logger.info(f"Worker {worker_id} 任务被取消")
     finally:
         # 清理资源
+        await message_monitor.stop_heartbeat()
         await message_monitor.stop_all_monitors()
         await client_manager.disconnect_all()
         logger.info(f"Worker {worker_id} 已停止")
@@ -222,10 +247,15 @@ def main():
             log_level="warning"
         )
         server = uvicorn.Server(uvicorn_config)
-        asyncio.create_task(server.serve())
+        server_task = asyncio.create_task(server.serve())
 
-        # 运行监控
-        await run_monitor_worker(config.worker_id, config.account_ids)
+        try:
+            # 运行监控
+            await run_monitor_worker(config.worker_id, config.account_ids)
+        finally:
+            # 优雅关闭状态API服务器
+            server.should_exit = True
+            await server_task
 
     asyncio.run(run())
 

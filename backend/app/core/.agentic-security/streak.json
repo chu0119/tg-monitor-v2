@@ -1,7 +1,7 @@
 {
   "firstScanDate": "2026-07-07T00:55:48.143Z",
-  "lastScanDate": "2026-07-07T00:55:48.143Z",
-  "totalScans": 1,
+  "lastScanDate": "2026-07-07T01:49:22.709Z",
+  "totalScans": 4,
   "daysCleanCritical": 1,
   "lastCleanDate": "2026-07-07",
   "lastCriticalDate": null,
@@ -16,5 +16,5 @@
   "achievements": [
     "first-scan"
   ],
-  "previousGrade": null
+  "previousGrade": "A-"
 }

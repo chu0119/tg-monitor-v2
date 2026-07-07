@@ -4,8 +4,6 @@ API Worker入口
 """
 import os
 import sys
-import asyncio
-import signal
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -24,10 +22,6 @@ def setup_logging(worker_id: int):
     os.makedirs(log_dir, exist_ok=True)
 
     log_file = os.path.join(log_dir, f'api_worker_{worker_id}.log')
-
-    # 使用函数格式化日志，避免占位符问题
-    def format_record(record):
-        return f"{record['time'].strftime('%Y-%m-%d %H:%M:%S')} | {record['level'].name: <8} | API-{worker_id} | {record['function']}:{record['line']} - {record['message']}"
 
     logger.remove()
     logger.add(
@@ -56,11 +50,34 @@ def create_app():
     from app.api import phone_records, personnel, cases, watchlist, audit
     from app.api import proxy, system, update, migration
     from app.api import health
+    from app.api.keywords import list_keyword_groups_internal
+    from app.api.deps import get_db
+    from fastapi import Depends
+    from app.core.error_handler import (
+        AppException, app_exception_handler, general_exception_handler,
+    )
+    from app.api.auth import APIKeyAuthMiddleware
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """应用生命周期"""
         logger.info(f"API Worker 启动 (ID: {worker_manager.worker_id})")
+
+        # 初始化数据库
+        from app.core.database import init_db
+        await init_db()
+        logger.info("数据库初始化完成")
+
+        # 加载代理配置
+        from app.services.runtime_proxy_service import get_proxy_config, apply_proxy_config
+        from app.core.database import AsyncSessionLocal
+        try:
+            async with AsyncSessionLocal() as db:
+                proxy_cfg = await get_proxy_config(db)
+            apply_proxy_config(proxy_cfg)
+        except Exception as e:
+            logger.warning(f"加载代理配置失败: {e}")
+
         yield
         logger.info(f"API Worker 关闭 (ID: {worker_manager.worker_id})")
 
@@ -69,6 +86,10 @@ def create_app():
         version=settings.VERSION,
         lifespan=lifespan
     )
+
+    # 注册异常处理器
+    app.add_exception_handler(AppException, app_exception_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
 
     # CORS配置
     allow_credentials = "*" not in settings.CORS_ORIGINS
@@ -79,6 +100,9 @@ def create_app():
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         allow_headers=["*"],
     )
+
+    # API Key认证中间件
+    app.add_middleware(APIKeyAuthMiddleware)
 
     # 注册路由
     api_prefix = settings.API_PREFIX
@@ -106,6 +130,11 @@ def create_app():
     app.include_router(cases.router, prefix=api_prefix)
     app.include_router(watchlist.router, prefix=api_prefix)
     app.include_router(audit.router, prefix=api_prefix)
+
+    # 兼容旧路由
+    @app.get(f"{api_prefix}/keyword-groups")
+    async def keyword_groups_alias(db=Depends(get_db)):
+        return await list_keyword_groups_internal(db)
 
     @app.get("/")
     async def root():

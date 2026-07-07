@@ -1,21 +1,21 @@
 {
-  "scanId": "965dc570-b3ba-4fed-9421-33e0d7432469",
-  "startedAt": "2026-07-07T01:02:08.298Z",
-  "durationMs": 60,
+  "scanId": "2fd4b9d2-57b6-47df-8da5-5214360da9e3",
+  "startedAt": "2026-07-07T01:51:18.180Z",
+  "durationMs": 71,
   "scanned": {
     "files": 3,
     "lines": 0
   },
   "findings": [
     {
-      "id": "cf4aab4b53df2cbf",
+      "id": "05fd3c5a8bf7e15c",
       "kind": "logic",
       "severity": "high",
       "vuln": "Sensitive Directory Path Construction",
       "cwe": "CWE-22",
       "stride": "Information Disclosure",
       "file": "api_worker.py",
-      "line": 26,
+      "line": 24,
       "snippet": "log_file = os.path.join(log_dir, f'api_worker_{worker_id}.log')",
       "fix": {
         "description": "Restrict file paths to a specific allowed directory; reject '..' and absolute paths.",
@@ -85,7 +85,7 @@
         "dominantDriver": "legal counsel",
         "comparable": "Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil",
         "confidence": "low",
-        "narrative": "Sensitive Directory Path Construction on `api_worker.py:26` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil."
+        "narrative": "Sensitive Directory Path Construction on `api_worker.py:24` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil."
       },
       "parser": "LOGIC",
       "family": null
@@ -174,7 +174,7 @@
       "family": null
     },
     {
-      "id": "concurrency:fire-forget:monitor_worker.py:105",
+      "id": "concurrency:fire-forget:monitor_worker.py:108",
       "kind": "sast",
       "severity": "low",
       "vuln": "Concurrency: fire-and-forget async call in start_monitors() — result not awaited",
@@ -182,7 +182,7 @@
       "owaspLlm": null,
       "stride": null,
       "file": "monitor_worker.py",
-      "line": 105,
+      "line": 108,
       "snippet": "",
       "fix": null,
       "reachable": null,
@@ -265,7 +265,7 @@
         "dominantDriver": "legal counsel",
         "comparable": "Generic finding — likely cost driven by user count + jurisdiction stack",
         "confidence": "low",
-        "narrative": "Concurrency: fire-and-forget async call in start_monitors() — result not awaited on `monitor_worker.py:105` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
+        "narrative": "Concurrency: fire-and-forget async call in start_monitors() — result not awaited on `monitor_worker.py:108` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
       },
       "stableId": null,
       "confidenceTier": null,
@@ -356,7 +356,7 @@
       "attackPlaybook": null
     },
     {
-      "id": "concurrency:fire-forget:monitor_worker.py:140",
+      "id": "concurrency:fire-forget:monitor_worker.py:150",
       "kind": "sast",
       "severity": "low",
       "vuln": "Concurrency: fire-and-forget async call in run_monitor_worker() — result not awaited",
@@ -364,7 +364,7 @@
       "owaspLlm": null,
       "stride": null,
       "file": "monitor_worker.py",
-      "line": 140,
+      "line": 150,
       "snippet": "",
       "fix": null,
       "reachable": null,
@@ -447,7 +447,7 @@
         "dominantDriver": "legal counsel",
         "comparable": "Generic finding — likely cost driven by user count + jurisdiction stack",
         "confidence": "low",
-        "narrative": "Concurrency: fire-and-forget async call in run_monitor_worker() — result not awaited on `monitor_worker.py:140` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
+        "narrative": "Concurrency: fire-and-forget async call in run_monitor_worker() — result not awaited on `monitor_worker.py:150` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
       },
       "stableId": null,
       "confidenceTier": null,
@@ -538,7 +538,7 @@
       "attackPlaybook": null
     },
     {
-      "id": "concurrency:fire-forget:monitor_worker.py:179",
+      "id": "concurrency:fire-forget:monitor_worker.py:204",
       "kind": "sast",
       "severity": "low",
       "vuln": "Concurrency: fire-and-forget async call in create_status_app() — result not awaited",
@@ -546,7 +546,7 @@
       "owaspLlm": null,
       "stride": null,
       "file": "monitor_worker.py",
-      "line": 179,
+      "line": 204,
       "snippet": "",
       "fix": null,
       "reachable": null,
@@ -629,7 +629,7 @@
         "dominantDriver": "legal counsel",
         "comparable": "Generic finding — likely cost driven by user count + jurisdiction stack",
         "confidence": "low",
-        "narrative": "Concurrency: fire-and-forget async call in create_status_app() — result not awaited on `monitor_worker.py:179` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
+        "narrative": "Concurrency: fire-and-forget async call in create_status_app() — result not awaited on `monitor_worker.py:204` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
       },
       "stableId": null,
       "confidenceTier": null,
@@ -720,7 +720,7 @@
       "attackPlaybook": null
     },
     {
-      "id": "concurrency:fire-forget:monitor_worker.py:202",
+      "id": "concurrency:fire-forget:monitor_worker.py:227",
       "kind": "sast",
       "severity": "low",
       "vuln": "Concurrency: fire-and-forget async call in main() — result not awaited",
@@ -728,7 +728,7 @@
       "owaspLlm": null,
       "stride": null,
       "file": "monitor_worker.py",
-      "line": 202,
+      "line": 227,
       "snippet": "",
       "fix": null,
       "reachable": null,
@@ -811,7 +811,7 @@
         "dominantDriver": "legal counsel",
         "comparable": "Generic finding — likely cost driven by user count + jurisdiction stack",
         "confidence": "low",
-        "narrative": "Concurrency: fire-and-forget async call in main() — result not awaited on `monitor_worker.py:202` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
+        "narrative": "Concurrency: fire-and-forget async call in main() — result not awaited on `monitor_worker.py:227` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Generic finding — likely cost driven by user count + jurisdiction stack."
       },
       "stableId": null,
       "confidenceTier": null,
@@ -909,7 +909,7 @@
       "path": "/",
       "framework": "FastAPI",
       "file": "api_worker.py",
-      "line": 110,
+      "line": 139,
       "hasAuth": false,
       "hasFileUpload": false,
       "params": [],
@@ -921,7 +921,7 @@
       "path": "/status",
       "framework": "FastAPI",
       "file": "monitor_worker.py",
-      "line": 185,
+      "line": 210,
       "hasAuth": false,
       "hasFileUpload": false,
       "params": [],
@@ -933,7 +933,7 @@
       "path": "/health",
       "framework": "FastAPI",
       "file": "monitor_worker.py",
-      "line": 195,
+      "line": 220,
       "hasAuth": false,
       "hasFileUpload": false,
       "params": [],
@@ -980,37 +980,37 @@
         {
           "type": "http-route",
           "file": "api_worker.py",
-          "line": 110,
+          "line": 139,
           "label": "/"
         },
         {
           "type": "http-route-py",
           "file": "api_worker.py",
-          "line": 110,
+          "line": 139,
           "label": "/"
         },
         {
           "type": "http-route",
           "file": "monitor_worker.py",
-          "line": 185,
+          "line": 210,
           "label": "/status"
         },
         {
           "type": "http-route",
           "file": "monitor_worker.py",
-          "line": 195,
+          "line": 220,
           "label": "/health"
         },
         {
           "type": "http-route-py",
           "file": "monitor_worker.py",
-          "line": 185,
+          "line": 210,
           "label": "/status"
         },
         {
           "type": "http-route-py",
           "file": "monitor_worker.py",
-          "line": 195,
+          "line": 220,
           "label": "/health"
         },
         {
@@ -1022,7 +1022,7 @@
         {
           "type": "db-edge",
           "file": "monitor_worker.py",
-          "line": 111,
+          "line": 114,
           "label": null
         }
       ],
@@ -1036,7 +1036,7 @@
       }
     },
     "trustBoundaryDiagram": {
-      "mermaid": "flowchart LR\n  INTERNET((Internet))\n  APP[\"Application\"]\n  route__[\"/\"]\n  route__status[\"/status\"]\n  route__health[\"/health\"]\n  db_monitor_worker_py_70[(\"db@monitor_worker.py:70\")]\n  db_monitor_worker_py_111[(\"db@monitor_worker.py:111\")]\n  INTERNET -->|http| route__\n  route__ -->|invoke| APP\n  INTERNET -->|http| route__\n  route__ -->|invoke| APP\n  INTERNET -->|http| route__status\n  route__status -->|invoke| APP\n  INTERNET -->|http| route__health\n  route__health -->|invoke| APP\n  INTERNET -->|http| route__status\n  route__status -->|invoke| APP\n  INTERNET -->|http| route__health\n  route__health -->|invoke| APP\n  APP -->|db| db_monitor_worker_py_70\n  APP -->|db| db_monitor_worker_py_111\n  class route__status sev_low;\n  class route__health sev_low;\n  class db_monitor_worker_py_111 sev_low;\n  classDef sev_critical fill:#ffcccc,stroke:#a00,stroke-width:2px;\n  classDef sev_high fill:#ffe0b2,stroke:#c60,stroke-width:2px;\n  classDef sev_medium fill:#fff3cd,stroke:#a80;\n  classDef sev_low fill:#e8eaf6,stroke:#557;",
+      "mermaid": "flowchart LR\n  INTERNET((Internet))\n  APP[\"Application\"]\n  route__[\"/\"]\n  route__status[\"/status\"]\n  route__health[\"/health\"]\n  db_monitor_worker_py_70[(\"db@monitor_worker.py:70\")]\n  db_monitor_worker_py_114[(\"db@monitor_worker.py:114\")]\n  INTERNET -->|http| route__\n  route__ -->|invoke| APP\n  INTERNET -->|http| route__\n  route__ -->|invoke| APP\n  INTERNET -->|http| route__status\n  route__status -->|invoke| APP\n  INTERNET -->|http| route__health\n  route__health -->|invoke| APP\n  INTERNET -->|http| route__status\n  route__status -->|invoke| APP\n  INTERNET -->|http| route__health\n  route__health -->|invoke| APP\n  APP -->|db| db_monitor_worker_py_70\n  APP -->|db| db_monitor_worker_py_114\n  class route__status sev_low;\n  class route__health sev_low;\n  class db_monitor_worker_py_114 sev_low;\n  classDef sev_critical fill:#ffcccc,stroke:#a00,stroke-width:2px;\n  classDef sev_high fill:#ffe0b2,stroke:#c60,stroke-width:2px;\n  classDef sev_medium fill:#fff3cd,stroke:#a80;\n  classDef sev_low fill:#e8eaf6,stroke:#557;",
       "nodes": [
         {
           "id": "INTERNET",
@@ -1070,8 +1070,8 @@
         },
         {
           "kind": "db",
-          "id": "db_monitor_worker_py_111",
-          "label": "db@monitor_worker.py:111"
+          "id": "db_monitor_worker_py_114",
+          "label": "db@monitor_worker.py:114"
         }
       ],
       "edges": [
@@ -1142,7 +1142,7 @@
         },
         {
           "from": "APP",
-          "to": "db_monitor_worker_py_111",
+          "to": "db_monitor_worker_py_114",
           "kind": "db"
         }
       ],
@@ -1152,63 +1152,63 @@
           "severity": "low",
           "vuln": "Concurrency: fire-and-forget async call in create_status_app",
           "file": "monitor_worker.py",
-          "line": 179
+          "line": 204
         },
         {
           "nodeId": "route__status",
           "severity": "low",
           "vuln": "Concurrency: fire-and-forget async call in main() — result n",
           "file": "monitor_worker.py",
-          "line": 202
+          "line": 227
         },
         {
           "nodeId": "route__health",
           "severity": "low",
           "vuln": "Concurrency: fire-and-forget async call in create_status_app",
           "file": "monitor_worker.py",
-          "line": 179
+          "line": 204
         },
         {
           "nodeId": "route__health",
           "severity": "low",
           "vuln": "Concurrency: fire-and-forget async call in main() — result n",
           "file": "monitor_worker.py",
-          "line": 202
+          "line": 227
         },
         {
           "nodeId": "route__status",
           "severity": "low",
           "vuln": "Concurrency: fire-and-forget async call in create_status_app",
           "file": "monitor_worker.py",
-          "line": 179
+          "line": 204
         },
         {
           "nodeId": "route__status",
           "severity": "low",
           "vuln": "Concurrency: fire-and-forget async call in main() — result n",
           "file": "monitor_worker.py",
-          "line": 202
+          "line": 227
         },
         {
           "nodeId": "route__health",
           "severity": "low",
           "vuln": "Concurrency: fire-and-forget async call in create_status_app",
           "file": "monitor_worker.py",
-          "line": 179
+          "line": 204
         },
         {
           "nodeId": "route__health",
           "severity": "low",
           "vuln": "Concurrency: fire-and-forget async call in main() — result n",
           "file": "monitor_worker.py",
-          "line": 202
+          "line": 227
         },
         {
-          "nodeId": "db_monitor_worker_py_111",
+          "nodeId": "db_monitor_worker_py_114",
           "severity": "low",
           "vuln": "Concurrency: fire-and-forget async call in start_monitors() ",
           "file": "monitor_worker.py",
-          "line": 105
+          "line": 108
         }
       ]
     },

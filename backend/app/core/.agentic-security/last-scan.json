@@ -1,21 +1,21 @@
 {
-  "scanId": "3372a886-b10a-4c7c-8ffe-e3ce8b035972",
-  "startedAt": "2026-07-07T00:55:48.025Z",
-  "durationMs": 96,
+  "scanId": "7e05b619-0662-46c9-a12c-5c12db878dd2",
+  "startedAt": "2026-07-07T01:49:22.602Z",
+  "durationMs": 86,
   "scanned": {
     "files": 6,
     "lines": 0
   },
   "findings": [
     {
-      "id": "c8ba11159950d827",
+      "id": "7296b842f2030192",
       "kind": "logic",
       "severity": "high",
       "vuln": "Sensitive Directory Path Construction",
       "cwe": "CWE-22",
       "stride": "Information Disclosure",
       "file": "worker_config.py",
-      "line": 95,
+      "line": 99,
       "snippet": "log_file = os.path.join(",
       "fix": {
         "description": "Restrict file paths to a specific allowed directory; reject '..' and absolute paths.",
@@ -85,7 +85,7 @@
         "dominantDriver": "legal counsel",
         "comparable": "Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil",
         "confidence": "low",
-        "narrative": "Sensitive Directory Path Construction on `worker_config.py:95` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil."
+        "narrative": "Sensitive Directory Path Construction on `worker_config.py:99` could expose configuration / internal data. Context: general SaaS / no specific regulatory exposure. Estimated cost: best $23k · likely $136k · worst $775k. Dominant driver: legal counsel. Comparable: Snyk 2022 path-traversal disclosure → CDN cache poisoning + .env exfil."
       },
       "parser": "LOGIC",
       "family": null

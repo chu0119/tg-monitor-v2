@@ -29,7 +29,11 @@ class WorkerManager:
             os.path.dirname(__file__), '..', '..', 'workers', 'config.json'
         )
         self.config = self._load_config()
-        self.worker_id = int(os.environ.get('WORKER_ID', '0'))
+        try:
+            self.worker_id = int(os.environ.get('WORKER_ID', '0'))
+        except (ValueError, TypeError):
+            logger.warning("WORKER_ID 环境变量无效，使用默认值 0")
+            self.worker_id = 0
         self.worker_type = os.environ.get('WORKER_TYPE', 'api')
 
     def _load_config(self) -> dict:
@@ -71,16 +75,16 @@ class WorkerManager:
 
     def get_worker_config(self, worker_id: int = None, worker_type: str = None) -> WorkerConfig:
         """获取指定Worker的配置"""
-        wid = worker_id or self.worker_id
-        wtype = worker_type or self.worker_type
+        wid = worker_id if worker_id is not None else self.worker_id
+        wtype = worker_type if worker_type is not None else self.worker_type
 
         if wtype == 'api':
             ports = self.config.get('worker_ports', {}).get('api', [8000])
-            port = ports[wid % len(ports)] if wid < len(ports) else 8000
+            port = ports[wid % len(ports)]
             account_ids = []
         else:
             ports = self.config.get('worker_ports', {}).get('monitor', [8010])
-            port = ports[wid % len(ports)] if wid < len(ports) else 8010
+            port = ports[wid % len(ports)]
 
             # 计算该Worker负责的账号ID范围
             accounts_per = self.config.get('accounts_per_worker', 5)

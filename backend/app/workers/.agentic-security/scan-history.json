@@ -73,5 +73,101 @@
       "concurrency:fire-forget:monitor_worker.py:179",
       "concurrency:fire-forget:monitor_worker.py:202"
     ]
+  },
+  {
+    "timestamp": "2026-07-07T01:50:05.650Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:105",
+      "concurrency:fire-forget:monitor_worker.py:140",
+      "concurrency:fire-forget:monitor_worker.py:179",
+      "concurrency:fire-forget:monitor_worker.py:202"
+    ]
+  },
+  {
+    "timestamp": "2026-07-07T01:50:23.876Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:105",
+      "concurrency:fire-forget:monitor_worker.py:140",
+      "concurrency:fire-forget:monitor_worker.py:194",
+      "concurrency:fire-forget:monitor_worker.py:217"
+    ]
+  },
+  {
+    "timestamp": "2026-07-07T01:50:29.866Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:105",
+      "concurrency:fire-forget:monitor_worker.py:140",
+      "concurrency:fire-forget:monitor_worker.py:194",
+      "concurrency:fire-forget:monitor_worker.py:217"
+    ]
+  },
+  {
+    "timestamp": "2026-07-07T01:50:38.386Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:108",
+      "concurrency:fire-forget:monitor_worker.py:143",
+      "concurrency:fire-forget:monitor_worker.py:197",
+      "concurrency:fire-forget:monitor_worker.py:220"
+    ]
+  },
+  {
+    "timestamp": "2026-07-07T01:50:45.761Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:108",
+      "concurrency:fire-forget:monitor_worker.py:150",
+      "concurrency:fire-forget:monitor_worker.py:204",
+      "concurrency:fire-forget:monitor_worker.py:227"
+    ]
+  },
+  {
+    "timestamp": "2026-07-07T01:51:18.249Z",
+    "label": "scan",
+    "total": 4,
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "kev": 0,
+    "ids": [
+      "concurrency:fire-forget:monitor_worker.py:108",
+      "concurrency:fire-forget:monitor_worker.py:150",
+      "concurrency:fire-forget:monitor_worker.py:204",
+      "concurrency:fire-forget:monitor_worker.py:227"
+    ]
   }
 ]
