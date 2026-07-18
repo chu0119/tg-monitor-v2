@@ -96,9 +96,12 @@ export function ConversationsPage() {
   });
 
   useEffect(() => {
-    fetchConversations();
     fetchAccounts();
-  }, [filter]);
+  }, []);
+
+  useEffect(() => {
+    fetchConversations();
+  }, [filter, conversationsPage, selectedAccountId]);
 
   const fetchAccounts = async () => {
     setLoadingAccounts(true);
@@ -120,6 +123,7 @@ export function ConversationsPage() {
   };
 
   const fetchConversations = async () => {
+    setLoading(true);
     try {
       const params: any = { page_size: CONVERSATIONS_PAGE_SIZE, page: conversationsPage };
       if (filter !== "all") {
@@ -133,6 +137,7 @@ export function ConversationsPage() {
       setConversations(conversationList);
     } catch (error) {
       console.error("获取会话失败:", error);
+      alert("获取会话列表失败，请稍后重试");
       setConversations([]);
     } finally {
       setLoading(false);
@@ -250,6 +255,7 @@ export function ConversationsPage() {
 
       setShowAddModal(false);
       setSelectedDialogs(new Set());
+      setConversationsPage(1);
       fetchConversations();
     } catch (error) {
       console.error("Failed to add conversations:", error);
@@ -510,6 +516,7 @@ export function ConversationsPage() {
                   onClick={() => {
                     setFilter(status);
                     setSelectedConversationIds(new Set());
+                    setConversationsPage(1);
                   }}
                   className={`px-3 sm:px-4 py-2 rounded-lg transition-colors text-xs sm:text-sm min-h-[44px] ${
                     filter === status

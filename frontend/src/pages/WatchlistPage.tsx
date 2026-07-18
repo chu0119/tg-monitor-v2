@@ -106,6 +106,7 @@ export function WatchlistPage() {
     try {
       await api.watchlist.create(formData);
       setShowCreate(false);
+      setCurrentPage(1);
       fetchItems();
     } catch (error) {
       console.error("Failed to create watchlist item:", error);
@@ -118,6 +119,7 @@ export function WatchlistPage() {
     try {
       await api.watchlist.update(editItem.id, formData);
       setEditItem(null);
+      setCurrentPage(1);
       fetchItems();
     } catch (error) {
       console.error("Failed to update watchlist item:", error);
@@ -129,6 +131,7 @@ export function WatchlistPage() {
     if (!confirm("确定删除此条目？")) return;
     try {
       await api.watchlist.delete(id);
+      setCurrentPage(1);
       fetchItems();
     } catch (error) {
       console.error("Failed to delete watchlist item:", error);

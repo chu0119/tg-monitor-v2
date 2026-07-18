@@ -99,6 +99,7 @@ export function CasesPage() {
     try {
       await api.cases.create(formData);
       setShowCreate(false);
+      setCurrentPage(1);
       fetchCases();
     } catch (error) {
       console.error("Failed to create case:", error);
@@ -110,6 +111,7 @@ export function CasesPage() {
     if (!confirm("确定删除此案件？")) return;
     try {
       await api.cases.delete(id);
+      setCurrentPage(1);
       fetchCases();
     } catch (error) {
       console.error("Failed to delete case:", error);

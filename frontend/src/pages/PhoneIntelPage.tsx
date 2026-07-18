@@ -88,6 +88,7 @@ export function PhoneIntelPage() {
   const [pageSize] = useState(50);
   const [loading, setLoading] = useState(true);
   const [searchPhone, setSearchPhone] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterSource, setFilterSource] = useState("");
   const [filterProvince, setFilterProvince] = useState("");
   const [filterCity, setFilterCity] = useState("");
@@ -101,7 +102,7 @@ export function PhoneIntelPage() {
     setLoading(true);
     try {
       const params: Record<string, any> = { page, page_size: pageSize };
-      if (searchPhone) params.phone = searchPhone;
+      if (debouncedSearch) params.phone = debouncedSearch;
       if (filterSource) params.source_type = filterSource;
       if (filterProvince) params.province = filterProvince;
       if (filterCity) params.city = filterCity;
@@ -109,7 +110,16 @@ export function PhoneIntelPage() {
       setRecords(data.items || []);
       setTotal(data.total || 0);
     } catch (e) { console.error(e); } finally { setLoading(false); }
-  }, [page, pageSize, searchPhone, filterSource, filterProvince, filterCity]);
+  }, [page, pageSize, debouncedSearch, filterSource, filterProvince, filterCity]);
+
+  // 搜索防抖 + 重置分页
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchPhone);
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchPhone]);
 
   const fetchStats = useCallback(async () => {
     try { setStats(await api.phoneRecords.stats()); } catch (e) { console.error(e); }
@@ -180,7 +190,6 @@ export function PhoneIntelPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" placeholder="搜索手机号..." value={searchPhone}
             onChange={(e) => setSearchPhone(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && (setPage(1), fetchData())}
             className="w-full pl-10 pr-4 py-2 rounded-lg border border-border bg-secondary/50 text-white placeholder-gray-500 focus:border-cyber-blue focus:outline-none text-sm" />
         </div>
         <select value={filterSource} onChange={(e) => { setFilterSource(e.target.value); setPage(1); }}
