@@ -180,5 +180,109 @@
     "ids": [
       "SettingsPage.tsx:210:214:SSRF"
     ]
+  },
+  {
+    "timestamp": "2026-07-18T09:29:11.774Z",
+    "label": "scan",
+    "total": 1,
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "kev": 0,
+    "ids": [
+      "SettingsPage.tsx:210:214:SSRF"
+    ]
+  },
+  {
+    "timestamp": "2026-07-18T09:29:25.111Z",
+    "label": "scan",
+    "total": 1,
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "kev": 0,
+    "ids": [
+      "SettingsPage.tsx:210:214:SSRF"
+    ]
+  },
+  {
+    "timestamp": "2026-07-18T09:29:36.730Z",
+    "label": "scan",
+    "total": 1,
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "kev": 0,
+    "ids": [
+      "SettingsPage.tsx:210:214:SSRF"
+    ]
+  },
+  {
+    "timestamp": "2026-07-18T09:29:50.564Z",
+    "label": "scan",
+    "total": 1,
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "kev": 0,
+    "ids": [
+      "SettingsPage.tsx:210:214:SSRF"
+    ]
+  },
+  {
+    "timestamp": "2026-07-18T09:30:04.993Z",
+    "label": "scan",
+    "total": 1,
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "kev": 0,
+    "ids": [
+      "SettingsPage.tsx:210:214:SSRF"
+    ]
+  },
+  {
+    "timestamp": "2026-07-18T09:30:21.433Z",
+    "label": "scan",
+    "total": 1,
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "kev": 0,
+    "ids": [
+      "SettingsPage.tsx:210:214:SSRF"
+    ]
+  },
+  {
+    "timestamp": "2026-07-18T09:30:39.446Z",
+    "label": "scan",
+    "total": 1,
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "kev": 0,
+    "ids": [
+      "SettingsPage.tsx:210:214:SSRF"
+    ]
+  },
+  {
+    "timestamp": "2026-07-18T09:30:57.118Z",
+    "label": "scan",
+    "total": 1,
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "kev": 0,
+    "ids": [
+      "SettingsPage.tsx:210:214:SSRF"
+    ]
   }
 ]

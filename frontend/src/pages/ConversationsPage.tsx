@@ -101,7 +101,7 @@ export function ConversationsPage() {
 
   useEffect(() => {
     fetchConversations();
-  }, [filter, conversationsPage, selectedAccountId]);
+  }, [filter, conversationsPage]);
 
   const fetchAccounts = async () => {
     setLoadingAccounts(true);
@@ -137,7 +137,6 @@ export function ConversationsPage() {
       setConversations(conversationList);
     } catch (error) {
       console.error("获取会话失败:", error);
-      alert("获取会话列表失败，请稍后重试");
       setConversations([]);
     } finally {
       setLoading(false);
@@ -255,8 +254,7 @@ export function ConversationsPage() {
 
       setShowAddModal(false);
       setSelectedDialogs(new Set());
-      setConversationsPage(1);
-      fetchConversations();
+      setConversationsPage(1); // useEffect will re-fetch with page=1
     } catch (error) {
       console.error("Failed to add conversations:", error);
       alert("添加对话失败");

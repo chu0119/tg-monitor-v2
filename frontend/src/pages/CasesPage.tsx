@@ -99,8 +99,7 @@ export function CasesPage() {
     try {
       await api.cases.create(formData);
       setShowCreate(false);
-      setCurrentPage(1);
-      fetchCases();
+      setCurrentPage(1); // useEffect will re-fetch with page=1
     } catch (error) {
       console.error("Failed to create case:", error);
       alert("创建案件失败");
@@ -111,8 +110,7 @@ export function CasesPage() {
     if (!confirm("确定删除此案件？")) return;
     try {
       await api.cases.delete(id);
-      setCurrentPage(1);
-      fetchCases();
+      setCurrentPage(1); // useEffect will re-fetch with page=1
     } catch (error) {
       console.error("Failed to delete case:", error);
       alert("删除案件失败");

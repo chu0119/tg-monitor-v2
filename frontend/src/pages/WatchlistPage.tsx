@@ -106,8 +106,7 @@ export function WatchlistPage() {
     try {
       await api.watchlist.create(formData);
       setShowCreate(false);
-      setCurrentPage(1);
-      fetchItems();
+      setCurrentPage(1); // useEffect will re-fetch with page=1
     } catch (error) {
       console.error("Failed to create watchlist item:", error);
       alert("添加失败");
@@ -119,8 +118,7 @@ export function WatchlistPage() {
     try {
       await api.watchlist.update(editItem.id, formData);
       setEditItem(null);
-      setCurrentPage(1);
-      fetchItems();
+      setCurrentPage(1); // useEffect will re-fetch with page=1
     } catch (error) {
       console.error("Failed to update watchlist item:", error);
       alert("更新失败");
@@ -131,8 +129,7 @@ export function WatchlistPage() {
     if (!confirm("确定删除此条目？")) return;
     try {
       await api.watchlist.delete(id);
-      setCurrentPage(1);
-      fetchItems();
+      setCurrentPage(1); // useEffect will re-fetch with page=1
     } catch (error) {
       console.error("Failed to delete watchlist item:", error);
       alert("删除失败");
