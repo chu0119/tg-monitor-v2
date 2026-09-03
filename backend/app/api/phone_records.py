@@ -139,9 +139,8 @@ async def get_phone_stats(db: AsyncSession = Depends(get_db)):
         "top_locations": top_locations,
         "location_detail_ratio": round(detail_ratio, 1),
     }
-    memory_cache.set("phone_records_stats", result, ttl=300)
+    memory_cache.set("phone_records_stats", result)
     return result
-    }
 
 
 @router.get("/provinces")
@@ -343,6 +342,15 @@ async def get_phone_detail(phone: str, db: AsyncSession = Depends(get_db)):
             "message_type": mm[6],
         })
 
+    # 提取关联的群聊（去重）
+    conversations = []
+    seen_conv_ids = set()
+    for mc in message_contexts:
+        cid = mc.get("conversation_id")
+        if cid and cid not in seen_conv_ids:
+            seen_conv_ids.add(cid)
+            conversations.append({"id": cid, "title": mc.get("conversation_title", "")})
+
     return {
         "base_info": base_info,
         "records": [{"id": r[0], "phone": r[1], "phone_display": r[2], "country_code": r[3],
@@ -354,5 +362,6 @@ async def get_phone_detail(phone: str, db: AsyncSession = Depends(get_db)):
         "senders": senders,
         "related_senders": related_senders,
         "message_contexts": message_contexts,
+        "conversations": conversations,
     }
 
