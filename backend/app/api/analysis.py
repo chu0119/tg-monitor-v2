@@ -71,7 +71,8 @@ async def get_top_words(
             return {"words": [], "cached": False, "timeout": True}
 
         # 缓存 5 分钟
-        memory_cache.set(cache_key, words, ttl=300)
+        memory_cache.set(cache_key, words)
+        memory_cache._timestamps[cache_key] = time.time()
         return {"words": words, "cached": False}
     except Exception as e:
         logger.error(f"获取高频词失败: {e}")

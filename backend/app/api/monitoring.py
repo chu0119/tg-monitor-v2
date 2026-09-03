@@ -89,7 +89,7 @@ async def get_monitoring_status(db: AsyncSession = Depends(get_db)):
             for a in accounts
         ]
     }
-    memory_cache.set("monitoring_status", result, ttl=5)
+    memory_cache.set("monitoring_status", result)
     return result
 
 

@@ -59,6 +59,9 @@ async def list_phone_records(
     if not ids:
         return {"items": [], "total": total, "page": page, "page_size": page_size, "total_pages": 0}
 
+    if not ids:
+        return {"items": [], "total": total, "page": page, "page_size": page_size, "total_pages": 0}
+
     # 批量获取详情
     placeholders = ",".join([f":id{i}" for i in range(len(ids))])
     id_params = {f"id{i}": id_val for i, id_val in enumerate(ids)}
@@ -214,9 +217,11 @@ async def get_phone_detail(phone: str, db: AsyncSession = Depends(get_db)):
     all_sender_db_ids = set(mentioned_map.keys()) | bound_ids
     sender_id_map = {}
     if sender_user_ids:
+        uid_placeholders = ",".join([f":uid{i}" for i in range(len(sender_user_ids))])
+        uid_params = {f"uid{i}": uid for i, uid in enumerate(sender_user_ids)}
         uid_rows = (await db.execute(text(
-            "SELECT id, user_id FROM senders WHERE user_id = ANY(:uids)"),
-            {"uids": list(sender_user_ids)})).fetchall()
+            f"SELECT id, user_id FROM senders WHERE user_id IN ({uid_placeholders})"),
+            uid_params)).fetchall()
         sender_id_map = {u: s for s, u in uid_rows}
         all_sender_db_ids.update(sender_id_map.values())
 
@@ -224,12 +229,14 @@ async def get_phone_detail(phone: str, db: AsyncSession = Depends(get_db)):
     sender_details = {}
     if all_sender_db_ids:
         sid_list = list(all_sender_db_ids)
+        sid_placeholders = ",".join([f":sid{i}" for i in range(len(sid_list))])
+        sid_params = {f"sid{i}": sid for i, sid in enumerate(sid_list)}
         sid_rows = (await db.execute(text(
-            """SELECT s.id, s.user_id, s.username, s.first_name, s.last_name,
+            f"""SELECT s.id, s.user_id, s.username, s.first_name, s.last_name,
                       s.phone, s.country, s.phone_location, s.is_bot, s.is_verified,
                       s.is_premium, s.message_count, s.created_at
-               FROM senders s WHERE s.id = ANY(:sids)"""),
-            {"sids": sid_list})).fetchall()
+               FROM senders s WHERE s.id IN ({sid_placeholders})"""),
+            sid_params)).fetchall()
         for s in sid_rows:
             sender_details[s[0]] = {
                 "id": s[0], "user_id": s[1], "username": s[2] or "",
@@ -245,12 +252,12 @@ async def get_phone_detail(phone: str, db: AsyncSession = Depends(get_db)):
     sender_convs = {}
     if all_sender_db_ids:
         conv_rows = (await db.execute(text(
-            """SELECT m.sender_id as sid, c.id, c.title, c.chat_id
+            f"""SELECT m.sender_id as sid, c.id, c.title, c.chat_id
                FROM conversations c
                INNER JOIN messages m ON m.conversation_id = c.id
-               WHERE m.sender_id = ANY(:sids)
+               WHERE m.sender_id IN ({sid_placeholders})
                ORDER BY m.sender_id, c.title"""),
-            {"sids": list(all_sender_db_ids)})).fetchall()
+            sid_params)).fetchall()
         for cr in conv_rows:
             sid = cr[0]
             if sid not in sender_convs:
