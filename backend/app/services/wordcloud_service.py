@@ -90,7 +90,7 @@ class WordCloudService:
         conversation_id: Optional[int],
         sender_id: Optional[int],
         days: int,
-        max_rows: int = 2000,
+        max_rows: int = 300,
     ) -> List[str]:
         """获取消息文本"""
         start_date = datetime.now() - timedelta(days=days)

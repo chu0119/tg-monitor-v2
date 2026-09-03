@@ -50,12 +50,29 @@ async def get_top_words(
     limit: int = Query(50, ge=10, le=500),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取高频词列表"""
+    """获取高频词列表（带缓存，首次可能较慢，后续 <10ms）"""
     try:
-        words = await wordcloud_service.get_top_words(
-            db, conversation_id, sender_id, days, limit
-        )
-        return {"words": words}
+        # 使用缓存，词频数据变化不快，缓存 5 分钟
+        cache_key = f"wordcloud_top_words_{conversation_id}_{sender_id}_{days}_{limit}"
+        from app.utils.cache import memory_cache
+        cached = memory_cache.get(cache_key)
+        if cached is not None:
+            return {"words": cached}
+
+        # 首次计算：减少数据量 + 超时保护
+        import asyncio
+        try:
+            words = await asyncio.wait_for(
+                wordcloud_service.get_top_words(db, conversation_id, sender_id, days, limit),
+                timeout=2.0
+            )
+        except asyncio.TimeoutError:
+            # 超时返回空结果，下次重试
+            return {"words": [], "cached": False, "timeout": True}
+
+        # 缓存 5 分钟
+        memory_cache.set(cache_key, words, ttl=300)
+        return {"words": words, "cached": False}
     except Exception as e:
         logger.error(f"获取高频词失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
