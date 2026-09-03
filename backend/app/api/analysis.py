@@ -1,4 +1,5 @@
 """数据分析和高级功能 API"""
+import time
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response

@@ -429,9 +429,11 @@ async def get_sender_ranking(
         """)
         result = await db.execute(sql, {"limit": limit})
         rows = result.fetchall()
-        items = [{"id": r[0], "username": r[1] or "", "first_name": r[2] or "",
-                  "message_count": r[3] or 0, "alert_count": r[4] or 0} for r in rows]
-        memory_cache.set("sender_ranking_alerts", items, ttl=60)
+        items = []
+        for i, r in enumerate(rows, 1):
+            items.append({"sender_id": r[0], "username": r[1] or "", "first_name": r[2] or "",
+                          "message_count": r[3] or 0, "alert_count": r[4] or 0, "rank": i})
+        memory_cache.set("sender_ranking_alerts", items)
         return [SenderRanking(**item) for item in items]
     else:
         # 按消息数排序：直接使用索引

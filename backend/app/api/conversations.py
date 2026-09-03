@@ -741,7 +741,7 @@ async def get_conversation_stats(conversation_id: int, db: AsyncSession = Depend
         "total_alerts": alert_count,
         "trend": list(reversed(trend_data)),
     }
-    memory_cache.set(cache_key, result, ttl=30)
+    memory_cache.set(cache_key, result)
     return result
 
 
