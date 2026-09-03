@@ -4,6 +4,7 @@ Worker配置管理
 """
 import os
 import json
+import asyncio
 from pathlib import Path
 from typing import List, Dict, Optional
 from dataclasses import dataclass
@@ -19,6 +20,27 @@ class WorkerConfig:
     account_ids: List[int]
     session_dir: str
     log_file: str
+
+
+async def get_account_ids(db, worker_id: int, num_workers: int) -> List[int]:
+    """按轮询方式从数据库获取当前worker负责的账号ID
+
+    查询所有已授权且活跃的账号，按ID排序后轮询分配给各worker。
+    替换原来基于连续ID区间的硬编码分配方式（range-based），
+    解决账号ID > accounts_per_worker * num_workers 时不被监控的问题。
+    """
+    from sqlalchemy import select
+    from app.models.account import TelegramAccount
+
+    result = await db.execute(
+        select(TelegramAccount.id).where(
+            TelegramAccount.is_authorized == True,
+            TelegramAccount.is_active == True
+        ).order_by(TelegramAccount.id)
+    )
+    all_ids = [r[0] for r in result.fetchall()]
+    # 轮询分配：第i个账号分配给 worker_id == i % num_workers
+    return [aid for i, aid in enumerate(all_ids) if i % num_workers == worker_id]
 
 
 class WorkerManager:
@@ -85,12 +107,8 @@ class WorkerManager:
         else:
             ports = self.config.get('worker_ports', {}).get('monitor', [8010])
             port = ports[wid % len(ports)]
-
-            # 计算该Worker负责的账号ID范围
-            accounts_per = self.config.get('accounts_per_worker', 5)
-            start_id = wid * accounts_per + 1
-            end_id = start_id + accounts_per
-            account_ids = list(range(start_id, end_id))
+            # 账号分配已改为从数据库查询（参见 get_account_ids），不再使用硬编码ID范围
+            account_ids = []
 
         session_dir = os.path.join(
             self.config.get('session_dir', 'sessions'),

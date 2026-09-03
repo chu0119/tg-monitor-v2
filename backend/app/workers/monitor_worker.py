@@ -16,7 +16,7 @@ from sqlalchemy import select
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from app.core.config import settings
-from app.core.worker_config import worker_manager
+from app.core.worker_config import worker_manager, get_account_ids
 from app.core.database import init_db, AsyncSessionLocal
 from app.models.account import TelegramAccount
 from app.models.conversation import Conversation
@@ -236,13 +236,18 @@ def main():
     setup_session_dir(config.worker_id)
 
     logger.info(f"启动 Monitor Worker {config.worker_id}")
-    logger.info(f"管理账号: {config.account_ids}")
 
     # 创建状态查询应用
     status_app = create_status_app()
 
     # 启动监控任务
     async def run():
+        # 从数据库查询实际授权的账号，按轮询分配给当前worker
+        async with AsyncSessionLocal() as db:
+            num_workers = worker_manager.config.get('monitor_workers', 1)
+            account_ids = await get_account_ids(db, config.worker_id, num_workers)
+        logger.info(f"管理账号: {account_ids}")
+
         # 启动状态API
         uvicorn_config = uvicorn.Config(
             status_app,
@@ -255,7 +260,7 @@ def main():
 
         try:
             # 运行监控
-            await run_monitor_worker(config.worker_id, config.account_ids)
+            await run_monitor_worker(config.worker_id, account_ids)
         finally:
             # 优雅关闭状态API服务器
             server.should_exit = True
