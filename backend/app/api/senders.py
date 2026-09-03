@@ -48,19 +48,8 @@ async def list_senders(
         count_query = count_query.where(and_(*conditions))
     total = (await db.execute(count_query)).scalar()
 
-    # 分页数据：告警数以 alerts 表实时聚合为准，避免 Sender.alert_count 冗余字段不同步
-    alert_counts = (
-        select(
-            Alert.sender_id,
-            func.count(Alert.id).label("real_alert_count"),
-        )
-        .group_by(Alert.sender_id)
-        .subquery()
-    )
-    query = select(
-        Sender,
-        func.coalesce(alert_counts.c.real_alert_count, 0).label("real_alert_count"),
-    ).outerjoin(alert_counts, alert_counts.c.sender_id == Sender.id)
+    # 分页数据：直接使用 Sender.alert_count 冗余字段，避免全表 GROUP BY
+    query = select(Sender)
     if conditions:
         from sqlalchemy import and_
         query = query.where(and_(*conditions))
@@ -68,10 +57,10 @@ async def list_senders(
     query = query.offset((page - 1) * page_size).limit(page_size)
 
     result = await db.execute(query)
-    sender_rows = result.all()
+    sender_rows = result.scalars().all()
 
     items = []
-    for s, real_alert_count in sender_rows:
+    for s in sender_rows:
         items.append({
             "id": s.id,
             "user_id": s.user_id,
@@ -83,7 +72,7 @@ async def list_senders(
             "is_verified": s.is_verified,
             "is_premium": s.is_premium,
             "message_count": s.message_count,
-            "alert_count": real_alert_count or 0,
+            "alert_count": s.alert_count or 0,
             "country": s.country or "",
             "country_code": s.country_code or "",
             "phone_location": s.phone_location or "",
