@@ -41,12 +41,18 @@ async def list_senders(
     if phone_location:
         conditions.append(Sender.phone_location.ilike(f"%{phone_location}%"))
 
-    # 总数
-    count_query = select(func.count(Sender.id))
-    if conditions:
+    # 总数：无筛选时用 information_schema 近似值
+    if not conditions:
+        count_approx = await db.execute(text(
+            "SELECT table_rows FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = 'senders'"
+        ))
+        total = count_approx.scalar() or 0
+    else:
+        count_query = select(func.count(Sender.id))
         from sqlalchemy import and_
         count_query = count_query.where(and_(*conditions))
-    total = (await db.execute(count_query)).scalar()
+        total = (await db.execute(count_query)).scalar()
 
     # 分页数据：直接使用 Sender.alert_count 冗余字段，避免全表 GROUP BY
     query = select(Sender)

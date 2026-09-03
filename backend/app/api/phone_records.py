@@ -104,7 +104,12 @@ async def list_phone_records(
 
 @router.get("/stats")
 async def get_phone_stats(db: AsyncSession = Depends(get_db)):
-    """获取手机号统计概览（单次查询优化）"""
+    """获取手机号统计概览（带缓存）"""
+    # 缓存 5 分钟
+    from app.utils.cache import memory_cache
+    cached = memory_cache.get("phone_records_stats", ttl=300)
+    if cached:
+        return cached
     # 合并为单次查询，减少 DB 往返
     row = (await db.execute(text("""
         SELECT
@@ -127,12 +132,15 @@ async def get_phone_stats(db: AsyncSession = Depends(get_db)):
     domestic = row[1] or 0
     detail_ratio = (row[5] / total * 100) if total > 0 else 0
 
-    return {
+    result = {
         "total": total,
         "domestic": domestic,
         "by_source": {"sender": row[2] or 0, "message": row[3] or 0, "alert": row[4] or 0},
         "top_locations": top_locations,
         "location_detail_ratio": round(detail_ratio, 1),
+    }
+    memory_cache.set("phone_records_stats", result, ttl=300)
+    return result
     }
 
 

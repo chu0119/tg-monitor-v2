@@ -692,35 +692,40 @@ async def pull_history(
 
 @router.get("/{conversation_id}/stats")
 async def get_conversation_stats(conversation_id: int, db: AsyncSession = Depends(get_db)):
-    """获取会话统计"""
-    # 消息总数
-    msg_result = await db.execute(
-        select(func.count(Message.id))
-        .where(Message.conversation_id == conversation_id)
-    )
-    total_messages = msg_result.scalar()
+    """获取会话统计（优化版：合并查询 + 缓存）"""
+    # 缓存（30秒）
+    from app.utils.cache import memory_cache
+    cache_key = f"conv_stats_{conversation_id}"
+    cached = memory_cache.get(cache_key, ttl=30)
+    if cached:
+        return cached
 
-    # 告警总数
-    from app.models.alert import Alert
-    alert_result = await db.execute(
-        select(func.count(Alert.id))
-        .where(Alert.conversation_id == conversation_id)
-    )
-    total_alerts = alert_result.scalar()
-
-    # 每日消息趋势（最近7天）- 单条GROUP BY替代循环7次
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     start_7d = now_utc - timedelta(days=6)
-    trend_result = await db.execute(
-        select(func.date(Message.date).label('day'), func.count(Message.id).label('count'))
-        .where(
-            Message.conversation_id == conversation_id,
-            Message.date >= start_7d,
-            Message.date < now_utc + timedelta(days=1)
-        )
-        .group_by(func.date(Message.date))
-    )
-    trend_map = {str(row[0]): row[1] for row in trend_result.all()}
+
+    # 单次查询获取消息总数 + 趋势（避免多次 COUNT）
+    msg_stats = (await db.execute(text("""
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN date >= :start THEN 1 ELSE 0 END) as recent_7d
+        FROM messages WHERE conversation_id = :cid
+    """), {"cid": conversation_id, "start": start_7d})).fetchone()
+
+    total_messages = msg_stats[0] or 0
+
+    # 告警总数（alerts 表有 conversation_id 索引）
+    alert_count = (await db.execute(text(
+        "SELECT COUNT(*) FROM alerts WHERE conversation_id = :cid"
+    ), {"cid": conversation_id})).scalar() or 0
+
+    # 每日趋势
+    trend_result = (await db.execute(text("""
+        SELECT DATE(date) as day, COUNT(*) as cnt
+        FROM messages
+        WHERE conversation_id = :cid AND date >= :start
+        GROUP BY DATE(date)
+    """), {"cid": conversation_id, "start": start_7d})).fetchall()
+    trend_map = {str(row[0]): row[1] for row in trend_result}
 
     trend_data = []
     for i in range(7):
@@ -731,11 +736,13 @@ async def get_conversation_stats(conversation_id: int, db: AsyncSession = Depend
             "count": trend_map.get(date_str, 0)
         })
 
-    return {
+    result = {
         "total_messages": total_messages,
-        "total_alerts": total_alerts,
+        "total_alerts": alert_count,
         "trend": list(reversed(trend_data)),
     }
+    memory_cache.set(cache_key, result, ttl=30)
+    return result
 
 
 @router.post("/add-all-channels/{account_id}")
