@@ -7,6 +7,8 @@ from telethon.tl.types import Message, PeerChannel
 from loguru import logger
 from sqlalchemy import select, update, func
 from app.core.database import AsyncSessionLocal
+# Case 必须在 Alert 之前导入，否则 Alert 的 case_id 外键无法解析
+from app.models import Case
 from app.models import (
     Conversation, Message as MessageModel, Sender,
     Keyword, KeywordGroup, Alert, TelegramAccount

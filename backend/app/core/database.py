@@ -48,6 +48,12 @@ class Base(DeclarativeBase):
         return datetime.now(timezone.utc)
 
 
+async def reflect_metadata():
+    """强制反射所有表结构，解决外键约束在进程启动后添加的问题"""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.reflect)
+
+
 async def get_db() -> AsyncSession:
     """获取数据库会话"""
     async with AsyncSessionLocal() as session:
@@ -92,6 +98,10 @@ async def init_db():
             # 创建所有表
             await conn.run_sync(Base.metadata.create_all)
             logger.info("MySQL 数据库表初始化完成")
+
+        # 强制反射所有表结构，解决外键约束在进程启动后添加的问题
+        await reflect_metadata()
+        logger.info("数据库 metadata 反射完成")
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")
         raise
