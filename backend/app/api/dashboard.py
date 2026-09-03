@@ -410,6 +410,12 @@ async def get_sender_ranking(
     # 优化：使用原生SQL子查询，避免大表JOIN
     if sort_by == "alerts":
         # 按告警数排序：先统计告警数，再关联发送者信息
+        # 使用缓存（1分钟），避免每次查询都扫描 600 万行 alerts
+        from app.utils.cache import memory_cache
+        cached = memory_cache.get("sender_ranking_alerts", ttl=60)
+        if cached:
+            return [SenderRanking(**item) for item in cached]
+
         sql = text("""
             SELECT s.id, s.username, s.first_name, s.message_count, COALESCE(a.alert_count, 0) as alert_count
             FROM senders s
@@ -422,6 +428,11 @@ async def get_sender_ranking(
             LIMIT :limit
         """)
         result = await db.execute(sql, {"limit": limit})
+        rows = result.fetchall()
+        items = [{"id": r[0], "username": r[1] or "", "first_name": r[2] or "",
+                  "message_count": r[3] or 0, "alert_count": r[4] or 0} for r in rows]
+        memory_cache.set("sender_ranking_alerts", items, ttl=60)
+        return [SenderRanking(**item) for item in items]
     else:
         # 按消息数排序：直接使用索引
         sql = text("""

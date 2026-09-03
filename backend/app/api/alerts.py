@@ -51,14 +51,27 @@ async def list_alerts(
     # 用原生 SQL 查询，避免 ORM selectinload 对大表的性能问题
     where_clauses = []
     params = {}
-    if has_phone:
-        where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE phone IS NOT NULL AND phone != '')")
-    if sender_country:
-        where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE country = :sender_country)")
-        params["sender_country"] = sender_country
-    if sender_location:
-        where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE phone_location LIKE :sender_location)")
-        params["sender_location"] = f"%{sender_location}%"
+    # 预筛选 sender_id（避免 EXISTS 子查询在大表上慢）
+    sender_filter_ids = None
+    if has_phone or sender_country or sender_location:
+        sender_where = []
+        if has_phone:
+            sender_where.append("phone IS NOT NULL AND phone != ''")
+        if sender_country:
+            sender_where.append("country = :sender_country")
+        if sender_location:
+            sender_where.append("phone_location LIKE :sender_location")
+        sender_result = await db.execute(text(
+            f"SELECT id FROM senders WHERE {' AND '.join(sender_where)}"
+        ), {k: v for k, v in params.items() if k in ('sender_country', 'sender_location')})
+        sender_filter_ids = [row[0] for row in sender_result.fetchall()]
+        if not sender_filter_ids:
+            return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0}
+        placeholders = ",".join([f":sid{i}" for i in range(len(sender_filter_ids))])
+        where_clauses.append(f"a.sender_id IN ({placeholders})")
+        for i, sid in enumerate(sender_filter_ids):
+            params[f"sid{i}"] = sid
+
     if status:
         where_clauses.append("a.status = :status")
         params["status"] = status
@@ -99,6 +112,13 @@ async def list_alerts(
 
     # count: 无筛选时用 information_schema 近似值，有筛选时精确 COUNT
     if not where_clauses:
+        count_approx = await db.execute(text(
+            "SELECT table_rows FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = 'alerts'"
+        ))
+        total = count_approx.scalar() or 0
+    elif len(where_clauses) == 1 and where_clauses[0].startswith("a.status = "):
+        # 只有 status 筛选时，用近似值（status 分布不均匀，精确 COUNT 很慢）
         count_approx = await db.execute(text(
             "SELECT table_rows FROM information_schema.tables "
             "WHERE table_schema = DATABASE() AND table_name = 'alerts'"
