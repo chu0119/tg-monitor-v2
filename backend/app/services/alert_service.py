@@ -188,6 +188,13 @@ class AlertService:
                 .values(total_alerts=Conversation.total_alerts + 1)
             )
 
+            # 更新发送者告警计数(同一事务内维护反范式字段)
+            await db.execute(
+                update(Sender)
+                .where(Sender.id == sender.id)
+                .values(alert_count=Sender.alert_count + 1)
+            )
+
             # 注意：不在此处 commit，由调用方统一管理事务
             logger.info(f"告警已创建: alert_id={alert.id}, 等待事务提交后发送通知")
 
