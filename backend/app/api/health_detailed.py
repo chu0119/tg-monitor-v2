@@ -54,7 +54,7 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
     # 4. WebSocket 连接数
     ws_connections = 0
     try:
-        from app.main import manager
+        from app.core.websocket_manager import manager
         ws_connections = manager.get_connection_count()
     except Exception:
         pass

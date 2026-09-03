@@ -80,8 +80,8 @@ def create_app():
 
         # 启动 Redis pub/sub 订阅，将 monitor_worker 的事件转发到 WebSocket
         import asyncio
+        from app.core.websocket_manager import broadcast_new_message, manager
         from app.core.pubsub import subscribe
-        from app.main import broadcast_new_message
 
         _relay_task: asyncio.Task | None = None
 
@@ -95,8 +95,14 @@ def create_app():
         _relay_task = asyncio.create_task(_relay())
         logger.info("Redis pub/sub 订阅任务已启动")
 
+        # 启动 WebSocket 连接清理任务
+        await manager.start_cleanup_task()
+
         yield
         logger.info(f"API Worker 关闭 (ID: {worker_manager.worker_id})")
+
+        # 停止 WebSocket 清理任务
+        await manager.stop_cleanup_task()
 
         # 清理订阅任务
         if _relay_task is not None:
@@ -152,6 +158,10 @@ def create_app():
     app.include_router(cases.router, prefix=api_prefix)
     app.include_router(watchlist.router, prefix=api_prefix)
     app.include_router(audit.router, prefix=api_prefix)
+
+    # WebSocket 端点 (无 prefix，路径为 /ws)
+    from app.core.websocket_manager import websocket_endpoint
+    app.add_websocket_route("/ws", websocket_endpoint)
 
     # 兼容旧路由
     @app.get(f"{api_prefix}/keyword-groups")
