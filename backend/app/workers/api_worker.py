@@ -49,7 +49,7 @@ def create_app():
     from app.api import accounts, conversations, messages, keywords, alerts, notifications, dashboard, analysis, settings as settings_api, database, backups, diagnostics, monitoring, senders
     from app.api import phone_records, personnel, cases, watchlist, audit
     from app.api import proxy, system, update, migration
-    from app.api import health
+    from app.api import health, health_detailed
     from app.api.keywords import list_keyword_groups_internal
     from app.api.deps import get_db
     from fastapi import Depends
@@ -128,6 +128,7 @@ def create_app():
     # 注册路由
     api_prefix = settings.API_PREFIX
     app.include_router(health.router, prefix=api_prefix)
+    app.include_router(health_detailed.router)
     app.include_router(accounts.router, prefix=api_prefix)
     app.include_router(conversations.router, prefix=api_prefix)
     app.include_router(messages.router, prefix=api_prefix)
