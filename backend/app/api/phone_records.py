@@ -331,15 +331,22 @@ async def get_phone_detail(phone: str, db: AsyncSession = Depends(get_db)):
     else:
         match_messages = []
 
+    # 构建前端期望的消息上下文结构（含 context_before/match_message/context_after）
+    message_contexts = []
     for mm in match_messages:
         msg_id = mm[0]
         conv_id = mm[5]
         msg_date = mm[3]
         sender_info = {"id": mm[4], "name": mm[7] or mm[8] or mm[9] or f"User_{mm[4]}", "username": mm[9]}
-        message_contexts.append({
+        match_msg = {
             "id": msg_id, "text": mm[1] or mm[2] or "", "date": msg_date.isoformat() if msg_date else None,
-            "sender": sender_info, "conversation_id": conv_id, "conversation_title": mm[10] or "",
-            "message_type": mm[6],
+            "sender_name": mm[7] or mm[8] or mm[9] or f"User_{mm[4]}",
+            "conversation_title": mm[10] or "", "message_type": mm[6],
+        }
+        message_contexts.append({
+            "context_before": [],  # 前端期望的字段（暂不填充，避免额外查询）
+            "match_message": match_msg,
+            "context_after": [],  # 前端期望的字段（暂不填充）
         })
 
     # 提取关联的群聊（去重）
