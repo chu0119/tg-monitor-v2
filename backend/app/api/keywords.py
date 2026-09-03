@@ -19,6 +19,7 @@ from app.schemas.keyword import (
 from app.models.keyword import KeywordGroup, Keyword
 from app.models.alert import Alert
 from app.models.message import Message
+from app.services.audit_service import log_audit
 
 router = APIRouter(prefix="/keywords", tags=["关键词管理"])
 
@@ -394,6 +395,8 @@ async def create_keyword(
 
     await db.commit()
     await db.refresh(keyword)
+
+    await log_audit(db, "create_keyword", "keyword", target_id=keyword.id, detail={"word": keyword.word, "group_id": keyword.group_id})
     return keyword
 
 
@@ -457,6 +460,7 @@ async def delete_keyword(keyword_id: int, db: AsyncSession = Depends(get_db)):
 
     await db.commit()
 
+    await log_audit(db, "delete_keyword", "keyword", target_id=keyword_id, detail={"word": keyword.word, "group_id": group_id})
     return {"message": "关键词已删除"}
 
 
@@ -528,6 +532,8 @@ async def batch_import_keywords(
     )
 
     await db.commit()
+
+    await log_audit(db, "import_keywords", "keyword", detail={"count": created_count, "group_id": import_data.group_id})
 
     return {
         "message": f"导入完成，新增 {created_count} 个关键词",

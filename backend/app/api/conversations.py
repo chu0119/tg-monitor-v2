@@ -50,6 +50,7 @@ from app.models.message import Message
 from app.models.account import TelegramAccount
 from app.telegram.monitor import message_monitor
 from app.utils import to_local_naive
+from app.services.audit_service import log_audit
 
 router = APIRouter(prefix="/conversations", tags=["会话管理"])
 
@@ -544,6 +545,8 @@ async def create_conversation(
     if conversation.status == "active" and conversation.enable_realtime:
         await message_monitor.start_monitor(conversation.id)
 
+    await log_audit(db, "create_conversation", "conversation", target_id=conversation.id, detail={"title": conversation.title, "chat_id": conversation.chat_id})
+
     logger.info(f"创建新会话: id={conversation.id}, chat_id={conversation.chat_id}, title={conversation.title}")
     return conversation
 
@@ -650,6 +653,8 @@ async def delete_conversation(conversation_id: int, db: AsyncSession = Depends(g
     )
 
     await db.commit()
+
+    await log_audit(db, "delete_conversation", "conversation", target_id=conversation_id, detail={"title": conversation.title if conversation else None})
 
     return {"message": "会话已删除"}
 

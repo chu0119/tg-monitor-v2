@@ -16,18 +16,9 @@ from app.schemas.case import (
     CasePersonAdd,
 )
 from app.utils import now_utc, datetime_to_iso
+from app.services.audit_service import log_audit
 
 router = APIRouter(prefix="/cases", tags=["案件管理"])
-
-
-async def _log_audit(db: AsyncSession, operator: str, action: str, target_type: str, target_id: str, detail: dict = None, ip: str = None):
-    """记录审计日志"""
-    try:
-        await db.execute(text(
-            "INSERT INTO audit_log (operator, action, target_type, target_id, detail, ip_address) VALUES (:op, :act, :tt, :tid, :det, :ip)"
-        ), {"op": operator, "act": action, "tt": target_type, "tid": target_id, "det": __import__("json").dumps(detail, ensure_ascii=False) if detail else None, "ip": ip})
-    except Exception as e:
-        logger.warning(f"记录审计日志失败: {e}")
 
 
 async def _generate_case_number(db: AsyncSession) -> str:

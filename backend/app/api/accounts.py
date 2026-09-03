@@ -18,6 +18,7 @@ from app.models.account import TelegramAccount
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.telegram.client import client_manager
+from app.services.audit_service import log_audit
 
 router = APIRouter(prefix="/accounts", tags=["账号管理"])
 
@@ -76,7 +77,7 @@ async def get_account(account_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login/request", response_model=dict)
-async def request_login_code(request: TelegramAccountLogin):
+async def request_login_code(request: TelegramAccountLogin, db: AsyncSession = Depends(get_db)):
     """请求登录验证码"""
     try:
         result = await client_manager.request_login_code(
@@ -85,6 +86,7 @@ async def request_login_code(request: TelegramAccountLogin):
             api_hash=request.api_hash,
             proxy=request.proxy_config
         )
+        await log_audit(db, "login_request", "account", detail={"phone": request.phone})
         return result
     except Exception as e:
         logger.error(f"请求验证码失败: {e}")
@@ -95,7 +97,7 @@ async def request_login_code(request: TelegramAccountLogin):
 
 
 @router.post("/login/submit", response_model=TelegramAccountResponse)
-async def submit_login_code(request: TelegramAccountLoginCode):
+async def submit_login_code(request: TelegramAccountLoginCode, db: AsyncSession = Depends(get_db)):
     """提交验证码登录"""
     try:
         account = await client_manager.sign_in_with_code(
@@ -105,6 +107,7 @@ async def submit_login_code(request: TelegramAccountLoginCode):
             api_hash=request.api_hash,
             password=request.password
         )
+        await log_audit(db, "login", "account", detail={"phone": request.phone, "api_id": request.api_id})
         return account
     except ValueError as e:
         raise HTTPException(
@@ -218,6 +221,8 @@ async def delete_account(account_id: int, db: AsyncSession = Depends(get_db)):
         # 删除账号
         await db.delete(account)
         await db.commit()
+
+        await log_audit(db, "delete_account", "account", target_id=account_id, detail={"phone": account.phone})
 
         # 删除会话文件
         if account.session_file:
