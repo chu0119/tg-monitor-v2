@@ -1,7 +1,7 @@
 """发送者查询 API"""
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
