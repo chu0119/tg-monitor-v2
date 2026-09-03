@@ -746,6 +746,14 @@ class MessageMonitor:
             )
             db.add(db_message)
             await db.flush()
+
+            # Maintain denormalized counter in the same transaction as the insert
+            from sqlalchemy import text
+            await db.execute(
+                text("UPDATE conversations SET total_messages = total_messages + 1 WHERE id = :cid"),
+                {"cid": conversation_id}
+            )
+
             return db_message
         except Exception as e:
             # 如果插入失败(可能是主键冲突),说明消息已存在
@@ -779,11 +787,11 @@ class MessageMonitor:
         increment = max(1, int(increment or 1))
 
         # 使用单条 SQL 更新会话和账号统计,减少锁竞争(参数化查询)
+        # 注意: c.total_messages 已在 _save_message 中维护,此处不再重复增量
         sql = text("""
             UPDATE conversations c
             INNER JOIN telegram_accounts a ON c.account_id = a.id
             SET
-                c.total_messages = c.total_messages + :increment,
                 c.last_message_id = :message_id,
                 c.last_message_at = NOW(),
                 c.updated_at = NOW(),
@@ -820,12 +828,11 @@ class MessageMonitor:
                 if not account_id:
                     return
 
-                # 更新会话统计
+                # 更新会话统计(不含 total_messages,该字段已在 _save_message 中维护)
                 await db.execute(
                     update(Conversation)
                     .where(Conversation.id == conversation_id)
                     .values(
-                        total_messages=Conversation.total_messages + increment,
                         last_message_id=message_id,
                         last_message_at=now_utc(),
                         updated_at=now_utc()
@@ -1318,6 +1325,13 @@ class MessageMonitor:
                     logger.info(f"逐条降级处理完成: 会话 {conversation_id}, {len(messages)} 条消息")
                     return
 
+                # Maintain denormalized counter in the same transaction as the batch insert
+                from sqlalchemy import text
+                await db.execute(
+                    text("UPDATE conversations SET total_messages = total_messages + :inc WHERE id = :cid"),
+                    {"inc": len(db_messages), "cid": conversation_id}
+                )
+
                 # 批量处理关键词匹配
                 for db_message in db_messages:
                     try:
@@ -1448,6 +1462,14 @@ class MessageMonitor:
         if processed_count > 0 and last_message_id is not None:
             await self._update_conversation_stats(
                 db, conversation_id, last_message_id, processed_count
+            )
+
+        # Maintain denormalized counter in the same transaction as the inserts
+        if processed_count > 0:
+            from sqlalchemy import text
+            await db.execute(
+                text("UPDATE conversations SET total_messages = total_messages + :inc WHERE id = :cid"),
+                {"inc": processed_count, "cid": conversation_id}
             )
 
     async def stop_all_monitors(self):
