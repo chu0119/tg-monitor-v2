@@ -3,7 +3,7 @@ from typing import List, Optional, Any
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import FileResponse
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import select, and_, or_, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from loguru import logger
@@ -247,11 +247,18 @@ async def list_messages(
             logger.warning(f"Invalid end_date format: {end_date}")
 
     # 先获取总数
-    count_query = select(func.count(Message.id))
-    if conditions:
+    if not conditions:
+        # 大表用 information_schema 近似值（毫秒级），避免全表扫描
+        approx = await db.execute(text(
+            "SELECT table_rows FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = 'messages'"
+        ))
+        total = approx.scalar() or 0
+    else:
+        count_query = select(func.count(Message.id))
         count_query = count_query.where(and_(*conditions))
-    count_result = await db.execute(count_query)
-    total = count_result.scalar()
+        count_result = await db.execute(count_query)
+        total = count_result.scalar()
 
     # 获取分页数据 - 使用 selectinload 避免 N+1 查询
     query = select(Message).options(
