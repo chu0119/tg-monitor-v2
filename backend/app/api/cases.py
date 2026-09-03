@@ -168,6 +168,26 @@ async def get_case(case_id: int, db: AsyncSession = Depends(get_db)):
     return case_data
 
 
+@router.get("/{case_id}/alerts")
+async def get_case_alerts(case_id: int, db: AsyncSession = Depends(get_db)):
+    """获取案件关联的告警列表"""
+    result = await db.execute(text("""
+        SELECT ca.id, ca.alert_id, ca.added_by, ca.created_at,
+               a.alert_level, a.status, a.keyword_text, a.matched_text, a.message_preview
+        FROM case_alerts ca
+        LEFT JOIN alerts a ON ca.alert_id = a.id
+        WHERE ca.case_id = :cid
+        ORDER BY ca.created_at DESC
+    """), {"cid": case_id})
+    alerts = []
+    for r in result.fetchall():
+        ad = dict(r._mapping)
+        if ad.get("created_at") and isinstance(ad["created_at"], datetime):
+            ad["created_at"] = datetime_to_iso(ad["created_at"])
+        alerts.append(ad)
+    return alerts
+
+
 @router.post("")
 async def create_case(data: CaseCreate, db: AsyncSession = Depends(get_db)):
     """创建案件"""
