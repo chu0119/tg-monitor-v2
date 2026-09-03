@@ -29,9 +29,9 @@ async def _log_audit(db: AsyncSession, operator: str, action: str, target_type: 
 
 @router.get("")
 async def list_watchlist(
-    entity_type: str = Query(None, description="实体类型筛选"),
+    entity_type: str = Query(None, alias="item_type", description="实体类型筛选"),
     threat_level: str = Query(None, description="威胁级别筛选"),
-    is_active: bool = Query(None, description="是否激活"),
+    is_active: bool = Query(None, alias="status", description="是否激活"),
     keyword: str = Query(None, description="关键词搜索"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),

@@ -13,10 +13,10 @@ router = APIRouter(prefix="/audit", tags=["审计日志"])
 @router.get("")
 async def list_audit_logs(
     operator: str = Query(None, description="操作人筛选"),
-    action: str = Query(None, description="操作类型筛选"),
+    action: str = Query(None, alias="action_type", description="操作类型筛选"),
     target_type: str = Query(None, description="目标类型筛选"),
-    start_time: str = Query(None, description="开始时间 ISO格式"),
-    end_time: str = Query(None, description="结束时间 ISO格式"),
+    start_time: str = Query(None, alias="start_date", description="开始时间 ISO格式"),
+    end_time: str = Query(None, alias="end_date", description="结束时间 ISO格式"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -94,8 +94,8 @@ async def list_audit_logs(
 
 @router.get("/stats")
 async def get_audit_stats(
-    start_time: str = Query(None, description="开始时间 ISO格式"),
-    end_time: str = Query(None, description="结束时间 ISO格式"),
+    start_time: str = Query(None, alias="start_date", description="开始时间 ISO格式"),
+    end_time: str = Query(None, alias="end_date", description="结束时间 ISO格式"),
     db: AsyncSession = Depends(get_db),
 ):
     """获取审计统计"""
