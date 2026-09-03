@@ -33,7 +33,8 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
     tg_clients_count = 0
     active_monitors = 0
     try:
-        async with httpx.AsyncClient(timeout=5.0) as c:
+        # trust_env=False: 不走外部代理，直连本地 monitor_worker
+        async with httpx.AsyncClient(timeout=5.0, trust_env=False) as c:
             resp = await c.get("http://127.0.0.1:9010/status")
             monitor_data = resp.json()
             active_monitors = monitor_data.get("active_monitors", 0)

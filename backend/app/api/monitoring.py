@@ -55,7 +55,8 @@ async def restart_monitoring(db: AsyncSession = Depends(get_db)):
 @router.get("/status")
 async def get_monitoring_status(db: AsyncSession = Depends(get_db)):
     """获取监控状态（从 monitor_worker 9010 /status 拉取实时数据）"""
-    async with httpx.AsyncClient(timeout=5.0) as c:
+    # trust_env=False: 不走外部代理，直连本地 monitor_worker
+    async with httpx.AsyncClient(timeout=5.0, trust_env=False) as c:
         try:
             monitor_resp = await c.get("http://127.0.0.1:9010/status")
             monitor_data = monitor_resp.json()
