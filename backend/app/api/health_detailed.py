@@ -23,8 +23,17 @@ router = APIRouter()
 @router.get("/health/detailed")
 async def detailed_health(db: AsyncSession = Depends(get_db)):
     """详细健康检查 - 返回前端 DashboardPage.tsx HealthStatus 接口期望的结构"""
+    return await _build_health(db)
 
-    # 1. 数据库连通性 + 延迟
+
+@router.get("/health")
+async def health(db: AsyncSession = Depends(get_db)):
+    """健康检查 - 前端 DashboardPage.tsx 通过 fetch("/health") 调用，返回详细结构"""
+    return await _build_health(db)
+
+
+async def _build_health(db: AsyncSession) -> dict:
+    """构建健康检查响应"""
     t0 = time.time()
     db_info = await check_database_connection()
     db_latency_ms = round((time.time() - t0) * 1000, 2)
