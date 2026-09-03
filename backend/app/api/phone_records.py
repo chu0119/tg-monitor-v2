@@ -248,16 +248,21 @@ async def get_phone_detail(phone: str, db: AsyncSession = Depends(get_db)):
                 "created_at": s[12].isoformat() if s[12] else None,
             }
 
-    # 第三步：批量查询所有 sender 的会话（1 次查询替代 N 次）
+    # 第三步：批量查询所有 sender 的会话（优化版）
     sender_convs = {}
     if all_sender_db_ids:
-        conv_rows = (await db.execute(text(
-            f"""SELECT m.sender_id as sid, c.id, c.title, c.chat_id
-               FROM conversations c
-               INNER JOIN messages m ON m.conversation_id = c.id
-               WHERE m.sender_id IN ({sid_placeholders})
-               ORDER BY m.sender_id, c.title"""),
-            sid_params)).fetchall()
+        # 限制查询的 sender 数量，避免慢查询
+        limited_ids = list(all_sender_db_ids)[:10]
+        conv_rows = (await db.execute(text(f"""
+            SELECT m.sender_id as sid, c.id, c.title, c.chat_id
+            FROM (
+                SELECT DISTINCT m.conversation_id, m.sender_id
+                FROM messages m
+                WHERE m.sender_id IN ({sid_placeholders})
+            ) m
+            JOIN conversations c ON m.conversation_id = c.id
+            GROUP BY m.sender_id, m.conversation_id
+        """), sid_params)).fetchall()
         for cr in conv_rows:
             sid = cr[0]
             if sid not in sender_convs:
