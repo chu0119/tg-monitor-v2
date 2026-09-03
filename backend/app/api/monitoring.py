@@ -1,4 +1,5 @@
 """监控管理 API"""
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,32 +54,33 @@ async def restart_monitoring(db: AsyncSession = Depends(get_db)):
 
 @router.get("/status")
 async def get_monitoring_status(db: AsyncSession = Depends(get_db)):
-    """获取监控状态"""
-    # 获取活跃监控数量
-    active_count = len(message_monitor.active_monitors)
+    """获取监控状态（从 monitor_worker 9010 /status 拉取实时数据）"""
+    async with httpx.AsyncClient(timeout=5.0) as c:
+        try:
+            monitor_resp = await c.get("http://127.0.0.1:9010/status")
+            monitor_data = monitor_resp.json()
+        except Exception as e:
+            logger.warning(f"查询 monitor_worker 9010/status 失败: {e}")
+            monitor_data = {"active_monitors": 0, "connected_clients": 0, "account_ids": []}
 
-    # 获取连接的客户端数量
-    connected_clients = len(client_manager.clients)
+    # 从数据库获取账号列表，结合 monitor 数据判断连接状态
+    result = await db.execute(select(TelegramAccount))
+    accounts = result.scalars().all()
 
-    # 检查账号状态
-    result = await db.execute(
-        select(TelegramAccount).where(TelegramAccount.is_active == True)
-    )
-    active_accounts = result.scalars().all()
-
-    accounts_status = []
-    for account in active_accounts:
-        client = client_manager.clients.get(account.id)
-        accounts_status.append({
-            "account_id": account.id,
-            "phone": account.phone,
-            "connected": client is not None and client.is_connected() if client else False
-        })
+    account_ids = monitor_data.get("account_ids", [])
+    connected_clients = monitor_data.get("connected_clients", 0)
 
     return {
-        "active_monitors": active_count,
+        "active_monitors": monitor_data.get("active_monitors", 0),
         "connected_clients": connected_clients,
-        "accounts": accounts_status
+        "accounts": [
+            {
+                "account_id": a.id,
+                "phone": a.phone,
+                "connected": a.id in account_ids and connected_clients > 0
+            }
+            for a in accounts
+        ]
     }
 
 
