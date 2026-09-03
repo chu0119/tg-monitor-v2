@@ -41,6 +41,8 @@ async def list_alerts(
     sender_id: int = Query(None),
     keyword: str = Query(None),
     has_phone: bool = Query(None),
+    sender_country: str = Query(None, description="按发送者国家筛选"),
+    sender_location: str = Query(None, description="按发送者归属地筛选"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -51,6 +53,12 @@ async def list_alerts(
     params = {}
     if has_phone:
         where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE phone IS NOT NULL AND phone != '')")
+    if sender_country:
+        where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE country = :sender_country)")
+        params["sender_country"] = sender_country
+    if sender_location:
+        where_clauses.append("a.sender_id IN (SELECT id FROM senders WHERE phone_location LIKE :sender_location)")
+        params["sender_location"] = f"%{sender_location}%"
     if status:
         where_clauses.append("a.status = :status")
         params["status"] = status
@@ -436,6 +444,11 @@ async def batch_update_alert_status(
     handler_note = data.get("handler_note")
     if not alert_ids or not new_status:
         raise HTTPException(status_code=400, detail="alert_ids 和 status 不能为空")
+    # Validate status against AlertStatus enum
+    from app.models.alert import AlertStatus
+    valid_statuses = [s.value for s in AlertStatus]
+    if new_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"无效状态: {new_status}，有效值: {valid_statuses}")
 
     values = {"status": new_status}
     if handler_note is not None:
@@ -467,6 +480,150 @@ async def batch_delete_alerts(
     )
     await db.commit()
     return {"message": f"已删除 {result.rowcount} 条告警"}
+
+
+
+# ---------- 告警去重查询 ----------
+
+@router.get("/grouped")
+async def list_alerts_grouped(
+    status: str = Query(None, description="告警状态"),
+    alert_level: str = Query(None, description="告警级别"),
+    keyword_group_id: int = Query(None, description="关键词组ID"),
+    assigned_to: str = Query(None, description="处理人"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """按 dedup_key 分组，返回合并后的告警列表（仅返回有 dedup_key 的告警）"""
+    where_clauses = ["a.dedup_key IS NOT NULL", "a.dedup_key != ''"]
+    params = {}
+
+    if status:
+        where_clauses.append("a.status = :status")
+        params["status"] = status
+    if alert_level:
+        where_clauses.append("a.alert_level = :alert_level")
+        params["alert_level"] = alert_level
+    if keyword_group_id:
+        group_result = await db.execute(
+            select(KeywordGroup.name).where(KeywordGroup.id == keyword_group_id)
+        )
+        kg_name = group_result.scalar_one_or_none()
+        if kg_name:
+            where_clauses.append("a.keyword_group_name = :kg_name")
+            params["kg_name"] = kg_name
+        else:
+            return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0}
+    if assigned_to:
+        where_clauses.append("a.assigned_to = :assigned_to")
+        params["assigned_to"] = assigned_to
+
+    where_sql = " WHERE " + " AND ".join(where_clauses)
+
+    # 统计分组数
+    count_result = await db.execute(
+        text(f"SELECT COUNT(DISTINCT a.dedup_key) FROM alerts a{where_sql}"), params
+    )
+    total = count_result.scalar()
+
+    if total == 0:
+        return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0}
+
+    # 分页查询分组（只取 dedup_key + count）
+    offset = (page - 1) * page_size
+    group_sql = f"""
+        SELECT a.dedup_key, COUNT(*) AS alert_count, MAX(a.created_at) AS latest_at
+        FROM alerts a
+        {where_sql}
+        GROUP BY a.dedup_key
+        ORDER BY latest_at DESC
+        LIMIT :lim OFFSET :off
+    """
+    params["lim"] = page_size
+    params["off"] = offset
+    group_result = await db.execute(text(group_sql), params)
+    groups = group_result.fetchall()
+
+    if not groups:
+        return {"items": [], "total": total, "page": page, "page_size": page_size, "total_pages": (total + page_size - 1) // page_size}
+
+    dedup_keys = [g[0] for g in groups]
+    group_map = {g[0]: g[1] for g in groups}
+
+    # 批量查询每个分组的最新告警（一条查询取所有分组的最新告警）
+    placeholders = ", ".join(f":dk_{i}" for i in range(len(dedup_keys)))
+    batch_params = {f"dk_{i}": dk for i, dk in enumerate(dedup_keys)}
+    # Use window function to get latest alert per group
+    batch_sql = f"""
+        SELECT * FROM (
+            SELECT a.id, a.dedup_key, a.message_id, a.conversation_id, a.keyword_id, a.sender_id,
+                   a.keyword_text, a.keyword_group_name, a.alert_level, a.status,
+                   a.matched_text, a.message_preview, a.highlighted_message,
+                   a.handler, a.handler_note, a.handled_at,
+                   a.assigned_to, a.assigned_at, a.workflow_status, a.handler_result,
+                   a.case_id, a.priority_score,
+                   a.notification_sent, a.created_at, a.updated_at,
+                   s.user_id AS sender_tg_id,
+                   COALESCE(s.username, COALESCE(s.first_name, CONCAT('User_', s.user_id))) AS sender_username,
+                   c.title AS conversation_title,
+                   m.date AS message_time,
+                   ROW_NUMBER() OVER (PARTITION BY a.dedup_key ORDER BY a.created_at DESC) AS rn
+            FROM alerts a
+            LEFT JOIN senders s ON a.sender_id = s.id
+            LEFT JOIN conversations c ON a.conversation_id = c.id
+            LEFT JOIN messages m ON a.message_id = m.id
+            WHERE a.dedup_key IN ({placeholders})
+        ) ranked
+        WHERE rn = 1
+    """
+    batch_result = await db.execute(text(batch_sql), batch_params)
+    main_rows = {row._mapping["dedup_key"]: dict(row._mapping) for row in batch_result.fetchall()}
+
+    # 批量查询每个分组的关键词
+    kw_sql = f"""
+        SELECT dedup_key, GROUP_CONCAT(DISTINCT keyword_text) AS keywords
+        FROM alerts
+        WHERE dedup_key IN ({placeholders})
+        GROUP BY dedup_key
+    """
+    kw_result = await db.execute(text(kw_sql), batch_params)
+    kw_map = {}
+    for row in kw_result.fetchall():
+        dk = row[0]
+        kw_str = row[1] or ""
+        kw_map[dk] = [k.strip() for k in kw_str.split(",") if k.strip()]
+
+    items = []
+    for dk in dedup_keys:
+        main_alert = main_rows.get(dk)
+        if not main_alert:
+            continue
+        if main_alert.get("created_at") and isinstance(main_alert["created_at"], datetime):
+            main_alert["created_at"] = datetime_to_iso(main_alert["created_at"])
+        if main_alert.get("message_time") and isinstance(main_alert["message_time"], datetime):
+            main_alert["message_time"] = datetime_to_iso(main_alert["message_time"])
+        if main_alert.get("assigned_at") and isinstance(main_alert["assigned_at"], datetime):
+            main_alert["assigned_at"] = datetime_to_iso(main_alert["assigned_at"])
+        # Remove rn and dedup_key from the alert dict (internal fields)
+        main_alert.pop("rn", None)
+
+        items.append({
+            "dedup_key": dk,
+            "main_alert": main_alert,
+            "keywords": kw_map.get(dk, []),
+            "alert_count": group_map.get(dk, 0),
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
+
 
 
 @router.get("/{alert_id}", response_model=AlertResponse)
@@ -583,3 +740,283 @@ async def get_alert_trend(
     """获取告警趋势统计"""
     trend = await alert_aggregation_service.get_alert_trend(db, days=days, group_by=group_by)
     return {"items": trend, "days": days, "group_by": group_by}
+
+
+@router.put("/{alert_id}/assign")
+async def assign_alert(
+    alert_id: int,
+    assignee: str,
+    note: str = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """指派告警给其他人"""
+    from app.models.alert import Alert
+    from app.utils import now_utc
+    result = await db.execute(select(Alert).where(Alert.id == alert_id))
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="告警不存在")
+    alert.assignee = assignee
+    alert.assignee_note = note
+    alert.assigned_at = now_utc()
+    await db.commit()
+    return {"message": f"告警已指派给 {assignee}"}
+
+
+
+# ==================== 告警增强功能 ====================
+
+import asyncio
+import json
+
+
+async def _write_audit_log(
+    db: AsyncSession,
+    operator: str,
+    action: str,
+    target_type: str,
+    target_id: int = None,
+    detail: dict = None,
+):
+    """异步写入审计日志（不阻塞主请求）"""
+    try:
+        await db.execute(
+            text(
+                "INSERT INTO audit_log (operator, action, target_type, target_id, detail, created_at) "
+                "VALUES (:operator, :action, :target_type, :target_id, :detail, NOW())"
+            ),
+            {
+                "operator": operator,
+                "action": action,
+                "target_type": target_type,
+                "target_id": target_id,
+                "detail": json.dumps(detail, ensure_ascii=False) if detail else None,
+            },
+        )
+    except Exception as e:
+        logger.error(f"写入审计日志失败: {e}")
+
+
+# ---------- 告警合并 ----------
+
+@router.post("/{alert_id}/merge")
+async def merge_alerts(
+    alert_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """将多条告警合并为一条主告警"""
+    target_ids = data.get("target_ids", [])
+    operator = data.get("operator", "system")
+
+    if not target_ids:
+        raise HTTPException(status_code=400, detail="target_ids 不能为空")
+
+    # 验证主告警存在
+    main_result = await db.execute(select(Alert).where(Alert.id == alert_id))
+    main_alert = main_result.scalar_one_or_none()
+    if not main_alert:
+        raise HTTPException(status_code=404, detail="主告警不存在")
+
+    # 将目标告警标记为已合并
+    await db.execute(
+        update(Alert)
+        .where(Alert.id.in_(target_ids), Alert.id != alert_id)
+        .values(is_merged=1, merged_into_id=alert_id)
+    )
+    await db.commit()
+
+    # 审计日志
+    await _write_audit_log(
+        db, operator, "merge", "alert", alert_id,
+        {"merged_ids": target_ids, "main_id": alert_id},
+    )
+    await db.commit()
+
+    return {"message": f"已将 {len(target_ids)} 条告警合并到告警 #{alert_id}"}
+
+
+# ---------- 批量操作 ----------
+
+@router.post("/batch")
+async def batch_alert_operation(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量操作告警 - handle/assign/merge/delete"""
+    alert_ids = data.get("alert_ids", [])
+    action = data.get("action")
+    params_data = data.get("params", {})
+    operator = params_data.get("operator", "system")
+
+    if not alert_ids:
+        raise HTTPException(status_code=400, detail="alert_ids 不能为空")
+    if action not in ("handle", "assign", "merge", "delete"):
+        raise HTTPException(status_code=400, detail="无效的 action，可选: handle, assign, merge, delete")
+
+    if action == "handle":
+        handler = params_data.get("handler", "")
+        handler_note = params_data.get("handler_note", "")
+        await db.execute(
+            update(Alert)
+            .where(Alert.id.in_(alert_ids))
+            .values(
+                status="resolved",
+                handler=handler,
+                handler_note=handler_note,
+                handled_at=func.now(),
+            )
+        )
+
+    elif action == "assign":
+        assignee = params_data.get("assigned_to", "")
+        if not assignee:
+            raise HTTPException(status_code=400, detail="assigned_to 不能为空")
+        await db.execute(
+            update(Alert)
+            .where(Alert.id.in_(alert_ids))
+            .values(assigned_to=assignee, assigned_at=func.now())
+        )
+
+    elif action == "merge":
+        main_id = params_data.get("main_id")
+        if not main_id:
+            raise HTTPException(status_code=400, detail="merge 操作需要 params.main_id")
+        merge_ids = [aid for aid in alert_ids if aid != main_id]
+        await db.execute(
+            update(Alert)
+            .where(Alert.id.in_(merge_ids))
+            .values(is_merged=1, merged_into_id=main_id)
+        )
+
+    elif action == "delete":
+        await db.execute(
+            update(Alert)
+            .where(Alert.id.in_(alert_ids))
+            .values(status="deleted")
+        )
+
+    await db.commit()
+
+    # 审计日志
+    await _write_audit_log(
+        db, operator, f"batch_{action}", "alert", None,
+        {"alert_ids": alert_ids, "action": action, "params": params_data},
+    )
+    await db.commit()
+
+    return {"message": f"批量 {action} 操作完成，影响 {len(alert_ids)} 条告警"}
+
+
+# ---------- 告警分配 ----------
+
+@router.post("/{alert_id}/assign")
+async def assign_alert_v2(
+    alert_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """分配告警给处理人"""
+    assigned_to = data.get("assigned_to")
+    operator = data.get("operator", "system")
+
+    if not assigned_to:
+        raise HTTPException(status_code=400, detail="assigned_to 不能为空")
+
+    result = await db.execute(select(Alert).where(Alert.id == alert_id))
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="告警不存在")
+
+    await db.execute(
+        text("UPDATE alerts SET assigned_to = :at, assigned_at = NOW() WHERE id = :aid"),
+        {"at": assigned_to, "aid": alert_id},
+    )
+    await db.commit()
+
+    # 审计日志
+    await _write_audit_log(
+        db, operator, "assign", "alert", alert_id,
+        {"assigned_to": assigned_to},
+    )
+    await db.commit()
+
+    return {"message": f"告警已分配给 {assigned_to}"}
+
+
+# ---------- 工作流状态更新 ----------
+
+VALID_WORKFLOW_TRANSITIONS = {
+    "pending":    ["read", "invalid"],
+    "read":       ["verifying", "invalid"],
+    "verifying":  ["confirmed", "invalid"],
+    "confirmed":  ["filed", "transferred"],
+    "filed":      ["closed"],
+    "transferred": ["closed"],
+    "closed":     [],
+    "invalid":    [],
+}
+
+
+@router.post("/{alert_id}/workflow")
+async def update_workflow_status(
+    alert_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新告警工作流状态"""
+    new_status = data.get("workflow_status")
+    handler_result = data.get("handler_result")
+    handler_note = data.get("handler_note")
+    operator = data.get("operator", "system")
+
+    if not new_status:
+        raise HTTPException(status_code=400, detail="workflow_status 不能为空")
+
+    result = await db.execute(select(Alert).where(Alert.id == alert_id))
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="告警不存在")
+
+    current_wf = alert.workflow_status or "pending"
+    allowed = VALID_WORKFLOW_TRANSITIONS.get(current_wf, [])
+    if new_status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不允许从 {current_wf} 流转到 {new_status}，允许的目标: {allowed}",
+        )
+
+    set_clauses = ["workflow_status = :wf_status"]
+    params = {"aid": alert_id, "wf_status": new_status}
+    if handler_result is not None:
+        set_clauses.append("handler_result = :handler_result")
+        params["handler_result"] = handler_result
+    if handler_note is not None:
+        set_clauses.append("handler_note = :handler_note")
+        params["handler_note"] = handler_note
+    if new_status == "closed":
+        set_clauses.append("status = 'resolved'")
+        set_clauses.append("handled_at = NOW()")
+    elif new_status == "invalid":
+        set_clauses.append("status = 'false_positive'")
+        set_clauses.append("handled_at = NOW()")
+
+    set_sql = ", ".join(set_clauses)
+    await db.execute(
+        text(f"UPDATE alerts SET {set_sql} WHERE id = :aid"), params
+    )
+    await db.commit()
+
+    # 审计日志
+    await _write_audit_log(
+        db, operator, "workflow", "alert", alert_id,
+        {
+            "from_status": current_wf,
+            "to_status": new_status,
+            "handler_result": handler_result,
+            "handler_note": handler_note,
+        },
+    )
+    await db.commit()
+
+    return {"message": f"工作流状态已从 {current_wf} 更新为 {new_status}"}

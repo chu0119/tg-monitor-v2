@@ -1,7 +1,7 @@
 """代理管理 API（简化版，不依赖内置 Clash/Mihomo）。"""
 from __future__ import annotations
 
-
+import asyncio
 import time
 from typing import Literal, Optional
 
@@ -97,14 +97,17 @@ async def test_proxy_connectivity(request: ProxyTestRequest):
 
     target = "https://www.google.com"
     proxy_url = f"{request.protocol}://{request.host}:{request.port}"
-    proxy_handler = urllib.request.ProxyHandler({"https": proxy_url, "http": proxy_url})
-    opener = urllib.request.build_opener(proxy_handler)
 
-    start = time.perf_counter()
-    try:
+    def _do_request():
+        proxy_handler = urllib.request.ProxyHandler({"https": proxy_url, "http": proxy_url})
+        opener = urllib.request.build_opener(proxy_handler)
         req = urllib.request.Request(target, headers={"User-Agent": "Mozilla/5.0"})
         resp = opener.open(req, timeout=request.timeout_sec)
         resp.read()
+
+    start = time.perf_counter()
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_do_request), timeout=request.timeout_sec + 5)
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         return {
             "success": True,

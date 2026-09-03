@@ -376,7 +376,7 @@ export function BigScreenPage() {
 
   useEffect(() => {
     fetchData();
-    const dataTimer = window.setInterval(fetchData, 3000);
+    const dataTimer = window.setInterval(fetchData, 5000);
     const clockTimer = window.setInterval(() => setCurrentTime(new Date()), 1000);
     return () => {
       window.clearInterval(dataTimer);

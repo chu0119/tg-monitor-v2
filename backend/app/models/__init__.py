@@ -9,6 +9,7 @@ from app.models.notification_config import NotificationConfig
 from app.models.notification_log import NotificationLog
 from app.models.settings import Settings
 from app.models.proxy_node import ProxyNode
+from app.models.phone_record import PhoneRecord
 
 __all__ = [
     "TelegramAccount",

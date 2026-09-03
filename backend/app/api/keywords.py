@@ -1,7 +1,7 @@
 """关键词管理 API"""
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
@@ -52,15 +52,23 @@ async def list_keyword_groups_internal(db: AsyncSession):
     )
     groups = result.scalars().all()
 
-    # 实时计算每个组的实际关键词数量并构建响应
+    # 批量查询所有组的关键词数量 - 子查询替代N+1
+    group_ids = [g.id for g in groups]
+    if group_ids:
+        placeholders = ",".join([f":gid{i}" for i in range(len(group_ids))])
+        gid_params = {f"gid{i}": gid for i, gid in enumerate(group_ids)}
+        kw_counts_result = await db.execute(text(f"""
+            SELECT group_id, COUNT(*) as cnt FROM keywords
+            WHERE group_id IN ({placeholders})
+            GROUP BY group_id
+        """), gid_params)
+        kw_counts = {row[0]: row[1] for row in kw_counts_result.fetchall()}
+    else:
+        kw_counts = {}
+
     groups_list = []
     for group in groups:
-        # 计算该组的实际关键词数量
-        count_result = await db.execute(
-            select(func.count(Keyword.id))
-            .where(Keyword.group_id == group.id)
-        )
-        actual_count = count_result.scalar() or 0
+        actual_count = kw_counts.get(group.id, 0)
 
         # 构建响应字典
         group_dict = {

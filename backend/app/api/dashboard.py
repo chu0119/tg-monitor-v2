@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta
 from typing import List
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from functools import lru_cache
 from asyncio import Lock
@@ -22,29 +22,56 @@ from app.models import (
 )
 from app.utils import start_of_day_local, end_of_day_local, to_local, to_utc, now_local, to_local_naive, now_utc
 
+# Redis缓存（可选）
+try:
+    from app.utils.redis_cache import redis_cache
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    redis_cache = None
+
 router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
+# 缓存变量
+_sender_ranking_cache = {}
+_sender_ranking_cache_time = 0
+_conversation_activity_cache = {}
+_conversation_activity_cache_time = 0
+CACHE_TTL_SLOW = 60  # 慢查询缓存60秒
+
 
 # 简单的内存缓存（30秒）
 last_stats_time = 0
 last_stats_data = None
-CACHE_TTL = 3  # 大屏需要接近实时的数字滚动，保留短缓存避免重复请求压垮数据库
+CACHE_TTL = 30  # 优化：增加缓存时间到30秒
 
 async def get_cached_stats():
-    """获取缓存的统计数据"""
-    global last_stats_time, last_stats_data
-    current_time = time.time()
-
-    # 检查缓存
-    if last_stats_data and current_time - last_stats_time < CACHE_TTL:
-        return last_stats_data
-
-    return None
+    """获取缓存的统计数据（Redis）"""
+    if not REDIS_AVAILABLE or redis_cache is None:
+        return None
+    try:
+        cached = redis_cache.get("dashboard_stats")
+        return cached
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"dashboard_stats缓存获取失败: {e}")
+        return None
 
 async def set_cached_stats(data):
-    """设置缓存"""
-    global last_stats_time, last_stats_data
-    last_stats_data = data
-    last_stats_time = time.time()
+    """设置缓存（Redis）"""
+    if not REDIS_AVAILABLE or redis_cache is None:
+        return
+    try:
+        # 将data转换为字典
+        if hasattr(data, 'dict'):
+            cache_data = data.dict()
+        elif hasattr(data, '__dict__'):
+            cache_data = data.__dict__
+        else:
+            cache_data = data
+        redis_cache.set("dashboard_stats", cache_data, CACHE_TTL)
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"dashboard_stats缓存设置失败: {e}")
 
 
 @router.get("/stats", response_model=DashboardStats)
@@ -56,48 +83,68 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         return cached
 
     now_local_dt = now_local()
-    # 获取今天本地时间的开始时间（用于"今日"统计）
-    # 本地今天 00:00 对应的 UTC 时间
     from datetime import timezone as tz
-    today_local_start_tz = start_of_day_local(now_local_dt)  # 本地今天 00:00（带时区）
-    today_local_start_utc = to_utc(today_local_start_tz).replace(tzinfo=None)  # 转换为UTC naive，用于查询数据库
+    today_local_start_tz = start_of_day_local(now_local_dt)
+    today_local_start_utc = to_utc(today_local_start_tz).replace(tzinfo=None)
 
-    # 账号统计
-    total_accounts = await db.execute(select(func.count(TelegramAccount.id)))
-    total_accounts = total_accounts.scalar()
-    active_accounts = await db.execute(
-        select(func.count(TelegramAccount.id))
-        .where(TelegramAccount.is_active == True, TelegramAccount.is_authorized == True)
-    )
-    active_accounts = active_accounts.scalar()
+    # 优化：使用information_schema获取近似行数（毫秒级）
+    approx_sql = text("""
+        SELECT
+            table_name,
+            table_rows
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+        AND table_name IN ('telegram_accounts', 'conversations', 'messages', 'alerts', 'keywords', 'keyword_groups', 'senders')
+    """)
+    approx_result = await db.execute(approx_sql)
+    approx_rows = {row[0]: row[1] for row in approx_result.fetchall()}
 
-    # 会话统计
-    total_conversations = await db.execute(select(func.count(Conversation.id)))
-    total_conversations = total_conversations.scalar()
-    active_conversations = await db.execute(
-        select(func.count(Conversation.id))
-        .where(Conversation.status == "active")
-    )
-    active_conversations = active_conversations.scalar()
+    # 精确统计小表（毫秒级）
+    small_tables_sql = text("""
+        SELECT
+            (SELECT COUNT(*) FROM telegram_accounts) as total_accounts,
+            (SELECT COUNT(*) FROM telegram_accounts WHERE is_active = 1 AND is_authorized = 1) as active_accounts,
+            (SELECT COUNT(*) FROM conversations) as total_conversations,
+            (SELECT COUNT(*) FROM conversations WHERE status = 'active') as active_conversations,
+            (SELECT COUNT(*) FROM keywords) as total_keywords,
+            (SELECT COUNT(*) FROM keywords WHERE match_count > 0) as active_keywords,
+            (SELECT COUNT(*) FROM keyword_groups) as keyword_groups,
+            (SELECT COUNT(*) FROM senders) as total_senders
+    """)
+    small_result = await db.execute(small_tables_sql)
+    small_row = small_result.fetchone()
 
-    # 消息统计
-    total_messages = await db.execute(select(func.count(Message.id)))
-    total_messages = total_messages.scalar()
+    total_accounts = small_row[0]
+    active_accounts = small_row[1] or 0
+    total_conversations = small_row[2]
+    active_conversations = small_row[3] or 0
+    total_keywords = small_row[4]
+    active_keywords = small_row[5] or 0
+    keyword_groups = small_row[6] or 0
+    total_senders = small_row[7]
 
-    # 今日消息（本地时间今天 00:00 开始到现在）
-    today_messages = await db.execute(
-        select(func.count(Message.id))
-        .where(Message.created_at >= today_local_start_utc)
-    )
-    today_messages = today_messages.scalar()
+    # 使用近似值（大表）或精确值（小表）
+    total_messages = approx_rows.get('messages', 0)
+    total_alerts = approx_rows.get('alerts', 0)
 
-    # 24小时消息分布 - 单条 GROUP BY 查询替代循环24次
+    # 今日统计使用精确查询（有索引，较快）
+    today_sql = text("""
+        SELECT
+            (SELECT COUNT(*) FROM messages WHERE created_at >= :today) as today_messages,
+            (SELECT COUNT(*) FROM alerts WHERE created_at >= :today) as today_alerts,
+            (SELECT COUNT(*) FROM alerts WHERE status = 'pending') as pending_alerts
+    """)
+    today_result = await db.execute(today_sql, {"today": today_local_start_utc})
+    today_row = today_result.fetchone()
+    today_messages = today_row[0] or 0
+    today_alerts = today_row[1] or 0
+    pending_alerts = today_row[2] or 0
+
+    # 24小时消息分布
     messages_24h = []
-    from datetime import timezone as tz
     now_utc_time = datetime.now(tz.utc).replace(tzinfo=None)
     start_24h_utc = now_utc_time - timedelta(hours=24)
 
-    # MySQL: HOUR() 返回 0-23 的UTC小时，按此分组
     hour_result = await db.execute(
         select(func.hour(Message.date), func.count(Message.id))
         .where(Message.date >= start_24h_utc, Message.date < now_utc_time)
@@ -105,7 +152,6 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     )
     hour_counts = {row[0]: row[1] for row in hour_result.all()}
 
-    # 生成从早到晚的24小时分布，标签使用本地时间
     now_local_naive = to_local_naive(now_local_dt)
     for i in range(23, -1, -1):
         hour_end_utc = now_utc_time - timedelta(hours=i)
@@ -116,40 +162,12 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
             "count": hour_counts.get(utc_hour, 0)
         })
 
-    # 告警统计
-    total_alerts = await db.execute(select(func.count(Alert.id)))
-    total_alerts = total_alerts.scalar()
-    pending_alerts = await db.execute(
-        select(func.count(Alert.id))
-        .where(Alert.status == "pending")
-    )
-    pending_alerts = pending_alerts.scalar()
-    today_alerts = await db.execute(
-        select(func.count(Alert.id))
-        .where(Alert.created_at >= today_local_start_utc)
-    )
-    today_alerts = today_alerts.scalar()
-
+    # 告警级别统计
     alerts_by_level_result = await db.execute(
         select(Alert.alert_level, func.count(Alert.id))
         .group_by(Alert.alert_level)
     )
     alerts_by_level = {row[0]: row[1] for row in alerts_by_level_result.all()}
-
-    # 关键词统计
-    total_keywords = await db.execute(select(func.count(Keyword.id)))
-    total_keywords = total_keywords.scalar()
-    active_keywords = await db.execute(
-        select(func.count(Keyword.id))
-        .where(Keyword.match_count > 0)
-    )
-    active_keywords = active_keywords.scalar()
-    keyword_groups = await db.execute(select(func.count(KeywordGroup.id)))
-    keyword_groups = keyword_groups.scalar()
-
-    # 发送者统计
-    total_senders = await db.execute(select(func.count(Sender.id)))
-    total_senders = total_senders.scalar()
 
     result = DashboardStats(
         total_accounts=total_accounts,
@@ -375,27 +393,43 @@ async def get_sender_ranking(
     sort_by: str = Query("messages"),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取发送者排行"""
+    """获取发送者排行（带Redis缓存）"""
+    # 检查Redis缓存
+    cache_key = f"sender_ranking_{limit}_{sort_by}"
+    if REDIS_AVAILABLE and redis_cache is not None:
+        cached = redis_cache.get(cache_key)
+        if cached is not None:
+            return [SenderRanking(**item) for item in cached]
+
     if sort_by not in {"messages", "alerts"}:
         sort_by = "messages"
-    alert_count_expr = func.count(Alert.id).label("alert_count")
-    order_by = (
-        [alert_count_expr.desc(), Sender.message_count.desc()]
-        if sort_by == "alerts"
-        else [Sender.message_count.desc()]
-    )
-    result = await db.execute(
-        select(
-            Sender.id, Sender.username, Sender.first_name,
-            Sender.message_count,
-            alert_count_expr,
-        )
-        .outerjoin(Alert, Alert.sender_id == Sender.id)
-        .group_by(Sender.id, Sender.username, Sender.first_name, Sender.message_count)
-        .order_by(*order_by)
-        .limit(limit)
-    )
-    rows = result.all()
+
+    # 优化：使用原生SQL子查询，避免大表JOIN
+    if sort_by == "alerts":
+        # 按告警数排序：先统计告警数，再关联发送者信息
+        sql = text("""
+            SELECT s.id, s.username, s.first_name, s.message_count, COALESCE(a.alert_count, 0) as alert_count
+            FROM senders s
+            LEFT JOIN (
+                SELECT sender_id, COUNT(*) as alert_count
+                FROM alerts
+                GROUP BY sender_id
+            ) a ON s.id = a.sender_id
+            ORDER BY alert_count DESC, s.message_count DESC
+            LIMIT :limit
+        """)
+        result = await db.execute(sql, {"limit": limit})
+    else:
+        # 按消息数排序：直接使用索引
+        sql = text("""
+            SELECT id, username, first_name, message_count, 0 as alert_count
+            FROM senders
+            ORDER BY message_count DESC
+            LIMIT :limit
+        """)
+        result = await db.execute(sql, {"limit": limit})
+
+    rows = result.fetchall()
 
     rankings = []
     for i, row in enumerate(rows, 1):
@@ -408,6 +442,10 @@ async def get_sender_ranking(
             rank=i
         ))
 
+    # 保存到Redis缓存
+    if REDIS_AVAILABLE and redis_cache is not None:
+        redis_cache.set(cache_key, [r.dict() for r in rankings], CACHE_TTL_SLOW)
+
     return rankings
 
 
@@ -416,24 +454,30 @@ async def get_conversation_activity(
     limit: int = 10,
     db: AsyncSession = Depends(get_db)
 ):
-    """获取会话活跃度 - 优化版本，避免 N+1 查询"""
-    # 一次性获取所有会话和它们的活跃发送者统计
-    result = await db.execute(
-        select(
-            Conversation.id,
-            Conversation.title,
-            Conversation.chat_type,
-            Conversation.total_messages,
-            Conversation.total_alerts,
-            Conversation.last_message_at,
-            func.count(func.distinct(Message.sender_id)).label('sender_count')
-        )
-        .outerjoin(Message, Conversation.id == Message.conversation_id)
-        .group_by(Conversation.id)
-        .order_by(Conversation.total_messages.desc())
-        .limit(limit)
-    )
-    rows = result.all()
+    """获取会话活跃度（带缓存）"""
+    # 检查Redis缓存
+    cache_key = "conv_activity_top12"
+    if REDIS_AVAILABLE and redis_cache is not None:
+        cached = redis_cache.get(cache_key)
+        if cached is not None:
+            return [ConversationActivity(**item) for item in cached]
+
+    # 优化：直接使用预计算的sender_count字段
+    sql = text("""
+        SELECT
+            id,
+            title,
+            chat_type,
+            total_messages,
+            total_alerts,
+            last_message_at,
+            sender_count
+        FROM conversations
+        ORDER BY total_messages DESC
+        LIMIT :limit
+    """)
+    result = await db.execute(sql, {"limit": limit})
+    rows = result.fetchall()
 
     activities = []
     for row in rows:
@@ -446,6 +490,10 @@ async def get_conversation_activity(
             alert_count=row.total_alerts,
             last_message_at=row.last_message_at
         ))
+
+    # 保存到Redis缓存
+    if REDIS_AVAILABLE and redis_cache is not None:
+        redis_cache.set(cache_key, [a.dict() for a in activities], CACHE_TTL_SLOW)
 
     return activities
 

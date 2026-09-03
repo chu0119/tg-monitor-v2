@@ -60,3 +60,12 @@ backend/app/proxy/mihomo
 *.tmp
 proxy/config.yaml
 .last_restart
+
+# 备份/临时副本（防止误提交）
+*.bak
+*.bak2
+*.bak3
+*.backup
+*.backup2
+backup_*/
+frontend/backup/

@@ -78,6 +78,9 @@ class Keyword(Base):
     match_count = Column(Integer, default=0, comment="匹配次数")
     last_matched_at = Column(DateTime, comment="最后匹配时间")
 
+    # 同义词扩展
+    synonyms = Column(JSON, comment="同义词列表")
+
     # 状态
     is_active = Column(Boolean, default=True, comment="是否激活")
 

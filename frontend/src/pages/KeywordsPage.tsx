@@ -97,6 +97,7 @@ export function KeywordsPage() {
       setShowGroupModal(false);
     } catch (error) {
       console.error("Failed to create group:", error);
+      alert("创建关键词组失败");
     }
   };
 
@@ -149,17 +150,22 @@ export function KeywordsPage() {
       setShowKeywordModal(false);
     } catch (error) {
       console.error("Failed to create keyword:", error);
+      alert("创建关键词失败");
     }
   };
 
   const handleDeleteKeyword = async (id: number) => {
     if (!selectedGroup) return;
+    if (!confirm("确定要删除这个关键词吗？")) {
+      return;
+    }
     try {
       await api.keywords.deleteKeyword(id);
       fetchKeywords(selectedGroup.id);
       fetchGroups();
     } catch (error) {
       console.error("Failed to delete keyword:", error);
+      alert("删除关键词失败");
     }
   };
 

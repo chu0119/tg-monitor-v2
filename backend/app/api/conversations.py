@@ -720,28 +720,27 @@ async def get_conversation_stats(conversation_id: int, db: AsyncSession = Depend
     )
     total_alerts = alert_result.scalar()
 
-    # 每日消息趋势（最近7天）
+    # 每日消息趋势（最近7天）- 单条GROUP BY替代循环7次
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    start_7d = now_utc - timedelta(days=6)
+    trend_result = await db.execute(
+        select(func.date(Message.date).label('day'), func.count(Message.id).label('count'))
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.date >= start_7d,
+            Message.date < now_utc + timedelta(days=1)
+        )
+        .group_by(func.date(Message.date))
+    )
+    trend_map = {str(row[0]): row[1] for row in trend_result.all()}
+
     trend_data = []
     for i in range(7):
-        # 使用UTC时间查询数据库
-        date_utc = datetime.now(timezone.utc) - timedelta(days=i)
-        next_date_utc = date_utc + timedelta(days=1)
-        # 转换为naive datetime用于查询
-        date = date_utc.replace(tzinfo=None)
-        next_date = next_date_utc.replace(tzinfo=None)
-
-        day_result = await db.execute(
-            select(func.count(Message.id))
-            .where(
-                Message.conversation_id == conversation_id,
-                Message.date >= date,
-                Message.date < next_date
-            )
-        )
-        count = day_result.scalar()
+        date_utc = now_utc - timedelta(days=i)
+        date_str = date_utc.strftime("%Y-%m-%d")
         trend_data.append({
-            "date": date.strftime("%Y-%m-%d"),
-            "count": count
+            "date": date_str,
+            "count": trend_map.get(date_str, 0)
         })
 
     return {
@@ -864,3 +863,43 @@ async def add_all_channels_from_account(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@router.get("/tags/list")
+async def list_all_tags(db: AsyncSession = Depends(get_db)):
+    """获取所有标签（去重）"""
+    from sqlalchemy import text
+    result = await db.execute(
+        text("SELECT tags FROM conversations WHERE tags IS NOT NULL AND tags != 'null'")
+    )
+    all_tags = set()
+    for row in result.all():
+        tags = row[0]
+        if tags:
+            import json
+            try:
+                if isinstance(tags, str):
+                    tags = json.loads(tags)
+                if isinstance(tags, list):
+                    all_tags.update(tags)
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return sorted(all_tags)
+
+
+@router.put("/{conversation_id}/tags")
+async def update_conversation_tags(
+    conversation_id: int,
+    tags: List[str],
+    db: AsyncSession = Depends(get_db),
+):
+    """更新会话标签"""
+    result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    conv.tags = tags
+    await db.commit()
+    return {"message": "标签已更新", "tags": tags}

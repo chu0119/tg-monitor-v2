@@ -18,9 +18,9 @@ try:
         DATABASE_URL,
         echo=settings.DEBUG,
         pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20,
-        pool_recycle=3600,
+        pool_size=20,
+        max_overflow=30,
+        pool_recycle=1800,
         pool_timeout=30,
         pool_use_lifo=True,
     )
@@ -166,27 +166,35 @@ async def drop_all_tables():
 
 
 def get_database_info() -> dict:
-    """获取数据库信息"""
+    """获取数据库信息 - 同步版本，用于非异步上下文"""
     try:
         import asyncio
+        import concurrent.futures
 
         async def _get_info():
             return await check_database_connection()
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        info = None
         try:
-            info = loop.run_until_complete(_get_info())
-            return {
-                "type": "mysql",
-                "host": settings.MYSQL_HOST,
-                "port": settings.MYSQL_PORT,
-                "database": settings.MYSQL_DATABASE,
-                "configured": settings.is_database_configured(),
-                "connection_info": info
-            }
-        finally:
-            loop.close()
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _get_info())
+                info = future.result(timeout=10)
+        else:
+            info = asyncio.run(_get_info())
+
+        return {
+            "type": "mysql",
+            "host": settings.MYSQL_HOST,
+            "port": settings.MYSQL_PORT,
+            "database": settings.MYSQL_DATABASE,
+            "configured": settings.is_database_configured(),
+            "connection_info": info
+        }
     except Exception as e:
         return {
             "type": "mysql",

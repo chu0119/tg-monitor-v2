@@ -3,7 +3,8 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError as JWTError
 from passlib.context import CryptContext
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession

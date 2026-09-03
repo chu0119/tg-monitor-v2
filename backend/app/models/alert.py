@@ -59,6 +59,20 @@ class Alert(Base):
     created_at = Column(DateTime, server_default=func.now(), index=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
+
+    # 增强功能字段
+    dedup_key = Column(String(64), index=True, comment="去重键")
+    assigned_to = Column(String(100), index=True, comment="分配给")
+    assignee = Column(String(100), comment="指派人(旧)")
+    assignee_note = Column(Text, comment="指派备注(旧)")
+    assigned_at = Column(DateTime, comment="分配时间")
+    workflow_status = Column(String(30), index=True, comment="工作流状态")
+    handler_result = Column(String(50), comment="处理结果")
+    case_id = Column(Integer, ForeignKey("cases.id"), index=True, comment="关联案件ID")
+    priority_score = Column(Integer, index=True, comment="优先级评分")
+    is_merged = Column(Boolean, default=False, comment="是否已合并")
+    merged_into_id = Column(BigInteger, comment="合并到的主告警ID")
+
     # 关系 - 移除循环引用
     message = relationship("Message", foreign_keys=[message_id])
     conversation = relationship("Conversation")

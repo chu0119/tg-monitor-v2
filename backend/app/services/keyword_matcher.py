@@ -1,5 +1,6 @@
 """关键词匹配服务"""
 import re
+from functools import lru_cache
 import time
 from typing import List, Optional
 from sqlalchemy import select, update
@@ -9,11 +10,18 @@ from app.models import Keyword, KeywordGroup, Conversation
 from datetime import datetime
 
 
+
+@lru_cache(maxsize=1024)
+def _compile_regex(pattern: str, flags: int = 0):
+    """缓存编译后的正则表达式"""
+    return re.compile(pattern, flags)
+
 class KeywordMatcher:
     """关键词匹配器"""
 
     def __init__(self):
         self._rules_cache = {}
+        self._rules_cache_times = {}
         self._cache_ttl = 30
 
     def invalidate_cache(self):
@@ -49,6 +57,7 @@ class KeywordMatcher:
                 "match_type": keyword.match_type or group.match_type,
                 "case_sensitive": keyword.case_sensitive if keyword.case_sensitive is not None else group.case_sensitive,
                 "alert_level": keyword.alert_level or group.alert_level,
+                "synonyms": keyword.synonyms if hasattr(keyword, 'synonyms') and keyword.synonyms else [],
             })
 
         self._rules_cache[key] = {"created_at": time.time(), "rules": rules}
@@ -138,7 +147,7 @@ class KeywordMatcher:
             # 正则匹配
             try:
                 flags = 0 if case_sensitive else re.IGNORECASE
-                return bool(re.search(keyword, text, flags))
+                return bool(_compile_regex(keyword, flags).search(text))
             except re.error:
                 logger.warning(f"正则表达式错误: {keyword}")
                 return False
@@ -177,6 +186,7 @@ class KeywordMatcher:
                 groups_map = {g.id: g for g in groups_result.scalars().all()}
 
             matched = []
+            matched_ids = set()
             for keyword in keywords:
                 group = groups_map.get(keyword.group_id)
 
@@ -184,13 +194,23 @@ class KeywordMatcher:
                     match_type = keyword.match_type or group.match_type
                     case_sensitive = keyword.case_sensitive if keyword.case_sensitive is not None else group.case_sensitive
 
-                    if self._match(text, keyword.word, match_type, case_sensitive):
-                        matched.append({
-                            "keyword_id": keyword.id,
-                            "word": keyword.word,
-                            "group_id": group.id,
-                            "group_name": group.name,
-                            "match_type": match_type,
-                        })
+                    # 主词 + 同义词
+                    words_to_check = [keyword.word]
+                    synonyms = getattr(keyword, 'synonyms', None) or []
+                    if synonyms:
+                        words_to_check.extend(synonyms)
+
+                    for w in words_to_check:
+                        if self._match(text, w, match_type, case_sensitive):
+                            if keyword.id not in matched_ids:
+                                matched_ids.add(keyword.id)
+                                matched.append({
+                                    "keyword_id": keyword.id,
+                                    "word": keyword.word,
+                                    "group_id": group.id,
+                                    "group_name": group.name,
+                                    "match_type": match_type,
+                                })
+                            break
 
             return matched

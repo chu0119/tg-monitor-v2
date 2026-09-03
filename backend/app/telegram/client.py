@@ -1,6 +1,7 @@
 """Telegram 客户端管理"""
 import asyncio
 import time
+# fcntl不再需要，单worker用asyncio.Lock即可
 from datetime import datetime
 from typing import Dict, Optional, List
 from telethon import TelegramClient, events
@@ -14,6 +15,36 @@ from sqlalchemy import select, update
 from urllib.parse import urlparse
 
 
+
+
+class SessionFileLock:
+    """跨进程的session文件锁，使用fcntl文件锁实现
+    确保同一时间只有一个进程访问session文件
+    """
+    
+    def __init__(self, session_path: str):
+        self.lock_file = session_path + ".lock"
+        self._fd = None
+    
+    def __enter__(self):
+        # 创建锁文件
+        self._fd = open(self.lock_file, 'w')
+        # 获取排他锁（阻塞等待）
+        fcntl.flock(self._fd.fileno(), fcntl.LOCK_EX)
+        # 写入PID用于调试
+        import os
+        self._fd.write(str(os.getpid()))
+        self._fd.flush()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._fd:
+            # 释放锁
+            fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
+            self._fd.close()
+            self._fd = None
+        return False
+
 class TelegramClientManager:
     """Telegram 客户端管理器"""
 
@@ -25,9 +56,14 @@ class TelegramClientManager:
         # 追踪事件处理器用于清理
         self.event_handlers: Dict[int, List[dict]] = {}  # {account_id: [{'handler': handler, ...}]}
         self._unauthorized_accounts: set = set()  # 已知未授权的账号ID，跳过重复连接
+        # 服务重启时清空未授权列表，允许重新尝试连接
+        self._unauthorized_accounts.clear()
+        # 用于保护session文件并发访问的锁
+        import asyncio
+        # asyncio.Lock无法跨进程工作，改用SessionFileLock
 
-    def _get_default_proxy(self) -> Optional[tuple]:
-        """从配置获取默认代理，返回 Telethon 可用的元组"""
+    def _get_default_proxy(self) -> Optional[dict]:
+        """从配置获取默认代理，返回 Telethon 可用的字典格式"""
         proxy_url = (
             getattr(settings, "SOCKS5_PROXY", None)
             or getattr(settings, "HTTP_PROXY", None)
@@ -47,7 +83,7 @@ class TelegramClientManager:
             import socks as socklib
 
             scheme = (parsed.scheme or "").lower()
-            if scheme == "socks5":
+            if scheme in ("socks5", "socks5h"):
                 proxy_type = socklib.SOCKS5
             elif scheme in {"http", "https"}:
                 proxy_type = socklib.HTTP
@@ -55,7 +91,17 @@ class TelegramClientManager:
                 logger.warning(f"不支持的代理协议: {scheme}")
                 return None
 
-            result = (proxy_type, host, int(port), parsed.username, parsed.password)
+            # Telethon期望的代理格式是字典
+            result = {
+                "proxy_type": proxy_type,
+                "addr": host,
+                "port": int(port),
+            }
+            # 只添加非None的username和password
+            if parsed.username:
+                result["username"] = parsed.username
+            if parsed.password:
+                result["password"] = parsed.password
             logger.info(f"_get_default_proxy returning: {result}")
             return result
         except Exception as e:
@@ -103,14 +149,18 @@ class TelegramClientManager:
             # 检查是否有有效的代理配置
             if proxy_config.get("proxy_type") and proxy_config.get("addr"):
                 # Telethon 代理格式
-                return {
+                result = {
                     "proxy_type": proxy_config["proxy_type"],
                     "addr": proxy_config["addr"],
                     "port": proxy_config.get("port", 1080),
-                    "username": proxy_config.get("username"),
-                    "password": proxy_config.get("password"),
                     "rdns": True,
                 }
+                # 只添加非None的username和password
+                if proxy_config.get("username"):
+                    result["username"] = proxy_config["username"]
+                if proxy_config.get("password"):
+                    result["password"] = proxy_config["password"]
+                return result
 
         return None
 
@@ -122,19 +172,27 @@ class TelegramClientManager:
         proxy: Optional[dict] = None
     ) -> tuple:
         """创建Telegram客户端，返回 (client, authorized)"""
+        # 单worker模式下使用asyncio.Lock即可
+        return await self._create_client_internal(phone, api_id, api_hash, proxy)
+    
+    async def _create_client_internal(
+        self,
+        phone: str,
+        api_id: int,
+        api_hash: str,
+        proxy: Optional[dict] = None
+    ) -> tuple:
+        """创建Telegram客户端的内部实现"""
         session_path = self.get_session_path(phone)
 
-        # 检查session文件是否损坏，损坏则删除
+        # 检查session文件是否损坏（仅检查文件大小和基本结构）
         import os
         session_db = session_path + ".session"
         if os.path.exists(session_db):
-            try:
-                import sqlite3
-                conn = sqlite3.connect(session_db)
-                conn.execute("SELECT count(*) FROM sqlite_master")
-                conn.close()
-            except Exception:
-                logger.warning(f"Session文件损坏，自动删除: {session_db}")
+            # 检查文件大小是否合理（至少1KB）
+            file_size = os.path.getsize(session_db)
+            if file_size < 1024:
+                logger.warning(f"Session文件过小({file_size} bytes)，可能损坏，删除: {session_db}")
                 os.remove(session_db)
                 # 同时删除可能的journal/wal文件
                 for suffix in [".session-journal", ".session-wal", ".session-shm"]:
@@ -148,6 +206,10 @@ class TelegramClientManager:
         if proxy is not None and isinstance(proxy, dict):
             proxy = self._normalize_proxy_config(proxy)
 
+        # 移除proxy字典中的None值
+        if proxy and isinstance(proxy, dict):
+            proxy = {k: v for k, v in proxy.items() if v is not None}
+
         logger.info(f"create_client: final proxy={proxy}, phone={phone}")
 
         client = TelegramClient(
@@ -155,9 +217,18 @@ class TelegramClientManager:
             api_id,
             api_hash,
             proxy=proxy,
-            timeout=10,
+            timeout=15,
         )
-        await client.connect()
+        logger.info("create_client: 开始连接Telegram服务器...")
+        try:
+            await asyncio.wait_for(client.connect(), timeout=20)
+            logger.info("create_client: client.connect()完成")
+        except asyncio.TimeoutError:
+            logger.error("create_client: client.connect()超时(20秒)")
+            raise
+        except Exception as e:
+            logger.error(f"create_client: client.connect()异常: {e}")
+            raise
 
         if not client.is_connected():
             raise ConnectionError("Telethon connect failed")
@@ -173,6 +244,27 @@ class TelegramClientManager:
 
         auth = await client.is_user_authorized()
         logger.info(f"create_client: connected=True, authorized={auth}, proxy={'yes' if proxy else 'no'}")
+        
+        # 如果未授权，检查session文件状态
+        if not auth:
+            import os
+            session_db = session_path + ".session"
+            if os.path.exists(session_db):
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(session_db)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT * FROM sessions")
+                    session_data = cursor.fetchall()
+                    logger.info(f"create_client: session文件存在, 数据条数={len(session_data)}")
+                    if session_data:
+                        auth_key = session_data[0][3] if len(session_data[0]) > 3 else None
+                        logger.info(f"create_client: auth_key长度={len(auth_key) if auth_key else 0}")
+                    conn.close()
+                except Exception as e:
+                    logger.error(f"create_client: 检查session文件失败: {e}")
+            else:
+                logger.warning(f"create_client: session文件不存在: {session_db}")
 
         return client, auth
 
@@ -321,7 +413,7 @@ class TelegramClientManager:
 
         # 确保 session 持久化到磁盘
         try:
-            await client.session.save()
+            client.session.save()
             logger.info(f"账号 {phone} session 已保存到磁盘")
         except Exception as e:
             logger.warning(f"保存 session 失败: {e}")
@@ -332,10 +424,13 @@ class TelegramClientManager:
         logger.info(f"Telegram 账号登录成功: {phone} ({me.username})")
         return account
 
-    async def get_client(self, account_id: int) -> Optional[TelegramClient]:
-        """获取账号的客户端，确保已连接"""
+    async def get_client(self, account_id: int, force: bool = False) -> Optional[TelegramClient]:
+        """获取账号的客户端，确保已连接
+
+        force=True 时跳过 _unauthorized_accounts 缓存强制重连（账号重新授权后由心跳触发）。
+        """
         # 快速跳过已知未授权的账号（避免重复连接尝试）
-        if account_id in self._unauthorized_accounts:
+        if not force and account_id in self._unauthorized_accounts:
             return None
 
         if account_id in self.clients:

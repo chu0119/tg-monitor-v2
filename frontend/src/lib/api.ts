@@ -590,6 +590,110 @@ export const api = {
       return fetch(`${API_BASE}/analysis/report/pdf/weekly${params}`).then((resp) => resp.blob());
     },
   },
+
+  // 人员档案
+  personnel: {
+    search: (q: string) =>
+      fetch(`${API_BASE}/personnel/search?q=${encodeURIComponent(q)}`).then(handleResponse),
+    getProfile: (senderId: number) =>
+      fetch(`${API_BASE}/personnel/${senderId}/profile`).then(handleResponse),
+    getMessages: (senderId: number, params: {
+      group_by?: string;
+      conversation_id?: number;
+      date_from?: string;
+      date_to?: string;
+      keyword?: string;
+      page?: number;
+      page_size?: number;
+    }) => {
+      const cleanParams = Object.fromEntries(
+        Object.entries(params || {}).filter(([_, v]) => v !== undefined)
+      );
+      const searchParams = new URLSearchParams(cleanParams as any);
+      return fetch(`${API_BASE}/personnel/${senderId}/messages?${searchParams}`).then(handleResponse);
+    },
+  } ,
+  phoneRecords: {
+    list: (params?: Record<string, any>) =>
+      fetch(`/api/v1/phone-records?${new URLSearchParams(params || {}).toString()}`).then((r) => r.json()),
+    stats: () =>
+      fetch("/api/v1/phone-records/stats").then((r) => r.json()),
+    getPhone: (phone: string) =>
+      fetch(`/api/v1/phone-records/phone/${encodeURIComponent(phone)}`).then((r) => r.json()),
+    occurrences: (phone: string, params?: Record<string, any>) =>
+      fetch(`/api/v1/phone-records/phone/${encodeURIComponent(phone)}/occurrences?${new URLSearchParams(params || {}).toString()}`).then((r) => r.json()),
+  },
+
+  // 案件管理
+  cases: {
+    list: (params?: { status?: string; case_type?: string; priority?: string; page?: number; page_size?: number }) => {
+      const cleanParams = Object.fromEntries(
+        Object.entries(params || {}).filter(([_, v]) => v !== undefined)
+      );
+      const searchParams = new URLSearchParams(cleanParams as any);
+      return fetch(`${API_BASE}/cases?${searchParams}`).then(handleResponse);
+    },
+    get: (id: number) => fetch(`${API_BASE}/cases/${id}`).then(handleResponse),
+    create: (data: any) =>
+      fetch(`${API_BASE}/cases`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }).then(handleResponse),
+    update: (id: number, data: any) =>
+      fetch(`${API_BASE}/cases/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }).then(handleResponse),
+    delete: (id: number) =>
+      fetch(`${API_BASE}/cases/${id}`, { method: "DELETE" }).then(handleResponse),
+    addAlert: (caseId: number, alertId: number) =>
+      fetch(`${API_BASE}/cases/${caseId}/alerts/${alertId}`, { method: "POST" }).then(handleResponse),
+    removeAlert: (caseId: number, alertId: number) =>
+      fetch(`${API_BASE}/cases/${caseId}/alerts/${alertId}`, { method: "DELETE" }).then(handleResponse),
+    getAlerts: (caseId: number) =>
+      fetch(`${API_BASE}/cases/${caseId}/alerts`).then(handleResponse),
+  },
+
+  // 重点关注名单
+  watchlist: {
+    list: (params?: { item_type?: string; threat_level?: string; status?: string; page?: number; page_size?: number }) => {
+      const cleanParams = Object.fromEntries(
+        Object.entries(params || {}).filter(([_, v]) => v !== undefined)
+      );
+      const searchParams = new URLSearchParams(cleanParams as any);
+      return fetch(`${API_BASE}/watchlist?${searchParams}`).then(handleResponse);
+    },
+    get: (id: number) => fetch(`${API_BASE}/watchlist/${id}`).then(handleResponse),
+    create: (data: any) =>
+      fetch(`${API_BASE}/watchlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }).then(handleResponse),
+    update: (id: number, data: any) =>
+      fetch(`${API_BASE}/watchlist/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }).then(handleResponse),
+    delete: (id: number) =>
+      fetch(`${API_BASE}/watchlist/${id}`, { method: "DELETE" }).then(handleResponse),
+  },
+
+  // 审计日志
+  audit: {
+    list: (params?: { operator?: string; action_type?: string; target_type?: string; start_date?: string; end_date?: string; page?: number; page_size?: number }) => {
+      const cleanParams = Object.fromEntries(
+        Object.entries(params || {}).filter(([_, v]) => v !== undefined)
+      );
+      const searchParams = new URLSearchParams(cleanParams as any);
+      return fetch(`${API_BASE}/audit?${searchParams}`).then(handleResponse);
+    },
+    getActionTypes: () => fetch(`${API_BASE}/audit/action-types`).then(handleResponse),
+    getTargetTypes: () => fetch(`${API_BASE}/audit/target-types`).then(handleResponse),
+  },
 };
 
 // WebSocket 连接

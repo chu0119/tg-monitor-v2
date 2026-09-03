@@ -3,18 +3,30 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.auth import APIKeyAuthMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 import sys
 import asyncio
 import os
+import time
 
 from app.core.config import settings as config_settings
 from app.core.database import init_db
+from app.api import health
 from app.api import accounts, conversations, messages, keywords, alerts, notifications, dashboard, analysis, settings as settings_api, database, backups, diagnostics, monitoring, senders
+from app.api import phone_records
+from app.api import personnel
+from app.api import cases, watchlist, audit
 from app.api import proxy, system, update, migration
 from app.api.deps import get_db
+from app.core.error_handler import (
+    AppException,
+    app_exception_handler,
+    http_exception_handler,
+    general_exception_handler,
+)
 
 
 # 配置日志
@@ -54,7 +66,7 @@ class ConnectionManager:
         """接受连接，返回连接ID"""
         await websocket.accept()
         conn_id = f"{id(websocket)}_{asyncio.get_event_loop().time()}"
-        self.active_connections[websocket] = (asyncio.get_event_loop().time(), conn_id)
+        self.active_connections[websocket] = (time.monotonic(), conn_id)
         logger.info(f"WebSocket 连接建立 (ID: {conn_id})，当前连接数: {len(self.active_connections)}")
         return conn_id
 
@@ -68,7 +80,7 @@ class ConnectionManager:
     async def broadcast(self, message: dict):
         """广播消息，自动清理断开的连接"""
         disconnected = []
-        now = asyncio.get_event_loop().time()
+        now = time.monotonic()
 
         for connection, (last_active, conn_id) in list(self.active_connections.items()):
             # 检查连接超时
@@ -102,7 +114,7 @@ class ConnectionManager:
             await asyncio.wait_for(websocket.send_json(message), timeout=5.0)
             # 更新活跃时间
             if websocket in self.active_connections:
-                now = asyncio.get_event_loop().time()
+                now = time.monotonic()
                 _, conn_id = self.active_connections[websocket]
                 self.active_connections[websocket] = (now, conn_id)
         except asyncio.TimeoutError:
@@ -131,7 +143,7 @@ class ConnectionManager:
 
     async def cleanup_stale_connections(self):
         """清理僵尸连接（超时未活跃的连接）"""
-        now = asyncio.get_event_loop().time()
+        now = time.monotonic()
         stale_connections = [
             ws for ws, (last_active, _) in self.active_connections.items()
             if now - last_active > self.CONNECTION_TIMEOUT
@@ -253,19 +265,24 @@ async def lifespan(app: FastAPI):
     # 并行连接账号，提高启动速度（每个账号最多等15秒）
     async def connect_account(account):
         try:
-            client = await client_manager.get_client(account.id)
+            client = await asyncio.wait_for(
+                client_manager.get_client(account.id),
+                timeout=30
+            )
             if client:
                 logger.info(f"Telegram 账号已连接: {account.phone}")
             else:
                 logger.warning(f"Telegram 账号连接失败: {account.phone}")
         except asyncio.TimeoutError:
-            logger.warning(f"Telegram 账号连接超时，跳过: {account.phone}")
+            logger.warning(f"Telegram 账号连接超时(30s)，跳过: {account.phone}")
         except Exception as e:
-            logger.error(f"连接 Telegram 账号 {account.phone} 失败: {e}")
+            logger.error(f"连接 Telegram 账号 {account.phone} 失败: {type(e).__name__}: {e}")
 
     if accounts:
-        connect_tasks = [asyncio.create_task(connect_account(acc)) for acc in accounts]
-        await asyncio.gather(*connect_tasks, return_exceptions=True)
+        for acc in accounts:
+            task = asyncio.create_task(connect_account(acc))
+            background_tasks.add(task)
+            task.add_done_callback(background_tasks.discard)
 
     # 启动消息监控
     from app.telegram.monitor import message_monitor
@@ -304,6 +321,27 @@ async def lifespan(app: FastAPI):
     backup_task = asyncio.create_task(run_backup_task())
     background_tasks.add(backup_task)
     logger.info("自动备份任务已启动（后台运行）")
+
+    # 启动告警自动升级任务（每30分钟检查一次）
+    from app.services.alert_aggregation_service import alert_aggregation_service
+
+    async def run_escalation_task():
+        """后台运行告警自动升级任务"""
+        while True:
+            try:
+                await asyncio.sleep(1800)  # 每30分钟
+                async with AsyncSessionLocal() as db:
+                    result = await alert_aggregation_service.escalate_stale_alerts(db)
+                    if result.get("escalated_count", 0) > 0:
+                        logger.info(f"告警自动升级完成: {result['message']}")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"告警自动升级任务异常: {e}")
+
+    escalation_task = asyncio.create_task(run_escalation_task())
+    background_tasks.add(escalation_task)
+    logger.info("告警自动升级任务已启动（每30分钟）")
 
     yield
 
@@ -351,12 +389,17 @@ async def lifespan(app: FastAPI):
 
 
 # 创建 FastAPI 应用
+
 app = FastAPI(
     title=config_settings.PROJECT_NAME,
     version=config_settings.VERSION,
     lifespan=lifespan,
     redirect_slashes=True
 )
+
+# 注册异常处理器
+app.add_exception_handler(AppException, app_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
 
 # 配置 CORS
 # 注意：当 allow_origins 包含 "*" 时，不能设置 allow_credentials=True
@@ -369,8 +412,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# API Key auth middleware (enabled via TG_MONITOR_API_KEY env var)
+app.add_middleware(APIKeyAuthMiddleware)
+
 # 注册路由
 api_prefix = config_settings.API_PREFIX
+app.include_router(health.router, prefix=api_prefix)
 app.include_router(accounts.router, prefix=api_prefix)
 app.include_router(conversations.router, prefix=api_prefix)
 app.include_router(messages.router, prefix=api_prefix)
@@ -389,6 +436,11 @@ app.include_router(proxy.router, prefix=api_prefix)
 app.include_router(system.router, prefix=api_prefix)
 app.include_router(update.router, prefix=api_prefix)
 app.include_router(migration.router, prefix=api_prefix)
+app.include_router(phone_records.router, prefix=api_prefix)
+app.include_router(personnel.router, prefix=api_prefix)
+app.include_router(cases.router, prefix=api_prefix)
+app.include_router(watchlist.router, prefix=api_prefix)
+app.include_router(audit.router, prefix=api_prefix)
 
 
 # ==================== 兼容旧 API 路径 ====================
@@ -464,7 +516,7 @@ async def health():
         threads = process.num_threads()
 
         # 系统级 CPU
-        cpu_percent = psutil.cpu_percent(interval=0.5)
+        cpu_percent = psutil.cpu_percent(interval=None)
 
         # 系统级内存
         mem = psutil.virtual_memory()
@@ -597,3 +649,5 @@ if __name__ == "__main__":
         port=config_settings.PORT,
         reload=config_settings.DEBUG
     )
+
+

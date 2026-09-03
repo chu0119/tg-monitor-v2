@@ -204,7 +204,7 @@ class AlertService:
 
                 # create_alerts 的调用方统一提交事务。后台任务可能先于提交执行，
                 # 因此短暂重试，避免把正常的提交竞态误判为数据丢失。
-                max_attempts = 20
+                max_attempts = 40  # 20 seconds total (was 10s, increased for slow commits)
                 for attempt in range(max_attempts):
                     result = await db.execute(
                         select(Alert).where(Alert.id == alert_id)

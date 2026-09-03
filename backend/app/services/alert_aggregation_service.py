@@ -110,7 +110,7 @@ class AlertAggregationService:
                         Alert.created_at < cutoff,
                         Alert.alert_level != new_level,
                     )
-                )
+                ).limit(500)
             )
             alerts = result.scalars().all()
 

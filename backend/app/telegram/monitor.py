@@ -14,6 +14,7 @@ from app.models import (
 from app.telegram.client import client_manager
 from app.services.keyword_matcher import KeywordMatcher
 from app.services.alert_service import alert_service
+from app.services.phone_service import get_full_info, extract_phones_from_message
 from app.utils import now_utc
 
 
@@ -281,7 +282,7 @@ class MessageMonitor:
                         if not client:
                             # 客户端不存在,尝试重新创建
                             logger.warning(f"账号 {account.phone} 的客户端不存在,尝试重新连接...")
-                            new_client = await client_manager.get_client(account.id)
+                            new_client = await client_manager.get_client(account.id, force=True)
                             if new_client:
                                 # 重启该账号的监控
                                 await self.restart_monitors_for_account(account.id)
@@ -304,10 +305,27 @@ class MessageMonitor:
                                 last_msg_time = self._session_last_message_time[conv_id]
                                 time_since_last_msg = (datetime.now() - last_msg_time).total_seconds()
 
-                                # 如果超过10分钟没有消息,记录警告
+                                # 如果超过10分钟没有消息,尝试自动恢复
                                 if time_since_last_msg > 600:  # 10分钟
-                                    logger.warning(f"会话 {conv_id} 超过 {int(time_since_last_msg/60)} 分钟没有收到消息,可能监控失效")
-                                    # 可以在这里添加通知机制(如发送到前端)
+                                    logger.warning(f"会话 {conv_id} 超过 {int(time_since_last_msg/60)} 分钟没有收到消息,尝试自动恢复")
+                                    # 自动恢复：重启该会话所属账号的监控（带冷却时间）
+                                    if not hasattr(self, '_recovery_cooldown'):
+                                        self._recovery_cooldown = {}
+                                    now_ts = datetime.now().timestamp()
+                                    last_recovery = self._recovery_cooldown.get(conv_id, 0)
+                                    if now_ts - last_recovery > 600:  # 10分钟冷却
+                                        try:
+                                            async with AsyncSessionLocal() as db:
+                                                result = await db.execute(
+                                                    select(Conversation.account_id).where(Conversation.id == conv_id)
+                                                )
+                                                acc_id = result.scalar_one_or_none()
+                                                if acc_id:
+                                                    await self.restart_monitors_for_account(acc_id)
+                                                    self._recovery_cooldown[conv_id] = now_ts
+                                                    logger.info(f"会话 {conv_id} 自动恢复完成")
+                                        except Exception as e:
+                                            logger.error(f"会话 {conv_id} 自动恢复失败: {e}")
 
             except asyncio.CancelledError:
                 break
@@ -419,9 +437,21 @@ class MessageMonitor:
                     await db.rollback()
                     return False
 
+                # 提取消息正文中的手机号
+                if message.text or message.caption:
+                    try:
+                        extracted_phones = extract_phones_from_message(message)
+                        for phone_info in extracted_phones:
+                            await self._save_phone_record(
+                                db, phone_info, message, conversation_id,
+                                message.sender_id, sender
+                            )
+                    except Exception as e:
+                        logger.warning(f"提取手机号失败: {e}")
+
                 # 关键词匹配
                 matched_keywords = await self.keyword_matcher.match_message(
-                    db, message, conversation_id
+                    db, message, conversation_id, conversation
                 )
 
                 if matched_keywords:
@@ -512,6 +542,12 @@ class MessageMonitor:
         new_last_name = getattr(message.sender, "last_name", None)
         new_phone = getattr(message.sender, "phone", None)
 
+        # 通过 phonenumbers 库解析手机号获取国家信息
+        phone_info = get_full_info(new_phone) if new_phone else {}
+        country_code = phone_info.get("country_code", "")
+        country = phone_info.get("country", "")
+        phone_location = phone_info.get("location", "")
+
         # 使用 MySQL 原生 SQL 进行原子操作(参数化查询防止 SQL 注入)
         from sqlalchemy import text
 
@@ -519,9 +555,11 @@ class MessageMonitor:
         sql = text("""
             INSERT INTO senders (
                 user_id, username, first_name, last_name, phone,
+                country_code, country, phone_location,
                 is_bot, is_verified, is_premium, message_count
             ) VALUES (
                 :user_id, :username, :first_name, :last_name, :phone,
+                :country_code, :country, :phone_location,
                 :is_bot, :is_verified, :is_premium, 1
             )
             ON DUPLICATE KEY UPDATE
@@ -530,7 +568,10 @@ class MessageMonitor:
                 username = COALESCE(NULLIF(username, ''), :username),
                 first_name = COALESCE(NULLIF(first_name, ''), :first_name),
                 last_name = COALESCE(NULLIF(last_name, ''), :last_name),
-                phone = COALESCE(NULLIF(phone, ''), :phone)
+                phone = COALESCE(NULLIF(phone, ''), :phone),
+                country_code = COALESCE(NULLIF(country_code, ''), :country_code),
+                country = COALESCE(NULLIF(country, ''), :country),
+                phone_location = COALESCE(NULLIF(phone_location, ''), :phone_location)
         """)
 
         try:
@@ -540,6 +581,9 @@ class MessageMonitor:
                 "first_name": new_first_name or "",
                 "last_name": new_last_name or "",
                 "phone": new_phone or "",
+                "country_code": country_code,
+                "country": country,
+                "phone_location": phone_location,
                 "is_bot": 1 if getattr(message.sender, 'bot', False) else 0,
                 "is_verified": 1 if getattr(message.sender, 'verified', False) else 0,
                 "is_premium": 1 if getattr(message.sender, 'premium', False) else 0,
@@ -570,12 +614,18 @@ class MessageMonitor:
                     sender.message_count = (sender.message_count or 0) + 1
                     return sender
 
+                # 解析手机号国家信息（fallback 方法中也需要）
+                fb_phone = getattr(message.sender, "phone", None)
+                fb_phone_info = get_full_info(fb_phone) if fb_phone else {}
                 sender = Sender(
                     user_id=sender_id,
                     username=getattr(message.sender, "username", None),
                     first_name=getattr(message.sender, "first_name", None),
                     last_name=getattr(message.sender, "last_name", None),
-                    phone=getattr(message.sender, "phone", None),
+                    phone=fb_phone,
+                    country_code=fb_phone_info.get("country_code", ""),
+                    country=fb_phone_info.get("country", ""),
+                    phone_location=fb_phone_info.get("location", ""),
                     is_bot=getattr(message.sender, "bot", False),
                     is_verified=getattr(message.sender, "verified", False),
                     is_premium=getattr(message.sender, "premium", False),
@@ -592,6 +642,61 @@ class MessageMonitor:
                 logger.error(f"回退方法失败(user_id={sender_id}): {e}")
                 await db.rollback()
                 return None
+
+
+    async def _save_phone_record(self, db, phone_info, message, conversation_id, sender_id, sender):
+        """保存手机号记录到 phone_records 表"""
+        from app.models.phone_record import PhoneRecord
+        from app.services.phone_service import get_full_info
+        from sqlalchemy import text as sql_text
+
+        phone = phone_info.get("phone", "")
+        if not phone or not phone.isdigit() or len(phone) < 7 or len(phone) > 15:
+            return
+
+        # 获取手机号详细信息
+        phone_detail = get_full_info(phone)
+
+        # 构建来源详情
+        sender_name = ""
+        if sender:
+            sender_name = getattr(sender, "first_name", "") or ""
+            username = getattr(sender, "username", "")
+            if username:
+                sender_name = f"{sender_name}(@{username})" if sender_name else f"@{username}"
+
+        source_detail = f"{sender_name}: {phone_info.get('context', '')}" if phone_info.get('context') else sender_name
+
+        try:
+            # INSERT ... ON DUPLICATE KEY UPDATE
+            sql = sql_text("""
+                INSERT INTO phone_records (
+                    phone, phone_display, country_code, country, phone_location, carrier,
+                    source_type, source_id, source_detail, conversation_id,
+                    first_seen_at, last_seen_at, occurrence_count
+                ) VALUES (
+                    :phone, :phone_display, :country_code, :country, :phone_location, :carrier,
+                    'message', :source_id, :source_detail, :conversation_id,
+                    NOW(), NOW(), 1
+                )
+                ON DUPLICATE KEY UPDATE
+                    last_seen_at = NOW(),
+                    occurrence_count = occurrence_count + 1,
+                    source_detail = IF(LENGTH(COALESCE(:source_detail, '')) > LENGTH(COALESCE(source_detail, '')), :source_detail, source_detail)
+            """)
+            await db.execute(sql, {
+                "phone": phone,
+                "phone_display": phone_info.get("display", phone),
+                "country_code": phone_detail.get("country_code", ""),
+                "country": phone_detail.get("country", ""),
+                "phone_location": phone_detail.get("location", ""),
+                "carrier": phone_detail.get("carrier", ""),
+                "source_id": message.id if hasattr(message, 'id') else 0,
+                "source_detail": source_detail[:500] if source_detail else "",
+                "conversation_id": conversation_id or 0,
+            })
+        except Exception as e:
+            logger.warning(f"保存手机号记录失败: phone={phone}, error={e}")
 
     async def _save_message(
         self,
@@ -747,8 +852,15 @@ class MessageMonitor:
         """获取会话标题（使用缓存减少数据库查询，支持Telethon fallback）"""
         if not hasattr(self, '_conv_title_cache'):
             self._conv_title_cache = {}
+            self._conv_title_cache_times = {}
         if conversation_id in self._conv_title_cache:
-            return self._conv_title_cache[conversation_id]
+            import time
+            cache_time = self._conv_title_cache_times.get(conversation_id, 0)
+            if time.time() - cache_time < 300:  # 5 min TTL
+                return self._conv_title_cache[conversation_id]
+            else:
+                del self._conv_title_cache[conversation_id]
+                self._conv_title_cache_times.pop(conversation_id, None)
         try:
             result = await db.execute(
                 select(Conversation).where(Conversation.id == conversation_id)
@@ -771,14 +883,21 @@ class MessageMonitor:
                             title = entity.title
                         if title:
                             conv.title = title
-                            await db.commit()
+                            # 不在这里 commit，由外层 process_message 统一 commit
                 except Exception:
                     pass
 
             if not title:
                 title = f"用户#{conv.chat_id}" if conv and conv.chat_type == 'private' else f"会话#{conversation_id}"
 
+            # Limit cache size to 1000 entries
+            if len(self._conv_title_cache) > 1000:
+                oldest_key = min(self._conv_title_cache_times, key=self._conv_title_cache_times.get)
+                del self._conv_title_cache[oldest_key]
+                self._conv_title_cache_times.pop(oldest_key, None)
+            import time
             self._conv_title_cache[conversation_id] = title
+            self._conv_title_cache_times[conversation_id] = time.time()
             return title
         except Exception:
             return "Unknown"
@@ -1204,6 +1323,8 @@ class MessageMonitor:
                     logger.warning(f"批量 flush 失败，降级为逐条处理: {flush_error}")
                     await db.rollback()
                     senders_cache.clear()
+                    # Expire all stale objects after rollback
+                    db.expire_all()
                     await self._process_messages_individually(db, conversation_id, messages, senders_cache)
                     await db.commit()
                     logger.info(f"逐条降级处理完成: 会话 {conversation_id}, {len(messages)} 条消息")

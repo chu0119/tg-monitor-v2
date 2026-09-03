@@ -32,6 +32,7 @@ export const Route = createFileRoute("/")({
 });
 
 function RootComponent() {
+  console.log("[DEBUG] RootComponent rendered, route:", window.location.pathname);
   const location = useLocation();
 
   // setup 页面不使用 MainLayout

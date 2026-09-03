@@ -45,6 +45,25 @@ async def get_proxy_config(db: AsyncSession) -> dict:
     except ValueError:
         port = 1080
 
+    # 如果数据库没有代理配置，尝试从.env的SOCKS5_PROXY解析
+    if not enabled and not host:
+        env_proxy = getattr(settings, "SOCKS5_PROXY", None) or os.environ.get("SOCKS5_PROXY")
+        if env_proxy:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(env_proxy)
+                if parsed.hostname:
+                    return {
+                        "enabled": True,
+                        "protocol": parsed.scheme or "socks5",
+                        "host": parsed.hostname,
+                        "port": parsed.port or 1080,
+                        "username": parsed.username,
+                        "password": parsed.password,
+                    }
+            except Exception as e:
+                logger.warning(f"解析.env代理配置失败: {e}")
+
     return {
         "enabled": enabled,
         "protocol": protocol,
@@ -88,7 +107,7 @@ def build_proxy_url(config: dict) -> Optional[str]:
     host = (config.get("host") or "").strip()
     port = config.get("port")
 
-    if protocol not in {"http", "https", "socks5"}:
+    if protocol not in {"http", "https", "socks5", "socks5h"}:
         return None
     if not host or not isinstance(port, int):
         return None
@@ -106,7 +125,9 @@ def build_proxy_url(config: dict) -> Optional[str]:
 
 
 def apply_proxy_config(config: dict) -> dict:
-    """将代理配置应用到当前进程环境变量与全局 settings。"""
+    """将代理配置应用到当前进程环境变量与全局 settings。
+    如果数据库没有代理配置，保留.env中已有的SOCKS5_PROXY配置。
+    """
     proxy_url = build_proxy_url(config)
 
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "SOCKS5_PROXY"):
@@ -117,6 +138,11 @@ def apply_proxy_config(config: dict) -> dict:
     settings.SOCKS5_PROXY = None
 
     if not proxy_url:
+        # 数据库没有代理配置时，检查是否已有.env中的SOCKS5_PROXY
+        env_proxy = os.environ.get("SOCKS5_PROXY") or getattr(settings, "SOCKS5_PROXY", None)
+        if env_proxy:
+            logger.info(f"数据库无代理配置，使用.env中的代理: {env_proxy}")
+            return {"applied": True, "proxy_url": env_proxy}
         logger.info("代理已禁用或配置不完整，已清空运行时代理环境变量")
         return {"applied": False, "proxy_url": None}
 
@@ -126,7 +152,7 @@ def apply_proxy_config(config: dict) -> dict:
         os.environ["HTTPS_PROXY"] = proxy_url
         settings.HTTP_PROXY = proxy_url
         settings.HTTPS_PROXY = proxy_url
-    elif protocol == "socks5":
+    elif protocol in ("socks5", "socks5h"):
         os.environ["ALL_PROXY"] = proxy_url
         os.environ["SOCKS5_PROXY"] = proxy_url
         settings.SOCKS5_PROXY = proxy_url

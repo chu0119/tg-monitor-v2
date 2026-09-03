@@ -1,16 +1,24 @@
-import { StrictMode } from "react";
+import React, { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./styles/globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
-
-// Import the generated route tree
 import { routeTree } from "./routeTree.gen.tsx";
 
-// Create a new router instance
+// Create QueryClient
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5000,
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
 const router = createRouter({ routeTree });
 
-// Register the router instance for type safety
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;
@@ -19,8 +27,12 @@ declare module "@tanstack/react-router" {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider>
-      <RouterProvider router={router} />
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <Suspense fallback={<div className="flex items-center justify-center h-screen bg-gray-900"><div className="text-gray-400">加载中...</div></div>}>
+          <RouterProvider router={router} />
+        </Suspense>
+      </ThemeProvider>
+    </QueryClientProvider>
   </StrictMode>
 );

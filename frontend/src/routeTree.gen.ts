@@ -21,6 +21,8 @@ import { Route as BigscreenRouteImport } from './routes/bigscreen'
 import { Route as AnalysisRouteImport } from './routes/analysis'
 import { Route as AlertsRouteImport } from './routes/alerts'
 import { Route as AccountsRouteImport } from './routes/accounts'
+import { Route as PersonnelRouteImport } from './routes/personnel'
+import { Route as PhoneIntelRouteImport } from './routes/phone-intel'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SetupRoute = SetupRouteImport.update({
@@ -83,6 +85,16 @@ const AccountsRoute = AccountsRouteImport.update({
   path: '/accounts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PersonnelRoute = PersonnelRouteImport.update({
+  id: '/personnel',
+  path: '/personnel',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PhoneIntelRoute = PhoneIntelRouteImport.update({
+  id: '/phone-intel',
+  path: '/phone-intel',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -92,6 +104,8 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/personnel': typeof PersonnelRoute
+  '/phone-intel': typeof PhoneIntelRoute
   '/alerts': typeof AlertsRoute
   '/analysis': typeof AnalysisRoute
   '/bigscreen': typeof BigscreenRoute
@@ -107,6 +121,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/personnel': typeof PersonnelRoute
+  '/phone-intel': typeof PhoneIntelRoute
   '/alerts': typeof AlertsRoute
   '/analysis': typeof AnalysisRoute
   '/bigscreen': typeof BigscreenRoute
@@ -123,6 +139,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/personnel': typeof PersonnelRoute
+  '/phone-intel': typeof PhoneIntelRoute
   '/alerts': typeof AlertsRoute
   '/analysis': typeof AnalysisRoute
   '/bigscreen': typeof BigscreenRoute
@@ -140,6 +158,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/accounts'
+    | '/personnel'
+    | '/phone-intel'
     | '/alerts'
     | '/analysis'
     | '/bigscreen'
@@ -155,6 +175,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/accounts'
+    | '/personnel'
+    | '/phone-intel'
     | '/alerts'
     | '/analysis'
     | '/bigscreen'
@@ -170,6 +192,8 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/accounts'
+    | '/personnel'
+    | '/phone-intel'
     | '/alerts'
     | '/analysis'
     | '/bigscreen'
@@ -285,6 +309,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/personnel': {
+      id: '/personnel'
+      path: '/personnel'
+      fullPath: '/personnel'
+      preLoaderRoute: typeof PersonnelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/phone-intel': {
+      id: '/phone-intel'
+      path: '/phone-intel'
+      fullPath: '/phone-intel'
+      preLoaderRoute: typeof PhoneIntelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -298,6 +336,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsRoute: AccountsRoute,
+  PersonnelRoute: PersonnelRoute,
+  PhoneIntelRoute: PhoneIntelRoute,
   AlertsRoute: AlertsRoute,
   AnalysisRoute: AnalysisRoute,
   BigscreenRoute: BigscreenRoute,

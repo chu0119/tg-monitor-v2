@@ -1,4 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Virtuoso } from "react-virtuoso";
+import { useDebounce } from "@/hooks/useDebounce";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -36,9 +38,9 @@ interface Alert {
   status: string;
   matched_text: string;
   message_preview: string;
-  highlighted_message?: string;  // 带关键词高亮的消息内容
+  highlighted_message?: string;
   created_at: string;
-  message_time?: string;  // 消息原始发送时间
+  message_time?: string;
   sender_username?: string;
   sender_tg_id?: number;
   sender_phone?: string;
@@ -59,6 +61,7 @@ export function AlertsPage() {
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [filter, setFilter] = useState({ status: "", level: "", keyword: "", has_phone: false });
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 400);
   const [showKeywordGroupFilter, setShowKeywordGroupFilter] = useState(false);
   const [selectedKeywordGroups, setSelectedKeywordGroups] = useState<number[]>([]);
   const [keywordGroups, setKeywordGroups] = useState<KeywordGroup[]>([]);
@@ -68,6 +71,19 @@ export function AlertsPage() {
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
   const keywordGroupDropdownRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
+  // 手机号国家/归属地筛选
+  const [countries, setCountries] = useState<{name: string; count: number}[]>([]);
+  const [locations, setLocations] = useState<{name: string; count: number}[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState("");
+  const [selectedLocation, setSelectedLocation] = useState("");
+  const [countrySearch, setCountrySearch] = useState("");
+  const [locationSearch, setLocationSearch] = useState("");
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const countryBtnRef = useRef<HTMLButtonElement>(null);
+  const locationBtnRef = useRef<HTMLButtonElement>(null);
+  const [countryDropdownPos, setCountryDropdownPos] = useState({ top: 0, left: 0 });
+  const [locationDropdownPos, setLocationDropdownPos] = useState({ top: 0, left: 0 });
 
   // 分页状态
   const [currentPage, setCurrentPage] = useState(1);
@@ -78,7 +94,51 @@ export function AlertsPage() {
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstMountRef = useRef(true);
 
-  // 点击外部关闭下拉菜单
+  // 获取国家列表
+  useEffect(() => {
+    fetch("/api/v1/senders/countries/list")
+      .then(r => r.json())
+      .then(data => setCountries(data))
+      .catch(() => {});
+  }, []);
+
+  // 当国家变化时，获取归属地列表
+  useEffect(() => {
+    if (selectedCountry) {
+      fetch(`/api/v1/senders/locations/list?country=${encodeURIComponent(selectedCountry)}`)
+        .then(r => r.json())
+        .then(data => setLocations(data))
+        .catch(() => {});
+    } else {
+      setLocations([]);
+      setSelectedLocation("");
+    }
+  }, [selectedCountry]);
+
+  // 点击外部关闭国家/归属地 portal 下拉框
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (showCountryDropdown) {
+        const portalDropdown = document.querySelector('[data-dropdown="country"]');
+        const btn = countryBtnRef.current;
+        if (btn && !btn.contains(target) && portalDropdown && !portalDropdown.contains(target)) {
+          setShowCountryDropdown(false);
+        }
+      }
+      if (showLocationDropdown) {
+        const portalDropdown = document.querySelector('[data-dropdown="location"]');
+        const btn = locationBtnRef.current;
+        if (btn && !btn.contains(target) && portalDropdown && !portalDropdown.contains(target)) {
+          setShowLocationDropdown(false);
+        }
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showCountryDropdown, showLocationDropdown]);
+
+  // 点击外部关闭关键词组 portal 下拉框
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (showKeywordGroupDropdown && keywordGroupDropdownRef.current) {
@@ -96,7 +156,7 @@ export function AlertsPage() {
 
   useEffect(() => {
     fetchKeywordGroups();
-    
+
     // 初始加载时不防抖，直接请求
     if (isFirstMountRef.current) {
       isFirstMountRef.current = false;
@@ -119,7 +179,7 @@ export function AlertsPage() {
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [filter, selectedKeywordGroups, currentPage, pageSize]);
+  }, [filter, selectedKeywordGroups, currentPage, pageSize, selectedCountry, selectedLocation, debouncedSearch]);
 
   const fetchKeywordGroups = async () => {
     try {
@@ -139,15 +199,15 @@ export function AlertsPage() {
       };
       if (filter.status) params.status = filter.status;
       if (filter.level) params.alert_level = filter.level;
-      if (filter.keyword) params.keyword = filter.keyword;
+      if (debouncedSearch) params.keyword = debouncedSearch;
       if (filter.has_phone) params.has_phone = true;
+      if (selectedCountry) params.sender_country = selectedCountry;
+      if (selectedLocation) params.sender_location = selectedLocation;
       if (selectedKeywordGroups.length > 0) {
-        // 多个关键词组使用 OR 查询
-        params.keyword_group_id = selectedKeywordGroups[0]; // API只支持单个，后续可以扩展
+        params.keyword_group_id = selectedKeywordGroups[0];
       }
 
       const data = await api.alerts.list(params);
-      // API 返回格式: { items: [], total: number, page: number, page_size: number, total_pages: number }
       if (data && typeof data === 'object' && 'items' in data) {
         setAlerts(data.items || []);
         setTotalCount(data.total || 0);
@@ -168,6 +228,7 @@ export function AlertsPage() {
 
   const handleSearch = () => {
     setFilter({ ...filter, keyword: search });
+              setCurrentPage(1);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -314,7 +375,7 @@ export function AlertsPage() {
             <div className="hidden sm:flex flex-wrap items-center gap-3">
               <select
                 value={filter.status}
-                onChange={(e) => setFilter({ ...filter, status: e.target.value })}
+                onChange={(e) => { setFilter({ ...filter, status: e.target.value }); setCurrentPage(1); }}
                 className="input-tech px-4 py-2 rounded-lg min-h-[44px]"
               >
                 <option value="">全部状态</option>
@@ -326,7 +387,7 @@ export function AlertsPage() {
               </select>
               <select
                 value={filter.level}
-                onChange={(e) => setFilter({ ...filter, level: e.target.value })}
+                onChange={(e) => { setFilter({ ...filter, level: e.target.value }); setCurrentPage(1); }}
                 className="input-tech px-4 py-2 rounded-lg min-h-[44px]"
               >
                 <option value="">全部级别</option>
@@ -339,11 +400,125 @@ export function AlertsPage() {
                 <input
                   type="checkbox"
                   checked={filter.has_phone}
-                  onChange={(e) => setFilter({ ...filter, has_phone: e.target.checked })}
+                  onChange={(e) => {
+                    setFilter({ ...filter, has_phone: e.target.checked });
+                    setCurrentPage(1);
+                  }}
                   className="rounded"
                 />
                 <span className="text-sm">仅显示有手机号</span>
               </label>
+              {/* 国家筛选下拉框 */}
+              <div className="relative">
+                <button
+                  ref={countryBtnRef}
+                  onClick={() => {
+                    if (!showCountryDropdown && countryBtnRef.current) {
+                      const rect = countryBtnRef.current.getBoundingClientRect();
+                      setCountryDropdownPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX });
+                    }
+                    setShowCountryDropdown(!showCountryDropdown);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border min-h-[44px] text-sm whitespace-nowrap ${selectedCountry ? "border-cyber-blue bg-cyber-blue/10 text-cyber-blue" : "border-border bg-secondary/50"}`}
+                >
+                  🌍 {selectedCountry || "国家"}
+                  {selectedCountry && <span className="text-xs opacity-60">✕</span>}
+                </button>
+                {showCountryDropdown && createPortal(
+                  <div
+                    data-dropdown="country"
+                    className="fixed bg-[#0a0e1a] border border-cyber-blue/30 rounded-lg p-2 min-w-[220px] z-[10000] max-h-64 overflow-y-auto tech-scrollbar shadow-lg"
+                    style={{ top: `${countryDropdownPos.top}px`, left: `${countryDropdownPos.left}px` }}
+                  >
+                    <div className="p-2 border-b border-cyber-blue/10">
+                      <input
+                        type="text"
+                        placeholder="搜索国家..."
+                        value={countrySearch}
+                        onChange={(e) => setCountrySearch(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded bg-secondary/50 border border-border text-sm"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="overflow-y-auto max-h-60 tech-scrollbar">
+                      {countries
+                        .filter(c => !countrySearch || c.name.includes(countrySearch))
+                        .map(c => (
+                          <button
+                            key={c.name}
+                            onClick={() => {
+                              setSelectedCountry(selectedCountry === c.name ? "" : c.name);
+                              setSelectedLocation("");
+                              setShowCountryDropdown(false);
+                              setCountrySearch("");
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-cyber-blue/10 rounded ${selectedCountry === c.name ? "bg-cyber-blue/10 text-cyber-blue" : ""}`}
+                          >
+                            <span>{c.name}</span>
+                            <span className="text-xs text-muted-foreground">{c.count}</span>
+                          </button>
+                        ))}
+                    </div>
+                  </div>,
+                  document.body
+                )}
+              </div>
+              {/* 归属地下拉框（仅选了国家后显示） */}
+              {selectedCountry && (
+                <div className="relative">
+                  <button
+                    ref={locationBtnRef}
+                    onClick={() => {
+                      if (!showLocationDropdown && locationBtnRef.current) {
+                        const rect = locationBtnRef.current.getBoundingClientRect();
+                        setLocationDropdownPos({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX });
+                      }
+                      setShowLocationDropdown(!showLocationDropdown);
+                    }}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border min-h-[44px] text-sm whitespace-nowrap ${selectedLocation ? "border-cyber-blue bg-cyber-blue/10 text-cyber-blue" : "border-border bg-secondary/50"}`}
+                  >
+                    📍 {selectedLocation || "归属地"}
+                    {selectedLocation && <span className="text-xs opacity-60">✕</span>}
+                  </button>
+                  {showLocationDropdown && createPortal(
+                    <div
+                      data-dropdown="location"
+                      className="fixed bg-[#0a0e1a] border border-cyber-blue/30 rounded-lg p-2 min-w-[220px] z-[10000] max-h-64 overflow-y-auto tech-scrollbar shadow-lg"
+                      style={{ top: `${locationDropdownPos.top}px`, left: `${locationDropdownPos.left}px` }}
+                    >
+                      <div className="p-2 border-b border-cyber-blue/10">
+                        <input
+                          type="text"
+                          placeholder="搜索城市/省份..."
+                          value={locationSearch}
+                          onChange={(e) => setLocationSearch(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded bg-secondary/50 border border-border text-sm"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="overflow-y-auto max-h-60 tech-scrollbar">
+                        {locations
+                          .filter(l => !locationSearch || l.name.includes(locationSearch))
+                          .map(l => (
+                            <button
+                              key={l.name}
+                              onClick={() => {
+                                setSelectedLocation(selectedLocation === l.name ? "" : l.name);
+                                setShowLocationDropdown(false);
+                                setLocationSearch("");
+                              }}
+                              className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-cyber-blue/10 rounded ${selectedLocation === l.name ? "bg-cyber-blue/10 text-cyber-blue" : ""}`}
+                            >
+                              <span>{l.name}</span>
+                              <span className="text-xs text-muted-foreground">{l.count}</span>
+                            </button>
+                          ))}
+                      </div>
+                    </div>,
+                    document.body
+                  )}
+                </div>
+              )}
               <div className="relative" ref={keywordGroupDropdownRef}>
                 <Button
                   variant="outline"
@@ -419,7 +594,7 @@ export function AlertsPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  setFilter({ status: "", level: "", keyword: "", has_phone: false });
+                  setFilter({ status: "", level: "", keyword: "", has_phone: false }); setSelectedCountry(""); setSelectedLocation("");
                   setSearch("");
                   setSelectedKeywordGroups([]);
                 }}
@@ -445,7 +620,10 @@ export function AlertsPage() {
               <div className="grid grid-cols-2 gap-2">
                 <select
                   value={filter.status}
-                  onChange={(e) => setFilter({ ...filter, status: e.target.value })}
+                  onChange={(e) => {
+                    setFilter({ ...filter, status: e.target.value });
+                    setCurrentPage(1);
+                  }}
                   className="input-tech px-3 py-2 rounded-lg min-h-[44px] text-sm"
                 >
                   <option value="">全部状态</option>
@@ -457,7 +635,10 @@ export function AlertsPage() {
                 </select>
                 <select
                   value={filter.level}
-                  onChange={(e) => setFilter({ ...filter, level: e.target.value })}
+                  onChange={(e) => {
+                    setFilter({ ...filter, level: e.target.value });
+                    setCurrentPage(1);
+                  }}
                   className="input-tech px-3 py-2 rounded-lg min-h-[44px] text-sm"
                 >
                   <option value="">全部级别</option>
@@ -515,7 +696,7 @@ export function AlertsPage() {
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setFilter({ status: "", level: "", keyword: "", has_phone: false });
+                    setFilter({ status: "", level: "", keyword: "", has_phone: false }); setSelectedCountry(""); setSelectedLocation("");
                     setSearch("");
                     setSelectedKeywordGroups([]);
                   }}
@@ -582,19 +763,26 @@ export function AlertsPage() {
                 </button>
               </div>
             )}
-            {(() => {
-              return alerts.map((alert) => (
-              <AlertRow
-                key={alert.id}
-                alert={alert}
-                onClick={() => setSelectedAlert(alert)}
-                levelColor={levelColors[alert.alert_level as keyof typeof levelColors]}
-                levelLabel={levelLabels[alert.alert_level as keyof typeof levelLabels]}
-                isSelected={selectedAlerts.has(alert.id)}
-                onToggleSelect={() => toggleSelectAlert(alert.id)}
-              />
-            ));
-            })()}
+            <Virtuoso
+              totalCount={alerts.length}
+              overscan={200}
+              itemContent={(index) => {
+                const alert = alerts[index];
+                return (
+                  <div className="mb-3">
+                    <AlertRow
+                      alert={alert}
+                      onClick={() => setSelectedAlert(alert)}
+                      levelColor={levelColors[alert.alert_level as keyof typeof levelColors]}
+                      levelLabel={levelLabels[alert.alert_level as keyof typeof levelLabels]}
+                      isSelected={selectedAlerts.has(alert.id)}
+                      onToggleSelect={() => toggleSelectAlert(alert.id)}
+                    />
+                  </div>
+                );
+              }}
+              style={{ height: Math.min(alerts.length * 120, 600) }}
+            />
           </>
         )}
       </div>

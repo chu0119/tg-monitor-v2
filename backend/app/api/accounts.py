@@ -2,7 +2,7 @@
 from typing import List
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update, delete, or_, func
+from sqlalchemy import select, update, delete, or_, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
@@ -28,20 +28,34 @@ async def list_accounts(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(TelegramAccount))
     accounts = result.scalars().all()
 
-    # 实时统计每个账号的消息数和会话数
-    for account in accounts:
-        msg_result = await db.execute(
-            select(func.count(Message.id))
-            .join(Conversation, Message.conversation_id == Conversation.id)
-            .where(Conversation.account_id == account.id)
-        )
-        account.total_messages = msg_result.scalar() or 0
+    # 实时统计每个账号的消息数和会话数 - 批量子查询替代N+1
+    if accounts:
+        account_ids = [a.id for a in accounts]
+        placeholders = ",".join([f":id{i}" for i in range(len(account_ids))])
+        id_params = {f"id{i}": aid for i, aid in enumerate(account_ids)}
 
-        conv_result = await db.execute(
-            select(func.count(Conversation.id))
-            .where(Conversation.account_id == account.id)
-        )
-        account.total_conversations = conv_result.scalar() or 0
+        # 批量查询消息数
+        msg_counts_result = await db.execute(text(f"""
+            SELECT c.account_id, COUNT(m.id) as cnt
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            WHERE c.account_id IN ({placeholders})
+            GROUP BY c.account_id
+        """), id_params)
+        msg_counts = {row[0]: row[1] for row in msg_counts_result.fetchall()}
+
+        # 批量查询会话数
+        conv_counts_result = await db.execute(text(f"""
+            SELECT account_id, COUNT(*) as cnt
+            FROM conversations
+            WHERE account_id IN ({placeholders})
+            GROUP BY account_id
+        """), id_params)
+        conv_counts = {row[0]: row[1] for row in conv_counts_result.fetchall()}
+
+        for account in accounts:
+            account.total_messages = msg_counts.get(account.id, 0)
+            account.total_conversations = conv_counts.get(account.id, 0)
 
     return accounts
 

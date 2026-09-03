@@ -16,6 +16,8 @@ router = APIRouter(prefix="/senders", tags=["发送者查询"])
 async def list_senders(
     has_phone: Optional[bool] = Query(None, description="筛选有手机号的发送者"),
     keyword: Optional[str] = Query(None, description="搜索用户名或手机号"),
+    country: Optional[str] = Query(None, description="按国家筛选"),
+    phone_location: Optional[str] = Query(None, description="按归属地筛选"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -34,6 +36,10 @@ async def list_senders(
                 Sender.phone.ilike(f"%{keyword}%"),
             )
         )
+    if country:
+        conditions.append(Sender.country == country)
+    if phone_location:
+        conditions.append(Sender.phone_location.ilike(f"%{phone_location}%"))
 
     # 总数
     count_query = select(func.count(Sender.id))
@@ -78,6 +84,9 @@ async def list_senders(
             "is_premium": s.is_premium,
             "message_count": s.message_count,
             "alert_count": real_alert_count or 0,
+            "country": s.country or "",
+            "country_code": s.country_code or "",
+            "phone_location": s.phone_location or "",
             "created_at": s.created_at.isoformat() if s.created_at else None,
         })
 
@@ -88,3 +97,149 @@ async def list_senders(
         "page_size": page_size,
         "total_pages": (total + page_size - 1) // page_size if total else 0,
     }
+
+
+@router.get("/{sender_id}")
+async def get_sender_detail(
+    sender_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取发送者详情"""
+    from app.models.message import Message
+    result = await db.execute(select(Sender).where(Sender.id == sender_id))
+    sender = result.scalar_one_or_none()
+    if not sender:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="发送者不存在")
+
+    # 实时统计告警数
+    alert_count_result = await db.execute(
+        select(func.count(Alert.id)).where(Alert.sender_id == sender_id)
+    )
+    alert_count = alert_count_result.scalar() or 0
+
+    # 统计消息类型分布
+    type_result = await db.execute(
+        select(Message.message_type, func.count(Message.id))
+        .where(Message.sender_id == sender_id)
+        .group_by(Message.message_type)
+    )
+    message_types = {row[0]: row[1] for row in type_result.all()}
+
+    return {
+        "id": sender.id,
+        "user_id": sender.user_id,
+        "username": sender.username,
+        "first_name": sender.first_name,
+        "last_name": sender.last_name,
+        "phone": sender.phone,
+        "is_bot": sender.is_bot,
+        "is_verified": sender.is_verified,
+        "is_premium": sender.is_premium,
+        "message_count": sender.message_count,
+        "alert_count": alert_count,
+        "message_types": message_types,
+        "created_at": sender.created_at.isoformat() if sender.created_at else None,
+    }
+
+
+@router.get("/{sender_id}/messages")
+async def get_sender_messages(
+    sender_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取发送者的消息历史"""
+    from app.models.message import Message
+    from app.models.conversation import Conversation
+
+    # 验证发送者存在
+    sender_result = await db.execute(select(Sender).where(Sender.id == sender_id))
+    if not sender_result.scalar_one_or_none():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="发送者不存在")
+
+    # 总数
+    count_result = await db.execute(
+        select(func.count(Message.id)).where(Message.sender_id == sender_id)
+    )
+    total = count_result.scalar() or 0
+
+    # 分页查询
+    query = (
+        select(Message, Conversation.title)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(Message.sender_id == sender_id)
+        .order_by(Message.date.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    result = await db.execute(query)
+    rows = result.all()
+
+    items = []
+    for msg, conv_title in rows:
+        items.append({
+            "id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "conversation_title": conv_title,
+            "message_type": msg.message_type,
+            "text": msg.text,
+            "caption": msg.caption,
+            "date": msg.date.isoformat() if msg.date else None,
+            "views": msg.views,
+            "forwards": msg.forwards,
+            "has_media": msg.has_media,
+            "is_reply": msg.is_reply,
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size if total else 0,
+    }
+
+
+@router.get("/countries/list")
+async def list_countries(db: AsyncSession = Depends(get_db)):
+    """获取所有国家/地区列表（去重）"""
+    from sqlalchemy import text
+    result = await db.execute(
+        text("SELECT DISTINCT country, COUNT(*) as cnt FROM senders WHERE country IS NOT NULL AND country != '' GROUP BY country ORDER BY cnt DESC")
+    )
+    return [{"name": row[0], "count": row[1]} for row in result.all()]
+
+
+@router.get("/locations/list")
+async def list_locations(
+    country: Optional[str] = Query(None, description="国家筛选"),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取归属地列表（按告警数统计，而非发送者数）"""
+    from sqlalchemy import text
+    if country:
+        result = await db.execute(
+            text("""SELECT s.phone_location, COUNT(a.id) as cnt
+                FROM senders s
+                INNER JOIN alerts a ON a.sender_id = s.id
+                WHERE s.phone_location IS NOT NULL AND s.phone_location != '' AND s.country = :country
+                GROUP BY s.phone_location
+                HAVING cnt > 0
+                ORDER BY cnt DESC"""),
+            {"country": country}
+        )
+    else:
+        result = await db.execute(
+            text("""SELECT s.phone_location, COUNT(a.id) as cnt
+                FROM senders s
+                INNER JOIN alerts a ON a.sender_id = s.id
+                WHERE s.phone_location IS NOT NULL AND s.phone_location != ''
+                GROUP BY s.phone_location
+                HAVING cnt > 0
+                ORDER BY cnt DESC""")
+        )
+    return [{"name": row[0], "count": row[1]} for row in result.all()]
+
