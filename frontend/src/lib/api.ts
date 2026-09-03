@@ -53,7 +53,7 @@ function getWebSocketURL(): string {
   return `${protocol}//${host}/ws`;
 }
 
-// 统一的错误处理
+// 统一的错误处理（带10秒超时）
 async function handleResponse(res: Response): Promise<any> {
   if (!res.ok) {
     let errorMessage = `HTTP ${res.status}: ${res.statusText}`;
@@ -77,45 +77,52 @@ async function handleResponse(res: Response): Promise<any> {
   return res.json();
 }
 
+// 带超时的 fetch 包装（10秒 AbortController 超时）
+export function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 10000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return globalThis.fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 export const api = {
   // 账号管理
   accounts: {
-    list: () => fetch(`${API_BASE}/accounts`).then(handleResponse),
-    get: (id: number) => fetch(`${API_BASE}/accounts/${id}`).then(handleResponse),
+    list: () => fetchWithTimeout(`${API_BASE}/accounts`).then(handleResponse),
+    get: (id: number) => fetchWithTimeout(`${API_BASE}/accounts/${id}`).then(handleResponse),
     requestLogin: (data: { phone: string; api_id?: number; api_hash?: string; proxy_config?: any }) =>
-      fetch(`${API_BASE}/accounts/login/request`, {
+      fetchWithTimeout(`${API_BASE}/accounts/login/request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     submitLogin: (data: { phone: string; code: string; api_id?: number; api_hash?: string; password?: string }) =>
-      fetch(`${API_BASE}/accounts/login/submit`, {
+      fetchWithTimeout(`${API_BASE}/accounts/login/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     update: (id: number, data: any) =>
-      fetch(`${API_BASE}/accounts/${id}`, {
+      fetchWithTimeout(`${API_BASE}/accounts/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     delete: (id: number) =>
-      fetch(`${API_BASE}/accounts/${id}`, { method: "DELETE" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/accounts/${id}`, { method: "DELETE" }).then(handleResponse),
     getDialogs: (id: number) =>
-      fetch(`${API_BASE}/accounts/${id}/dialogs`, {
+      fetchWithTimeout(`${API_BASE}/accounts/${id}/dialogs`, {
         method: "POST",
       }).then(handleResponse),
     disconnect: (id: number) =>
-      fetch(`${API_BASE}/accounts/${id}/disconnect`, {
+      fetchWithTimeout(`${API_BASE}/accounts/${id}/disconnect`, {
         method: "POST",
       }).then(handleResponse),
     toggle: (id: number) =>
-      fetch(`${API_BASE}/accounts/${id}/toggle`, {
+      fetchWithTimeout(`${API_BASE}/accounts/${id}/toggle`, {
         method: "POST",
       }).then(handleResponse),
     add: (data: { api_id: string; api_hash: string; phone: string }) =>
-      fetch(`${API_BASE}/accounts`, {
+      fetchWithTimeout(`${API_BASE}/accounts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -129,51 +136,51 @@ export const api = {
         Object.entries(params || {}).filter(([_, v]) => v !== undefined)
       );
       const searchParams = new URLSearchParams(cleanParams as any);
-      const res = await fetch(`${API_BASE}/conversations?${searchParams}`);
+      const res = await fetchWithTimeout(`${API_BASE}/conversations?${searchParams}`);
       return await handleResponse(res);
     },
-    get: (id: number) => fetch(`${API_BASE}/conversations/${id}`).then(handleResponse),
+    get: (id: number) => fetchWithTimeout(`${API_BASE}/conversations/${id}`).then(handleResponse),
     create: (data: any) =>
-      fetch(`${API_BASE}/conversations`, {
+      fetchWithTimeout(`${API_BASE}/conversations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     batchCreate: (data: any[], force = false) =>
-      fetch(`${API_BASE}/conversations/batch?force=${force}`, {
+      fetchWithTimeout(`${API_BASE}/conversations/batch?force=${force}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     update: (id: number, data: any) =>
-      fetch(`${API_BASE}/conversations/${id}`, {
+      fetchWithTimeout(`${API_BASE}/conversations/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     batchUpdate: (conversationIds: number[], data: any) =>
-      fetch(`${API_BASE}/conversations/batch-update`, {
+      fetchWithTimeout(`${API_BASE}/conversations/batch-update`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversation_ids: conversationIds, update_data: data }),
       }).then(handleResponse),
     delete: (id: number) =>
-      fetch(`${API_BASE}/conversations/${id}`, { method: "DELETE" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/conversations/${id}`, { method: "DELETE" }).then(handleResponse),
     batchDelete: (conversationIds: number[]) =>
-      fetch(`${API_BASE}/conversations/batch`, {
+      fetchWithTimeout(`${API_BASE}/conversations/batch`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversation_ids: conversationIds }),
       }).then(handleResponse),
     pullHistory: (id: number, days?: number, limit?: number) =>
-      fetch(`${API_BASE}/conversations/${id}/pull-history?days=${days || ""}&limit=${limit || ""}`, {
+      fetchWithTimeout(`${API_BASE}/conversations/${id}/pull-history?days=${days || ""}&limit=${limit || ""}`, {
         method: "POST",
       }).then(handleResponse),
     batchSync: (accountId: number) =>
-      fetch(`${API_BASE}/conversations/batch-sync?account_id=${accountId}`, {
+      fetchWithTimeout(`${API_BASE}/conversations/batch-sync?account_id=${accountId}`, {
         method: "POST",
       }).then(handleResponse),
-    getStats: (id: number) => fetch(`${API_BASE}/conversations/${id}/stats`).then(handleResponse),
+    getStats: (id: number) => fetchWithTimeout(`${API_BASE}/conversations/${id}/stats`).then(handleResponse),
   },
 
   // 消息查询
@@ -193,12 +200,12 @@ export const api = {
         Object.entries(params || {}).filter(([_, v]) => v !== undefined)
       );
       const searchParams = new URLSearchParams(cleanParams as any);
-      const res = await fetch(`${API_BASE}/messages?${searchParams}`);
+      const res = await fetchWithTimeout(`${API_BASE}/messages?${searchParams}`);
       return handleResponse(res);
     },
-    get: (id: number) => fetch(`${API_BASE}/messages/${id}`).then(handleResponse),
+    get: (id: number) => fetchWithTimeout(`${API_BASE}/messages/${id}`).then(handleResponse),
     export: (data: any) =>
-      fetch(`${API_BASE}/messages/export`, {
+      fetchWithTimeout(`${API_BASE}/messages/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -207,59 +214,59 @@ export const api = {
 
   // 关键词管理
   keywords: {
-    listGroups: () => fetch(`${API_BASE}/keywords/groups`).then(handleResponse),
-    getGroup: (id: number) => fetch(`${API_BASE}/keywords/groups/${id}`).then(handleResponse),
+    listGroups: () => fetchWithTimeout(`${API_BASE}/keywords/groups`).then(handleResponse),
+    getGroup: (id: number) => fetchWithTimeout(`${API_BASE}/keywords/groups/${id}`).then(handleResponse),
     createGroup: (data: any) =>
-      fetch(`${API_BASE}/keywords/groups`, {
+      fetchWithTimeout(`${API_BASE}/keywords/groups`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     updateGroup: (id: number, data: any) =>
-      fetch(`${API_BASE}/keywords/groups/${id}`, {
+      fetchWithTimeout(`${API_BASE}/keywords/groups/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     deleteGroup: (id: number) =>
-      fetch(`${API_BASE}/keywords/groups/${id}`, { method: "DELETE" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/keywords/groups/${id}`, { method: "DELETE" }).then(handleResponse),
     listKeywords: (groupId: number) =>
-      fetch(`${API_BASE}/keywords/groups/${groupId}/keywords`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/keywords/groups/${groupId}/keywords`).then(handleResponse),
     createKeyword: (data: any) =>
-      fetch(`${API_BASE}/keywords/keywords`, {
+      fetchWithTimeout(`${API_BASE}/keywords/keywords`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     updateKeyword: (id: number, data: any) =>
-      fetch(`${API_BASE}/keywords/keywords/${id}`, {
+      fetchWithTimeout(`${API_BASE}/keywords/keywords/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     deleteKeyword: (id: number) =>
-      fetch(`${API_BASE}/keywords/keywords/${id}`, { method: "DELETE" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/keywords/keywords/${id}`, { method: "DELETE" }).then(handleResponse),
     batchImport: (data: any) =>
-      fetch(`${API_BASE}/keywords/keywords/batch-import`, {
+      fetchWithTimeout(`${API_BASE}/keywords/keywords/batch-import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     importPreview: (data: any) =>
-      fetch(`${API_BASE}/keywords/import-preview`, {
+      fetchWithTimeout(`${API_BASE}/keywords/import-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
-    qualityReport: () => fetch(`${API_BASE}/keywords/quality-report`).then(handleResponse),
+    qualityReport: () => fetchWithTimeout(`${API_BASE}/keywords/quality-report`).then(handleResponse),
     recentMatchPreview: (data: any, limit = 100) =>
-      fetch(`${API_BASE}/keywords/recent-match-preview?limit=${limit}`, {
+      fetchWithTimeout(`${API_BASE}/keywords/recent-match-preview?limit=${limit}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     testMatch: (text: string, keywordIds: number[]) =>
-      fetch(`${API_BASE}/keywords/test-match`, {
+      fetchWithTimeout(`${API_BASE}/keywords/test-match`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, keyword_ids: keywordIds }),
@@ -283,29 +290,29 @@ export const api = {
         Object.entries(params || {}).filter(([_, v]) => v !== undefined)
       );
       const searchParams = new URLSearchParams(cleanParams as any);
-      const res = await fetch(`${API_BASE}/alerts?${searchParams}`);
+      const res = await fetchWithTimeout(`${API_BASE}/alerts?${searchParams}`);
       const data = await handleResponse(res);
       // 返回完整的分页响应对象 { items: [], total: number, page: number, ... }
       return data;
     },
-    get: (id: number) => fetch(`${API_BASE}/alerts/${id}`).then(handleResponse),
+    get: (id: number) => fetchWithTimeout(`${API_BASE}/alerts/${id}`).then(handleResponse),
     handle: (id: number, data: { status: string; handler_note?: string }, handler: string) =>
-      fetch(`${API_BASE}/alerts/${id}/handle?handler=${handler}`, {
+      fetchWithTimeout(`${API_BASE}/alerts/${id}/handle?handler=${handler}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     updateStatus: (id: number, status: string) =>
-      fetch(`${API_BASE}/alerts/${id}/status`, {
+      fetchWithTimeout(`${API_BASE}/alerts/${id}/status`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       }).then(handleResponse),
     delete: (id: number) =>
-      fetch(`${API_BASE}/alerts/${id}`, { method: "DELETE" }).then(handleResponse),
-    getStats: () => fetch(`${API_BASE}/alerts/stats`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/alerts/${id}`, { method: "DELETE" }).then(handleResponse),
+    getStats: () => fetchWithTimeout(`${API_BASE}/alerts/stats`).then(handleResponse),
     batchUpdateStatus: (alertIds: number[], data: { status: string; handler_note?: string }) =>
-      fetch(`${API_BASE}/alerts/batch-status`, {
+      fetchWithTimeout(`${API_BASE}/alerts/batch-status`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ alert_ids: alertIds, ...data }),
@@ -325,7 +332,7 @@ export const api = {
         Object.entries(params || {}).filter(([_, v]) => v !== undefined)
       );
       const searchParams = new URLSearchParams(cleanParams as any);
-      const response = await fetch(`${API_BASE}/alerts/export/csv?${searchParams}`);
+      const response = await fetchWithTimeout(`${API_BASE}/alerts/export/csv?${searchParams}`);
       if (!response.ok) throw new Error("导出失败");
 
       // 下载文件
@@ -345,77 +352,77 @@ export const api = {
 
   // 通知配置
   notifications: {
-    list: () => fetch(`${API_BASE}/notifications`).then(handleResponse),
-    get: (id: number) => fetch(`${API_BASE}/notifications/${id}`).then(handleResponse),
+    list: () => fetchWithTimeout(`${API_BASE}/notifications`).then(handleResponse),
+    get: (id: number) => fetchWithTimeout(`${API_BASE}/notifications/${id}`).then(handleResponse),
     create: (data: any) =>
-      fetch(`${API_BASE}/notifications`, {
+      fetchWithTimeout(`${API_BASE}/notifications`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     update: (id: number, data: any) =>
-      fetch(`${API_BASE}/notifications/${id}`, {
+      fetchWithTimeout(`${API_BASE}/notifications/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     delete: (id: number) =>
-      fetch(`${API_BASE}/notifications/${id}`, { method: "DELETE" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/notifications/${id}`, { method: "DELETE" }).then(handleResponse),
     test: (data: { config_id: number; test_message?: string }) =>
-      fetch(`${API_BASE}/notifications/test`, {
+      fetchWithTimeout(`${API_BASE}/notifications/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
-    getTypes: () => fetch(`${API_BASE}/notifications/types`).then(handleResponse),
+    getTypes: () => fetchWithTimeout(`${API_BASE}/notifications/types`).then(handleResponse),
   },
 
   // 仪表盘
   dashboard: {
-    getStats: () => fetch(`${API_BASE}/dashboard/stats`).then(handleResponse),
+    getStats: () => fetchWithTimeout(`${API_BASE}/dashboard/stats`).then(handleResponse),
     getMessageTrend: (days?: number, conversationId?: number) =>
-      fetch(`${API_BASE}/dashboard/message-trend?days=${days || 7}&conversation_id=${conversationId || ""}`).then(
+      fetchWithTimeout(`${API_BASE}/dashboard/message-trend?days=${days || 7}&conversation_id=${conversationId || ""}`).then(
         handleResponse
       ),
     getKeywordTrend: (days?: number, limit?: number) =>
-      fetch(`${API_BASE}/dashboard/keyword-trend?days=${days || 7}&limit=${limit || 10}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/dashboard/keyword-trend?days=${days || 7}&limit=${limit || 10}`).then(handleResponse),
     getSenderRanking: (limit?: number, sortBy: "messages" | "alerts" = "messages") =>
-      fetch(`${API_BASE}/dashboard/sender-ranking?limit=${limit || 20}&sort_by=${sortBy}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/dashboard/sender-ranking?limit=${limit || 20}&sort_by=${sortBy}`).then(handleResponse),
     getConversationActivity: (limit?: number) =>
-      fetch(`${API_BASE}/dashboard/conversation-activity?limit=${limit || 10}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/dashboard/conversation-activity?limit=${limit || 10}`).then(handleResponse),
     getRecentAlerts: (limit?: number) =>
-      fetch(`${API_BASE}/dashboard/alerts/recent?limit=${limit || 20}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/dashboard/alerts/recent?limit=${limit || 20}`).then(handleResponse),
   },
 
   // 系统设置
   settings: {
-    get: () => fetch(`${API_BASE}/settings`).then(handleResponse),
+    get: () => fetchWithTimeout(`${API_BASE}/settings`).then(handleResponse),
     update: (data: any) =>
-      fetch(`${API_BASE}/settings`, {
+      fetchWithTimeout(`${API_BASE}/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     updateDbSetting: (key: string, value: string) =>
-      fetch(`${API_BASE}/settings/db/${encodeURIComponent(key)}`, {
+      fetchWithTimeout(`${API_BASE}/settings/db/${encodeURIComponent(key)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value }),
       }).then(handleResponse),
     reset: () =>
-      fetch(`${API_BASE}/settings/reset`, {
+      fetchWithTimeout(`${API_BASE}/settings/reset`, {
         method: "POST",
       }).then(handleResponse),
-    exportAll: () => fetch(`${API_BASE}/settings/export`).then(handleResponse),
+    exportAll: () => fetchWithTimeout(`${API_BASE}/settings/export`).then(handleResponse),
     importAll: (data: any) =>
-      fetch(`${API_BASE}/settings/import`, {
+      fetchWithTimeout(`${API_BASE}/settings/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
-    exportKeywords: () => fetch(`${API_BASE}/settings/export/keywords`).then(handleResponse),
+    exportKeywords: () => fetchWithTimeout(`${API_BASE}/settings/export/keywords`).then(handleResponse),
     importKeywords: (data: any) =>
-      fetch(`${API_BASE}/settings/import/keywords`, {
+      fetchWithTimeout(`${API_BASE}/settings/import/keywords`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -424,8 +431,8 @@ export const api = {
 
   // 数据库管理
   database: {
-    getStatus: () => fetch(`${API_BASE}/database/status`).then(handleResponse),
-    getStats: () => fetch(`${API_BASE}/database/stats`).then(handleResponse),
+    getStatus: () => fetchWithTimeout(`${API_BASE}/database/status`).then(handleResponse),
+    getStats: () => fetchWithTimeout(`${API_BASE}/database/stats`).then(handleResponse),
     testConnection: (config: {
       host: string;
       port: number;
@@ -433,7 +440,7 @@ export const api = {
       password: string;
       database: string;
     }) =>
-      fetch(`${API_BASE}/database/test-connection`, {
+      fetchWithTimeout(`${API_BASE}/database/test-connection`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
@@ -446,18 +453,18 @@ export const api = {
       database: string;
       save_config: boolean;
     }) =>
-      fetch(`${API_BASE}/database/configure`, {
+      fetchWithTimeout(`${API_BASE}/database/configure`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       }).then(handleResponse),
     init: () =>
-      fetch(`${API_BASE}/database/init`, {
+      fetchWithTimeout(`${API_BASE}/database/init`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       }).then(handleResponse),
     clear: () =>
-      fetch(`${API_BASE}/database/clear`, {
+      fetchWithTimeout(`${API_BASE}/database/clear`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       }).then(handleResponse),
@@ -465,18 +472,18 @@ export const api = {
 
   // 监控管理
   monitoring: {
-    getStatus: () => fetch(`${API_BASE}/monitoring/status`).then(handleResponse),
+    getStatus: () => fetchWithTimeout(`${API_BASE}/monitoring/status`).then(handleResponse),
     start: (conversationId: number) =>
-      fetch(`${API_BASE}/monitoring/start/${conversationId}`, { method: "POST" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/monitoring/start/${conversationId}`, { method: "POST" }).then(handleResponse),
     stop: (conversationId: number) =>
-      fetch(`${API_BASE}/monitoring/stop/${conversationId}`, { method: "POST" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/monitoring/stop/${conversationId}`, { method: "POST" }).then(handleResponse),
     restart: () =>
-      fetch(`${API_BASE}/monitoring/restart`, { method: "POST" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/monitoring/restart`, { method: "POST" }).then(handleResponse),
   },
 
   // 代理管理
   proxy: {
-    getStatus: () => fetch(`${API_BASE}/proxy/status`).then(handleResponse),
+    getStatus: () => fetchWithTimeout(`${API_BASE}/proxy/status`).then(handleResponse),
     saveConfig: (data: {
       enabled: boolean;
       protocol: "http" | "https" | "socks5";
@@ -485,7 +492,7 @@ export const api = {
       username?: string;
       password?: string;
     }) =>
-      fetch(`${API_BASE}/proxy/config`, {
+      fetchWithTimeout(`${API_BASE}/proxy/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -496,63 +503,63 @@ export const api = {
       port: number;
       timeout_sec?: number;
     }) =>
-      fetch(`${API_BASE}/proxy/test`, {
+      fetchWithTimeout(`${API_BASE}/proxy/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     enable: () =>
-      fetch(`${API_BASE}/proxy/enable`, {
+      fetchWithTimeout(`${API_BASE}/proxy/enable`, {
         method: "POST",
       }).then(handleResponse),
     disable: () =>
-      fetch(`${API_BASE}/proxy/disable`, {
+      fetchWithTimeout(`${API_BASE}/proxy/disable`, {
         method: "POST",
       }).then(handleResponse),
     testLatency: () =>
-      fetch(`${API_BASE}/proxy/latency`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/proxy/latency`).then(handleResponse),
     // 兼容旧页面调用
     start: () =>
-      fetch(`${API_BASE}/proxy/enable`, {
+      fetchWithTimeout(`${API_BASE}/proxy/enable`, {
         method: "POST",
       }).then(handleResponse),
     stop: () =>
-      fetch(`${API_BASE}/proxy/disable`, {
+      fetchWithTimeout(`${API_BASE}/proxy/disable`, {
         method: "POST",
       }).then(handleResponse),
     restart: () =>
-      fetch(`${API_BASE}/proxy/enable`, {
+      fetchWithTimeout(`${API_BASE}/proxy/enable`, {
         method: "POST",
       }).then(handleResponse),
   },
 
   // 系统状态
   system: {
-    getStatus: () => fetch(`${API_BASE}/system/status`).then(handleResponse),
-    getInfo: () => fetch(`${API_BASE}/system/info`).then(handleResponse),
-    getUpdateStatus: () => fetch(`${API_BASE}/system/update-status`).then(handleResponse),
-    checkUpdate: () => fetch(`${API_BASE}/system/check-update`).then(handleResponse),
+    getStatus: () => fetchWithTimeout(`${API_BASE}/system/status`).then(handleResponse),
+    getInfo: () => fetchWithTimeout(`${API_BASE}/system/info`).then(handleResponse),
+    getUpdateStatus: () => fetchWithTimeout(`${API_BASE}/system/update-status`).then(handleResponse),
+    checkUpdate: () => fetchWithTimeout(`${API_BASE}/system/check-update`).then(handleResponse),
     performUpdate: () =>
-      fetch(`${API_BASE}/system/perform-update`, { method: "POST" }).then(handleResponse),
-    getUpdateProgress: () => fetch(`${API_BASE}/system/update-progress`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/system/perform-update`, { method: "POST" }).then(handleResponse),
+    getUpdateProgress: () => fetchWithTimeout(`${API_BASE}/system/update-progress`).then(handleResponse),
   },
 
   // 备份管理
   backups: {
-    list: () => fetch(`${API_BASE}/backups/list`).then(handleResponse),
+    list: () => fetchWithTimeout(`${API_BASE}/backups/list`).then(handleResponse),
     create: (name?: string) =>
-      fetch(`${API_BASE}/backups/create${name ? `?name=${encodeURIComponent(name)}` : ""}`, {
+      fetchWithTimeout(`${API_BASE}/backups/create${name ? `?name=${encodeURIComponent(name)}` : ""}`, {
         method: "POST",
       }).then(handleResponse),
     restore: (name: string) =>
-      fetch(`${API_BASE}/backups/restore/${encodeURIComponent(name)}`, {
+      fetchWithTimeout(`${API_BASE}/backups/restore/${encodeURIComponent(name)}`, {
         method: "POST",
       }).then(handleResponse),
     delete: (name: string) =>
-      fetch(`${API_BASE}/backups/delete/${encodeURIComponent(name)}`, {
+      fetchWithTimeout(`${API_BASE}/backups/delete/${encodeURIComponent(name)}`, {
         method: "DELETE",
       }).then(handleResponse),
-    status: () => fetch(`${API_BASE}/backups/status`).then(handleResponse),
+    status: () => fetchWithTimeout(`${API_BASE}/backups/status`).then(handleResponse),
   },
 
   // 数据分析
@@ -563,40 +570,40 @@ export const api = {
       if (senderId) params.append("sender_id", senderId.toString());
       if (days) params.append("days", days.toString());
       if (limit) params.append("limit", limit.toString());
-      return fetch(`${API_BASE}/analysis/wordcloud/words?${params}`).then(handleResponse);
+      return fetchWithTimeout(`${API_BASE}/analysis/wordcloud/words?${params}`).then(handleResponse);
     },
     getKeywordTrend: (keyword: string, days?: number, interval?: string) =>
-      fetch(`${API_BASE}/analysis/wordcloud/trend?keyword=${encodeURIComponent(keyword)}&days=${days || 30}&interval=${interval || "day"}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/analysis/wordcloud/trend?keyword=${encodeURIComponent(keyword)}&days=${days || 30}&interval=${interval || "day"}`).then(handleResponse),
     getMessageSentiment: (messageId: number) =>
-      fetch(`${API_BASE}/analysis/sentiment/message/${messageId}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/analysis/sentiment/message/${messageId}`).then(handleResponse),
     getConversationSentiment: (conversationId: number, days?: number) =>
-      fetch(`${API_BASE}/analysis/sentiment/conversation/${conversationId}?days=${days || 7}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/analysis/sentiment/conversation/${conversationId}?days=${days || 7}`).then(handleResponse),
     getSentimentTrend: (conversationId: number, days?: number) =>
-      fetch(`${API_BASE}/analysis/sentiment/trend/${conversationId}?days=${days || 30}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/analysis/sentiment/trend/${conversationId}?days=${days || 30}`).then(handleResponse),
     getDailyReport: (date?: string) => {
       const params = date ? `?date=${date}` : "";
-      return fetch(`${API_BASE}/analysis/report/daily${params}`).then(handleResponse);
+      return fetchWithTimeout(`${API_BASE}/analysis/report/daily${params}`).then(handleResponse);
     },
     getWeeklyReport: (startDate?: string) => {
       const params = startDate ? `?start_date=${startDate}` : "";
-      return fetch(`${API_BASE}/analysis/report/weekly${params}`).then(handleResponse);
+      return fetchWithTimeout(`${API_BASE}/analysis/report/weekly${params}`).then(handleResponse);
     },
     downloadDailyReportPDF: (date?: string) => {
       const params = date ? `?date=${date}` : "";
-      return fetch(`${API_BASE}/analysis/report/pdf/daily${params}`).then((resp) => resp.blob());
+      return fetchWithTimeout(`${API_BASE}/analysis/report/pdf/daily${params}`).then((resp) => resp.blob());
     },
     downloadWeeklyReportPDF: (startDate?: string) => {
       const params = startDate ? `?start_date=${startDate}` : "";
-      return fetch(`${API_BASE}/analysis/report/pdf/weekly${params}`).then((resp) => resp.blob());
+      return fetchWithTimeout(`${API_BASE}/analysis/report/pdf/weekly${params}`).then((resp) => resp.blob());
     },
   },
 
   // 人员档案
   personnel: {
     search: (q: string) =>
-      fetch(`${API_BASE}/personnel/search?q=${encodeURIComponent(q)}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/personnel/search?q=${encodeURIComponent(q)}`).then(handleResponse),
     getProfile: (senderId: number) =>
-      fetch(`${API_BASE}/personnel/${senderId}/profile`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/personnel/${senderId}/profile`).then(handleResponse),
     getMessages: (senderId: number, params: {
       group_by?: string;
       conversation_id?: number;
@@ -610,18 +617,18 @@ export const api = {
         Object.entries(params || {}).filter(([_, v]) => v !== undefined)
       );
       const searchParams = new URLSearchParams(cleanParams as any);
-      return fetch(`${API_BASE}/personnel/${senderId}/messages?${searchParams}`).then(handleResponse);
+      return fetchWithTimeout(`${API_BASE}/personnel/${senderId}/messages?${searchParams}`).then(handleResponse);
     },
   } ,
   phoneRecords: {
     list: (params?: Record<string, any>) =>
-      fetch(`/api/v1/phone-records?${new URLSearchParams(params || {}).toString()}`).then((r) => r.json()),
+      fetchWithTimeout(`/api/v1/phone-records?${new URLSearchParams(params || {}).toString()}`).then((r) => r.json()),
     stats: () =>
-      fetch("/api/v1/phone-records/stats").then((r) => r.json()),
+      fetchWithTimeout("/api/v1/phone-records/stats").then((r) => r.json()),
     getPhone: (phone: string) =>
-      fetch(`/api/v1/phone-records/phone/${encodeURIComponent(phone)}`).then((r) => r.json()),
+      fetchWithTimeout(`/api/v1/phone-records/phone/${encodeURIComponent(phone)}`).then((r) => r.json()),
     occurrences: (phone: string, params?: Record<string, any>) =>
-      fetch(`/api/v1/phone-records/phone/${encodeURIComponent(phone)}/occurrences?${new URLSearchParams(params || {}).toString()}`).then((r) => r.json()),
+      fetchWithTimeout(`/api/v1/phone-records/phone/${encodeURIComponent(phone)}/occurrences?${new URLSearchParams(params || {}).toString()}`).then((r) => r.json()),
   },
 
   // 案件管理
@@ -631,29 +638,29 @@ export const api = {
         Object.entries(params || {}).filter(([_, v]) => v !== undefined)
       );
       const searchParams = new URLSearchParams(cleanParams as any);
-      return fetch(`${API_BASE}/cases?${searchParams}`).then(handleResponse);
+      return fetchWithTimeout(`${API_BASE}/cases?${searchParams}`).then(handleResponse);
     },
-    get: (id: number) => fetch(`${API_BASE}/cases/${id}`).then(handleResponse),
+    get: (id: number) => fetchWithTimeout(`${API_BASE}/cases/${id}`).then(handleResponse),
     create: (data: any) =>
-      fetch(`${API_BASE}/cases`, {
+      fetchWithTimeout(`${API_BASE}/cases`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     update: (id: number, data: any) =>
-      fetch(`${API_BASE}/cases/${id}`, {
+      fetchWithTimeout(`${API_BASE}/cases/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     delete: (id: number) =>
-      fetch(`${API_BASE}/cases/${id}`, { method: "DELETE" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/cases/${id}`, { method: "DELETE" }).then(handleResponse),
     addAlert: (caseId: number, alertId: number) =>
-      fetch(`${API_BASE}/cases/${caseId}/alerts/${alertId}`, { method: "POST" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/cases/${caseId}/alerts/${alertId}`, { method: "POST" }).then(handleResponse),
     removeAlert: (caseId: number, alertId: number) =>
-      fetch(`${API_BASE}/cases/${caseId}/alerts/${alertId}`, { method: "DELETE" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/cases/${caseId}/alerts/${alertId}`, { method: "DELETE" }).then(handleResponse),
     getAlerts: (caseId: number) =>
-      fetch(`${API_BASE}/cases/${caseId}/alerts`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/cases/${caseId}/alerts`).then(handleResponse),
   },
 
   // 重点关注名单
@@ -663,23 +670,23 @@ export const api = {
         Object.entries(params || {}).filter(([_, v]) => v !== undefined)
       );
       const searchParams = new URLSearchParams(cleanParams as any);
-      return fetch(`${API_BASE}/watchlist?${searchParams}`).then(handleResponse);
+      return fetchWithTimeout(`${API_BASE}/watchlist?${searchParams}`).then(handleResponse);
     },
-    get: (id: number) => fetch(`${API_BASE}/watchlist/${id}`).then(handleResponse),
+    get: (id: number) => fetchWithTimeout(`${API_BASE}/watchlist/${id}`).then(handleResponse),
     create: (data: any) =>
-      fetch(`${API_BASE}/watchlist`, {
+      fetchWithTimeout(`${API_BASE}/watchlist`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     update: (id: number, data: any) =>
-      fetch(`${API_BASE}/watchlist/${id}`, {
+      fetchWithTimeout(`${API_BASE}/watchlist/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       }).then(handleResponse),
     delete: (id: number) =>
-      fetch(`${API_BASE}/watchlist/${id}`, { method: "DELETE" }).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/watchlist/${id}`, { method: "DELETE" }).then(handleResponse),
   },
 
   // 审计日志
@@ -689,10 +696,10 @@ export const api = {
         Object.entries(params || {}).filter(([_, v]) => v !== undefined)
       );
       const searchParams = new URLSearchParams(cleanParams as any);
-      return fetch(`${API_BASE}/audit?${searchParams}`).then(handleResponse);
+      return fetchWithTimeout(`${API_BASE}/audit?${searchParams}`).then(handleResponse);
     },
-    getActionTypes: () => fetch(`${API_BASE}/audit/action-types`).then(handleResponse),
-    getTargetTypes: () => fetch(`${API_BASE}/audit/target-types`).then(handleResponse),
+    getActionTypes: () => fetchWithTimeout(`${API_BASE}/audit/action-types`).then(handleResponse),
+    getTargetTypes: () => fetchWithTimeout(`${API_BASE}/audit/target-types`).then(handleResponse),
   },
 };
 

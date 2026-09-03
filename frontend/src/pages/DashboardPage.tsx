@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { api } from "@/lib/api";
+import { api, fetchWithTimeout } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import {
   Activity,
@@ -288,7 +288,7 @@ export function DashboardPage() {
     try {
       const [statsData, healthData, keywordData, senderData, conversationData, alertData, wordsData, reportData] = await Promise.all([
         api.dashboard.getStats(),
-        fetch("/health").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetchWithTimeout("/health").then((r) => (r.ok ? r.json() : null)).catch(() => null),
         api.dashboard.getKeywordTrend(7, 8).catch(() => []),
         api.dashboard.getSenderRanking(12, "alerts").catch(() => []),
         api.dashboard.getConversationActivity(12).catch(() => []),
@@ -316,7 +316,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     fetchData();
-    intervalRef.current = window.setInterval(fetchData, 30000);
+    intervalRef.current = window.setInterval(fetchData, 300000);
     return () => {
       if (intervalRef.current) window.clearInterval(intervalRef.current);
     };

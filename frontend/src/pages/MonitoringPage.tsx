@@ -178,11 +178,13 @@ export function MonitoringPage() {
     // 然后获取数据
     fetchConversations();
     fetchGlobalStats();
-    const interval = setInterval(() => {
-      fetchGlobalStats();
-    }, 5000); // 每5秒刷新全局统计
-    return () => clearInterval(interval);
-  }, [loadSortPreferences]);
+    if (!isConnected) {
+      const interval = setInterval(() => {
+        fetchGlobalStats();
+      }, 5000); // 每5秒刷新全局统计
+      return () => clearInterval(interval);
+    }
+  }, [loadSortPreferences, isConnected]);
 
   // 当会话或分页参数变化时重新获取消息
   useEffect(() => {
