@@ -53,17 +53,17 @@ def get_monitoring_status():
 def restart_monitoring():
     log.info(">>> 开始执行监控重启 <<<")
     try:
-        fix = requests.post(f"{API_BASE}/api/v1/diagnostics/fix-all", timeout=60)
-        if fix.ok:
-            log.info(f"fix-all 完成: {fix.json()}")
+        # 多进程架构下，api_worker 的 client_manager 是空的
+        # 直接重启 monitor_worker 才能恢复监控
+        import subprocess
+        result = subprocess.run(
+            ["sudo", "systemctl", "restart", "tgmonitor-monitor-0"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            log.info("monitor_worker 重启成功")
         else:
-            log.error(f"fix-all 失败: HTTP {fix.status_code}")
-
-        restart = requests.post(f"{API_BASE}/api/v1/monitoring/restart", timeout=60)
-        if restart.ok:
-            log.info(f"restart 完成: {restart.json()}")
-        else:
-            log.error(f"restart 失败: HTTP {restart.status_code}")
+            log.error(f"monitor_worker 重启失败: {result.stderr}")
     except Exception as e:
         log.error(f"重启过程异常: {e}")
 

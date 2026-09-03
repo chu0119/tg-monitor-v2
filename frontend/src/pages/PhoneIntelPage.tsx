@@ -130,13 +130,13 @@ export function PhoneIntelPage() {
 
   // Fetch provinces on mount
   useEffect(() => {
-    fetch("/api/v1/phone-records/provinces").then(r => r.json()).then(data => setProvinces(data)).catch(() => {});
+    api.phoneRecords.provinces().then(data => setProvinces(data)).catch(() => {});
   }, []);
 
   // Fetch cities when province changes
   useEffect(() => {
     if (filterProvince) {
-      fetch(`/api/v1/phone-records/cities?province=${encodeURIComponent(filterProvince)}`).then(r => r.json()).then(data => setCities(data)).catch(() => {});
+      api.phoneRecords.cities(filterProvince).then(data => setCities(data)).catch(() => {});
     } else {
       setCities([]);
       setFilterCity("");

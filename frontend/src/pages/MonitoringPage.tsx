@@ -172,6 +172,9 @@ export function MonitoringPage() {
     }
   }, []);
 
+  // 轮询 refs（避免 stale closure）
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     // 先加载排序偏好
     loadSortPreferences();
@@ -179,11 +182,18 @@ export function MonitoringPage() {
     fetchConversations();
     fetchGlobalStats();
     if (!isConnected) {
-      const interval = setInterval(() => {
+      // 清理旧轮询
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      pollingRef.current = setInterval(() => {
         fetchGlobalStats();
       }, 5000); // 每5秒刷新全局统计
-      return () => clearInterval(interval);
     }
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
   }, [loadSortPreferences, isConnected]);
 
   // 当会话或分页参数变化时重新获取消息

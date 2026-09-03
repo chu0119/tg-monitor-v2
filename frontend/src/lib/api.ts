@@ -635,13 +635,15 @@ export const api = {
   } ,
   phoneRecords: {
     list: (params?: Record<string, any>) =>
-      fetchWithTimeout(`/api/v1/phone-records?${new URLSearchParams(params || {}).toString()}`).then((r) => r.json()),
+      fetchWithTimeout(`${API_BASE}/phone-records?${new URLSearchParams(params || {}).toString()}`).then(handleResponse),
     stats: () =>
-      fetchWithTimeout("/api/v1/phone-records/stats").then((r) => r.json()),
+      fetchWithTimeout(`${API_BASE}/phone-records/stats`).then(handleResponse),
     getPhone: (phone: string) =>
-      fetchWithTimeout(`/api/v1/phone-records/phone/${encodeURIComponent(phone)}`).then((r) => r.json()),
-    occurrences: (phone: string, params?: Record<string, any>) =>
-      fetchWithTimeout(`/api/v1/phone-records/phone/${encodeURIComponent(phone)}/occurrences?${new URLSearchParams(params || {}).toString()}`).then((r) => r.json()),
+      fetchWithTimeout(`${API_BASE}/phone-records/phone/${encodeURIComponent(phone)}`).then(handleResponse),
+    provinces: () =>
+      fetchWithTimeout(`${API_BASE}/phone-records/provinces`).then(handleResponse),
+    cities: (province: string) =>
+      fetchWithTimeout(`${API_BASE}/phone-records/cities?province=${encodeURIComponent(province)}`).then(handleResponse),
   },
 
   // 案件管理
@@ -711,8 +713,6 @@ export const api = {
       const searchParams = new URLSearchParams(cleanParams as any);
       return fetchWithTimeout(`${API_BASE}/audit?${searchParams}`).then(handleResponse);
     },
-    getActionTypes: () => fetchWithTimeout(`${API_BASE}/audit/action-types`).then(handleResponse),
-    getTargetTypes: () => fetchWithTimeout(`${API_BASE}/audit/target-types`).then(handleResponse),
   },
 };
 
