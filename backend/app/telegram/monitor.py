@@ -451,7 +451,7 @@ class MessageMonitor:
 
                 # 关键词匹配
                 matched_keywords = await self.keyword_matcher.match_message(
-                    db, message, conversation_id, conversation
+                    db, message, conversation_id
                 )
 
                 if matched_keywords:
