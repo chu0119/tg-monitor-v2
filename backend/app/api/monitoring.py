@@ -54,7 +54,13 @@ async def restart_monitoring(db: AsyncSession = Depends(get_db)):
 
 @router.get("/status")
 async def get_monitoring_status(db: AsyncSession = Depends(get_db)):
-    """获取监控状态（从 monitor_worker 9010 /status 拉取实时数据）"""
+    """获取监控状态（带缓存，5秒）"""
+    # 尝试缓存（5秒 TTL，减少对 9010 和 DB 的压力）
+    from app.utils.cache import memory_cache
+    cached = memory_cache.get("monitoring_status", ttl=5)
+    if cached:
+        return cached
+
     # trust_env=False: 不走外部代理，直连本地 monitor_worker
     async with httpx.AsyncClient(timeout=5.0, trust_env=False) as c:
         try:
@@ -71,7 +77,7 @@ async def get_monitoring_status(db: AsyncSession = Depends(get_db)):
     account_ids = monitor_data.get("account_ids", [])
     connected_clients = monitor_data.get("connected_clients", 0)
 
-    return {
+    result = {
         "active_monitors": monitor_data.get("active_monitors", 0),
         "connected_clients": connected_clients,
         "accounts": [
@@ -83,6 +89,8 @@ async def get_monitoring_status(db: AsyncSession = Depends(get_db)):
             for a in accounts
         ]
     }
+    memory_cache.set("monitoring_status", result, ttl=5)
+    return result
 
 
 @router.post("/start/{conversation_id}")
