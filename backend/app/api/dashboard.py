@@ -127,18 +127,19 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     total_messages = approx_rows.get('messages', 0)
     total_alerts = approx_rows.get('alerts', 0)
 
-    # 今日统计使用精确查询（有索引，较快）
+    # 今日统计 — 优化：messages 使用有索引的 date 列；pending 用 total - non-pending 避免全表扫描
     today_sql = text("""
         SELECT
-            (SELECT COUNT(*) FROM messages WHERE created_at >= :today) as today_messages,
+            (SELECT COUNT(*) FROM messages WHERE date >= :today) as today_messages,
             (SELECT COUNT(*) FROM alerts WHERE created_at >= :today) as today_alerts,
-            (SELECT COUNT(*) FROM alerts WHERE status = 'pending') as pending_alerts
+            (SELECT COUNT(*) FROM alerts WHERE status != 'pending') as non_pending_alerts
     """)
     today_result = await db.execute(today_sql, {"today": today_local_start_utc})
     today_row = today_result.fetchone()
     today_messages = today_row[0] or 0
     today_alerts = today_row[1] or 0
-    pending_alerts = today_row[2] or 0
+    # pending = total - non_pending (non_pending 通常极少，查询极快)
+    pending_alerts = max(0, (total_alerts or 0) - (today_row[2] or 0))
 
     # 24小时消息分布
     messages_24h = []
@@ -162,9 +163,11 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
             "count": hour_counts.get(utc_hour, 0)
         })
 
-    # 告警级别统计
+    # 告警级别统计 — 使用最近7天数据（利用 created_at 索引，避免全表扫描）
+    alerts_since = now_utc_time - timedelta(days=7)
     alerts_by_level_result = await db.execute(
         select(Alert.alert_level, func.count(Alert.id))
+        .where(Alert.created_at >= alerts_since)
         .group_by(Alert.alert_level)
     )
     alerts_by_level = {row[0]: row[1] for row in alerts_by_level_result.all()}
