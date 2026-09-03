@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
 from app.services.auto_backup_service import auto_backup_service
 from app.services.backup_service import backup_service
+from app.services.audit_service import log_audit
 
 
 router = APIRouter(prefix="/backups", tags=["备份管理"])
@@ -58,10 +59,11 @@ async def list_backups():
 
 
 @router.post("/create", response_model=BackupResponse)
-async def create_backup(name: Optional[str] = None, background_tasks: BackgroundTasks = None):
+async def create_backup(name: Optional[str] = None, background_tasks: BackgroundTasks = None, db: AsyncSession = Depends(get_db)):
     """手动创建备份"""
     try:
         result = await auto_backup_service.create_manual_backup(name)
+        await log_audit(db, "create_backup", "backup", detail={"name": result.get("name")})
         return BackupResponse(**result)
     except Exception as e:
         logger.error(f"创建备份失败: {e}")
@@ -69,7 +71,7 @@ async def create_backup(name: Optional[str] = None, background_tasks: Background
 
 
 @router.post("/restore/{name}", response_model=RestoreResponse)
-async def restore_backup(name: str, background_tasks: BackgroundTasks = None):
+async def restore_backup(name: str, background_tasks: BackgroundTasks = None, db: AsyncSession = Depends(get_db)):
     """恢复备份
 
     警告：恢复备份将覆盖当前数据！
@@ -78,6 +80,7 @@ async def restore_backup(name: str, background_tasks: BackgroundTasks = None):
         # 在后台执行恢复，避免阻塞
         if background_tasks:
             background_tasks.add_task(auto_backup_service.restore_backup, name)
+            await log_audit(db, "restore_backup", "backup", detail={"name": name, "status": "pending"})
             return RestoreResponse(
                 name=name,
                 restored_at="",
@@ -85,6 +88,7 @@ async def restore_backup(name: str, background_tasks: BackgroundTasks = None):
             )
         else:
             result = await auto_backup_service.restore_backup(name)
+            await log_audit(db, "restore_backup", "backup", detail={"name": name, "status": "completed"})
             return RestoreResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

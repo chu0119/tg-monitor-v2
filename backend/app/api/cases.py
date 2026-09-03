@@ -202,7 +202,7 @@ async def create_case(data: CaseCreate, db: AsyncSession = Depends(get_db)):
         if case_data.get(k) and isinstance(case_data[k], datetime):
             case_data[k] = datetime_to_iso(case_data[k])
 
-    await _log_audit(db, data.created_by or "system", "create_case", "case", str(case_data["id"]), {"case_number": case_number, "case_name": data.case_name})
+    await log_audit(db, "create_case", "case", target_id=str(case_data["id"]), detail={"case_number": case_number, "case_name": data.case_name}, operator=data.created_by or "system")
     await db.commit()
 
     return case_data
@@ -248,8 +248,7 @@ async def update_case(case_id: int, data: CaseUpdate, db: AsyncSession = Depends
     await db.execute(text(f"UPDATE cases SET {', '.join(updates)} WHERE id = :id"), params)
     await db.commit()
 
-    await _log_audit(db, "system", "update_case", "case", str(case_id), {"fields": [u.split(" =")[0] for u in updates if "updated_at" not in u]})
-    await db.commit()
+    await log_audit(db, "update_case", "case", target_id=str(case_id), detail={"fields": [u.split(" =")[0] for u in updates if "updated_at" not in u]})
 
     return {"message": "案件已更新"}
 
@@ -267,8 +266,7 @@ async def delete_case(case_id: int, db: AsyncSession = Depends(get_db)):
     await db.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case_id})
     await db.commit()
 
-    await _log_audit(db, "system", "delete_case", "case", str(case_id), {"case_number": dict(case._mapping).get("case_number")})
-    await db.commit()
+    await log_audit(db, "delete_case", "case", target_id=str(case_id), detail={"case_number": dict(case._mapping).get("case_number")})
 
     return {"message": "案件已删除"}
 
@@ -293,8 +291,7 @@ async def add_alert_to_case(case_id: int, data: CaseAlertAdd, db: AsyncSession =
     await db.execute(text("UPDATE cases SET alert_count = alert_count + 1, updated_at = :now WHERE id = :id"), {"id": case_id, "now": now_utc()})
     await db.commit()
 
-    await _log_audit(db, data.added_by or "system", "add_alert_to_case", "case", str(case_id), {"alert_id": data.alert_id})
-    await db.commit()
+    await log_audit(db, "add_alert_to_case", "case", target_id=str(case_id), detail={"alert_id": data.alert_id}, operator=data.added_by or "system")
 
     return {"message": "告警已添加到案件"}
 
@@ -312,8 +309,7 @@ async def remove_alert_from_case(case_id: int, alert_id: int, db: AsyncSession =
     await db.execute(text("UPDATE cases SET alert_count = GREATEST(alert_count - 1, 0), updated_at = :now WHERE id = :id"), {"id": case_id, "now": now_utc()})
     await db.commit()
 
-    await _log_audit(db, "system", "remove_alert_from_case", "case", str(case_id), {"alert_id": alert_id})
-    await db.commit()
+    await log_audit(db, "remove_alert_from_case", "case", target_id=str(case_id), detail={"alert_id": alert_id})
 
     return {"message": "告警已从案件移除"}
 
@@ -338,8 +334,7 @@ async def add_person_to_case(case_id: int, data: CasePersonAdd, db: AsyncSession
     await db.execute(text("UPDATE cases SET person_count = person_count + 1, updated_at = :now WHERE id = :id"), {"id": case_id, "now": now_utc()})
     await db.commit()
 
-    await _log_audit(db, data.added_by or "system", "add_person_to_case", "case", str(case_id), {"sender_id": data.sender_id, "role": data.role})
-    await db.commit()
+    await log_audit(db, "add_person_to_case", "case", target_id=str(case_id), detail={"sender_id": data.sender_id, "role": data.role}, operator=data.added_by or "system")
 
     return {"message": "人员已添加到案件"}
 
@@ -357,7 +352,6 @@ async def remove_person_from_case(case_id: int, sender_id: int, db: AsyncSession
     await db.execute(text("UPDATE cases SET person_count = GREATEST(person_count - 1, 0), updated_at = :now WHERE id = :id"), {"id": case_id, "now": now_utc()})
     await db.commit()
 
-    await _log_audit(db, "system", "remove_person_from_case", "case", str(case_id), {"sender_id": sender_id})
-    await db.commit()
+    await log_audit(db, "remove_person_from_case", "case", target_id=str(case_id), detail={"sender_id": sender_id})
 
     return {"message": "人员已从案件移除"}
