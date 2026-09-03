@@ -97,9 +97,16 @@ async def list_alerts(
 
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-    # count
-    count_result = await db.execute(text(f"SELECT count(*) FROM alerts a{where_sql}"), params)
-    total = count_result.scalar()
+    # count: 无筛选时用 information_schema 近似值，有筛选时精确 COUNT
+    if not where_clauses:
+        count_approx = await db.execute(text(
+            "SELECT table_rows FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = 'alerts'"
+        ))
+        total = count_approx.scalar() or 0
+    else:
+        count_result = await db.execute(text(f"SELECT count(*) FROM alerts a{where_sql}"), params)
+        total = count_result.scalar()
 
     # 分页数据 - 直接 JOIN 取关联字段
     offset = (page - 1) * page_size

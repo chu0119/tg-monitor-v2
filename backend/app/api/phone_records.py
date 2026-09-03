@@ -36,8 +36,17 @@ async def list_phone_records(
         params["city"] = f"%{city}%"
 
     where_sql = " AND ".join(where_clauses)
-    count_result = await db.execute(text(f"SELECT COUNT(*) FROM phone_records pr WHERE {where_sql}"), params)
-    total = count_result.scalar() or 0
+
+    # count: 无筛选时用 information_schema 近似值，避免全表 COUNT
+    if len(where_clauses) <= 1:  # 只有 "1=1"
+        count_approx = await db.execute(text(
+            "SELECT table_rows FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = 'phone_records'"
+        ))
+        total = count_approx.scalar() or 0
+    else:
+        count_result = await db.execute(text(f"SELECT COUNT(*) FROM phone_records pr WHERE {where_sql}"), params)
+        total = count_result.scalar() or 0
     offset = (page - 1) * page_size
 
     result = await db.execute(
@@ -81,23 +90,36 @@ async def list_phone_records(
 
 @router.get("/stats")
 async def get_phone_stats(db: AsyncSession = Depends(get_db)):
-    """获取手机号统计概览"""
-    total = (await db.execute(text("SELECT COUNT(*) FROM phone_records"))).scalar() or 0
-    domestic = (await db.execute(text("SELECT COUNT(*) FROM phone_records WHERE country_code = 'CN'"))).scalar() or 0
-    source_result = await db.execute(text("SELECT source_type, COUNT(*) FROM phone_records GROUP BY source_type"))
-    source_stats = {row[0]: row[1] for row in source_result.fetchall()}
+    """获取手机号统计概览（单次查询优化）"""
+    # 合并为单次查询，减少 DB 往返
+    row = (await db.execute(text("""
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN country_code = 'CN' THEN 1 ELSE 0 END) as domestic,
+            SUM(CASE WHEN source_type = 'sender' THEN 1 ELSE 0 END) as source_sender,
+            SUM(CASE WHEN source_type = 'message' THEN 1 ELSE 0 END) as source_message,
+            SUM(CASE WHEN source_type = 'alert' THEN 1 ELSE 0 END) as source_alert,
+            SUM(CASE WHEN phone_location IS NOT NULL AND phone_location != '' AND phone_location != '中国' THEN 1 ELSE 0 END) as has_location
+        FROM phone_records
+    """))).fetchone()
+
     location_result = await db.execute(
         text("""SELECT phone_location, COUNT(*) FROM phone_records
             WHERE country_code='CN' AND phone_location IS NOT NULL AND phone_location != '' AND phone_location != '中国'
             GROUP BY phone_location ORDER BY COUNT(*) DESC LIMIT 10"""))
     top_locations = [{"name": row[0], "count": row[1]} for row in location_result.fetchall()]
-    detail_row = (await db.execute(text(
-        """SELECT SUM(CASE WHEN phone_location IS NOT NULL AND phone_location != '' AND phone_location != '中国' THEN 1 ELSE 0 END),
-                  COUNT(*) FROM phone_records WHERE country_code='CN'"""))).fetchone()
-    detail_ratio = (detail_row[0] / detail_row[1] * 100) if detail_row[1] > 0 else 0
 
-    return {"total": total, "domestic": domestic, "by_source": source_stats,
-            "top_locations": top_locations, "location_detail_ratio": round(detail_ratio, 1)}
+    total = row[0] or 0
+    domestic = row[1] or 0
+    detail_ratio = (row[5] / total * 100) if total > 0 else 0
+
+    return {
+        "total": total,
+        "domestic": domestic,
+        "by_source": {"sender": row[2] or 0, "message": row[3] or 0, "alert": row[4] or 0},
+        "top_locations": top_locations,
+        "location_detail_ratio": round(detail_ratio, 1),
+    }
 
 
 @router.get("/provinces")

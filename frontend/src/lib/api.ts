@@ -612,10 +612,23 @@ export const api = {
       keyword?: string;
       page?: number;
       page_size?: number;
+      offset?: number;
+      limit?: number;
     }) => {
-      const cleanParams = Object.fromEntries(
-        Object.entries(params || {}).filter(([_, v]) => v !== undefined)
-      );
+      const cleanParams: Record<string, any> = {};
+      if (params?.group_by !== undefined) cleanParams.group_by = params.group_by;
+      if (params?.conversation_id !== undefined) cleanParams.conversation_id = params.conversation_id;
+      if (params?.date_from !== undefined) cleanParams.date_from = params.date_from;
+      if (params?.date_to !== undefined) cleanParams.date_to = params.date_to;
+      if (params?.keyword !== undefined) cleanParams.keyword = params.keyword;
+      // 支持 page/page_size 或 offset/limit 两种分页方式
+      if (params?.offset !== undefined) {
+        cleanParams.offset = params.offset;
+        cleanParams.limit = params.limit ?? 50;
+      } else if (params?.page !== undefined) {
+        cleanParams.offset = params.page * (params.page_size ?? 50);
+        cleanParams.limit = params.page_size ?? 50;
+      }
       const searchParams = new URLSearchParams(cleanParams as any);
       return fetchWithTimeout(`${API_BASE}/personnel/${senderId}/messages?${searchParams}`).then(handleResponse);
     },
