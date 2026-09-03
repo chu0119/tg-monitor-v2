@@ -274,3 +274,18 @@ async def disconnect_account(account_id: int, db: AsyncSession = Depends(get_db)
         await db.commit()
 
     return {"message": "已断开连接"}
+
+
+@router.post("/{account_id}/toggle")
+async def toggle_account(account_id: int, db: AsyncSession = Depends(get_db)):
+    """切换账号启用/禁用状态"""
+    account = await db.get(TelegramAccount, account_id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="账号不存在"
+        )
+    account.is_active = not account.is_active
+    await db.commit()
+    await db.refresh(account)
+    return {"id": account_id, "is_active": account.is_active}
