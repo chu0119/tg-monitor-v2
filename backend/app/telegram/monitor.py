@@ -903,9 +903,9 @@ class MessageMonitor:
             return "Unknown"
 
     async def _broadcast_new_message(self, db, db_message: MessageModel, sender: Sender, conversation_id: int, conversation_title: str = "Unknown"):
-        """通过 WebSocket 广播新消息到前端"""
+        """通过 WebSocket 广播新消息到前端（经 Redis pub/sub 跨进程转发）"""
         try:
-            from app.main import broadcast_new_message
+            from app.core.pubsub import publish
 
             # 格式化日期时间
             date_str = db_message.date.isoformat() if hasattr(db_message.date, 'isoformat') else str(db_message.date)
@@ -926,20 +926,8 @@ class MessageMonitor:
                 "alert_id": db_message.alert_id,
             }
 
-            # 创建后台任务并追踪,确保任务被正确清理
-            async def _broadcast_with_timeout():
-                try:
-                    async with asyncio.timeout(5):
-                        await broadcast_new_message(message_data)
-                except asyncio.TimeoutError:
-                    logger.warning("WebSocket 广播超时")
-                except Exception as e:
-                    logger.error(f"广播新消息失败: {e}")
-
-            task = asyncio.create_task(_broadcast_with_timeout())
-            self._background_tasks.add(task)
-            # 任务完成后自动从集合中移除
-            task.add_done_callback(self._background_tasks.discard)
+            # 发布到 Redis 频道，由 api_worker 订阅并转发到 WebSocket
+            await publish("new_message", message_data)
         except Exception as e:
             logger.error(f"广播新消息失败: {e}")
 

@@ -78,8 +78,29 @@ def create_app():
         except Exception as e:
             logger.warning(f"加载代理配置失败: {e}")
 
+        # 启动 Redis pub/sub 订阅，将 monitor_worker 的事件转发到 WebSocket
+        import asyncio
+        from app.core.pubsub import subscribe
+        from app.main import broadcast_new_message
+
+        _relay_task: asyncio.Task | None = None
+
+        async def _relay():
+            async def _handler(data):
+                # 去掉 publish 时注入的 type 字段，保持广播结构与原 broadcast_new_message 一致
+                data = {k: v for k, v in data.items() if k != "type"}
+                await broadcast_new_message(data)
+            await subscribe(_handler)
+
+        _relay_task = asyncio.create_task(_relay())
+        logger.info("Redis pub/sub 订阅任务已启动")
+
         yield
         logger.info(f"API Worker 关闭 (ID: {worker_manager.worker_id})")
+
+        # 清理订阅任务
+        if _relay_task is not None:
+            _relay_task.cancel()
 
     app = FastAPI(
         title=f"{settings.PROJECT_NAME} - API Worker {worker_manager.worker_id}",
