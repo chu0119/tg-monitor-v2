@@ -168,9 +168,10 @@ class MessageMonitor:
         # 创建事件处理器
         async def handle_new_message(event):
             # 将消息放入队列,由队列处理器统一处理(限制并发)
+            # 元组第三位为事件类型：new/edited，编辑消息需要走更新分支而不是去重跳过
             try:
                 # 使用 put_nowait 避免阻塞,如果队列满则记录警告
-                self._message_queue.put_nowait((event.message, conversation.id))
+                self._message_queue.put_nowait((event.message, conversation.id, "new"))
                 self._queue_stats["enqueued"] += 1
             except asyncio.QueueFull:
                 self._queue_stats["dropped"] += 1
@@ -189,13 +190,17 @@ class MessageMonitor:
         async def handle_edited_message(event):
             """处理编辑的消息"""
             try:
-                # 编辑的消息也需要检查关键词
                 logger.debug(f"收到编辑消息: {event.message.id}")
-                self._message_queue.put_nowait((event.message, conversation.id))
+                self._message_queue.put_nowait((event.message, conversation.id, "edited"))
                 self._queue_stats["enqueued"] += 1
             except asyncio.QueueFull:
                 self._queue_stats["dropped"] += 1
-                logger.warning(f"消息队列已满,编辑消息 {event.message.id} 无法入队")
+                # 编辑消息队列满时直接同步更新，避免编辑内容丢失
+                try:
+                    async with asyncio.timeout(30):
+                        await self._process_edited_message(event.message, conversation.id)
+                except Exception as e:
+                    logger.warning(f"编辑消息同步处理失败: {e}")
 
         edited_msg_handler = client.on(events.MessageEdited(chats=chats))(handle_edited_message)
 
@@ -755,6 +760,16 @@ class MessageMonitor:
         except Exception as e:
             logger.warning(f"保存手机号记录失败: phone={phone}, error={e}")
 
+    # 跨会话消息ID碰撞的替代ID方案：
+    # Telegram 消息 ID 只在单个会话内递增，不同会话会出现相同 ID。
+    # 主键直接用 TG 消息 ID 时，后到的会话消息会被误判为"重复"而静默丢弃。
+    # 替代 ID = tg_msg_id * 10_000_000 + (conversation_id % 10_000_000)，
+    # BigInteger 上限内安全（tg_msg_id < 9.2×10^11），325 个会话下实际不可能碰撞。
+    _SURROGATE_ID_MODULUS = 10_000_000
+
+    def _make_surrogate_message_id(self, tg_msg_id: int, conversation_id: int) -> int:
+        return tg_msg_id * self._SURROGATE_ID_MODULUS + (conversation_id % self._SURROGATE_ID_MODULUS)
+
     async def _save_message(
         self,
         db,
@@ -764,7 +779,9 @@ class MessageMonitor:
     ) -> Optional[MessageModel]:
         """保存消息到数据库(幂等性处理)
 
-        先查询后插入，避免 Duplicate entry 错误
+        先查询后插入，避免 Duplicate entry 错误。
+        去重按 (conversation_id, tg_message_id) 语义判断；
+        跨会话 ID 碰撞时改用替代 ID 入库而非丢弃。
         """
         # 处理Telegram消息时间:转换为UTC naive datetime存储
         msg_date = message.date
@@ -776,12 +793,15 @@ class MessageMonitor:
             # 如果没有时区信息,假定为UTC(Telegram API默认返回UTC)
             pass
 
-        # 先查询消息是否已存在（快速路径，避免不必要的 INSERT）
+        # 先查询消息是否已存在（快速路径）——必须限定同会话，否则别的会话同 ID 消息会被误判重复
         result = await db.execute(
-            select(MessageModel.id).where(MessageModel.id == message.id)
+            select(MessageModel.id).where(
+                MessageModel.id == message.id,
+                MessageModel.conversation_id == conversation_id,
+            )
         )
         if result.scalar_one_or_none():
-            # 消息已存在，返回 None 表示重复
+            # 同会话消息已存在，返回 None 表示重复
             return None
 
         # 尝试插入，如果因并发导致主键冲突则返回 None
@@ -813,9 +833,58 @@ class MessageMonitor:
 
             return db_message
         except Exception as e:
-            # 如果插入失败(可能是主键冲突),说明消息已存在
-            logger.debug(f"消息 {message.id} 已存在，跳过: {e}")
-            return None
+            # 主键冲突：区分"同会话重复"(丢弃)与"跨会话碰撞"(换替代ID重试)
+            from sqlalchemy.exc import IntegrityError
+            if not isinstance(e, IntegrityError):
+                logger.warning(f"消息 {message.id} 保存失败(非冲突): {e}")
+                return None
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            # 检查是否真的已存在同会话同ID消息（并发写入或 pull_history 已入库）
+            result = await db.execute(
+                select(MessageModel.id, MessageModel.conversation_id).where(
+                    MessageModel.id == message.id
+                )
+            )
+            existing = result.first()
+            if existing and existing[1] == conversation_id:
+                logger.debug(f"消息 {message.id} 已存在(会话 {conversation_id})，跳过")
+                return None
+
+            # 跨会话碰撞：用替代ID重试一次
+            surrogate_id = self._make_surrogate_message_id(message.id, conversation_id)
+            logger.info(
+                f"消息 ID {message.id} 跨会话碰撞(占用者会话 {existing[1] if existing else '?'}), "
+                f"会话 {conversation_id} 使用替代ID {surrogate_id}"
+            )
+            try:
+                db_message = MessageModel(
+                    id=surrogate_id,
+                    conversation_id=conversation_id,
+                    sender_id=sender_id,
+                    message_type=self._get_message_type(message),
+                    text=message.text,
+                    caption=getattr(message, "caption", None),
+                    date=msg_date,
+                    views=getattr(message, "views", None),
+                    forwards=getattr(message, "forwards", None),
+                    has_media=message.media is not None,
+                    is_reply=message.reply_to is not None,
+                    reply_to_msg_id=message.reply_to_msg_id if message.reply_to else None,
+                )
+                db.add(db_message)
+                await db.flush()
+                from sqlalchemy import text
+                await db.execute(
+                    text("UPDATE conversations SET total_messages = total_messages + 1 WHERE id = :cid"),
+                    {"cid": conversation_id}
+                )
+                return db_message
+            except Exception as e2:
+                logger.error(f"消息 {message.id} 替代ID {surrogate_id} 也冲突，跳过: {e2}")
+                return None
 
     def _get_message_type(self, message: Message) -> str:
         """获取消息类型"""
@@ -1215,17 +1284,17 @@ class MessageMonitor:
                     
                     try:
                         # 获取第一条消息（阻塞等待）
-                        message, conversation_id = await asyncio.wait_for(
+                        message, conversation_id, event_type = await asyncio.wait_for(
                             self._message_queue.get(),
                             timeout=1.0
                         )
-                        batch_messages.append((message, conversation_id))
-                        
+                        batch_messages.append((message, conversation_id, event_type))
+
                         # 尝试获取更多消息（非阻塞）
                         while len(batch_messages) < batch_size:
                             try:
-                                message, conversation_id = self._message_queue.get_nowait()
-                                batch_messages.append((message, conversation_id))
+                                message, conversation_id, event_type = self._message_queue.get_nowait()
+                                batch_messages.append((message, conversation_id, event_type))
                             except asyncio.QueueEmpty:
                                 break
                     except asyncio.TimeoutError:
@@ -1264,22 +1333,38 @@ class MessageMonitor:
 
     async def _process_batch(self, batch_messages: List[tuple]):
         """批量处理消息
-        
+
         Args:
-            batch_messages: 消息列表 [(message, conversation_id), ...]
+            batch_messages: 消息列表 [(message, conversation_id, event_type), ...]
+            event_type: "new" 新消息 / "edited" 编辑消息
         """
         if not batch_messages:
             return
-            
+
         # 使用 semaphore 限制并发
         async with self._process_semaphore:
+            # 编辑消息单独走更新分支（不能进批量插入逻辑，会被去重丢弃）
+            edited_items = [(m, cid) for m, cid, et in batch_messages if et == "edited"]
+            new_items = [(m, cid, et) for m, cid, et in batch_messages if et != "edited"]
+
+            for message, conversation_id in edited_items:
+                try:
+                    await self._process_edited_message(message, conversation_id)
+                except Exception as e:
+                    logger.error(f"处理编辑消息 {message.id} 失败: {e}")
+                finally:
+                    self._queue_stats["processed"] += 1
+
+            if not new_items:
+                return
+
             # 按会话分组
             messages_by_conv = {}
-            for message, conversation_id in batch_messages:
+            for message, conversation_id, _et in new_items:
                 if conversation_id not in messages_by_conv:
                     messages_by_conv[conversation_id] = []
                 messages_by_conv[conversation_id].append(message)
-            
+
             # 批量处理每个会话的消息
             for conversation_id, messages in messages_by_conv.items():
                 try:
@@ -1296,6 +1381,71 @@ class MessageMonitor:
                             self._queue_stats["processed"] += 1
                 else:
                     self._queue_stats["processed"] += len(messages)
+
+    async def _process_edited_message(self, message: Message, conversation_id: int):
+        """处理编辑的消息：更新已入库的文本/媒体标记，并用新文本重跑关键词匹配
+
+        若消息尚未入库（编辑先于入库到达），按新消息入库。
+        """
+        db = AsyncSessionLocal()
+        try:
+            # 查找已入库的消息（限定同会话）
+            result = await db.execute(
+                select(MessageModel).where(
+                    MessageModel.id == message.id,
+                    MessageModel.conversation_id == conversation_id,
+                )
+            )
+            db_message = result.scalar_one_or_none()
+
+            if db_message is None:
+                # 未入库过（编辑事件先到），按新消息处理
+                sender = await self._get_or_create_sender(db, message)
+                if not sender:
+                    await db.rollback()
+                    return
+                saved = await self._save_message(db, message, conversation_id, sender.id)
+                await db.commit()
+                if saved:
+                    self._session_last_message_time[conversation_id] = datetime.now()
+                return
+
+            # 更新编辑后的字段
+            msg_date = message.date
+            if msg_date.tzinfo is not None:
+                from app.utils import to_utc
+                msg_date = to_utc(msg_date).replace(tzinfo=None)
+            db_message.text = message.text
+            db_message.caption = getattr(message, "caption", None)
+            db_message.views = getattr(message, "views", None)
+            db_message.forwards = getattr(message, "forwards", None)
+            db_message.date = msg_date
+            db_message.has_media = message.media is not None
+            db.add(db_message)
+
+            # 用新文本重跑关键词匹配（create_alerts 内部按 message+keyword 查重，不会重复建警）
+            sender = await self._get_or_create_sender(db, message)
+            if sender:
+                class _Msg:
+                    pass
+                m = _Msg()
+                m.text = db_message.text
+                m.caption = db_message.caption
+                m.date = db_message.date
+                matched_keywords = await self.keyword_matcher.match_message(db, m, conversation_id)
+                if matched_keywords:
+                    await self.alert_service.create_alerts(db, db_message, sender, matched_keywords)
+
+            await db.commit()
+            logger.debug(f"编辑消息已更新: 消息 {message.id} (会话 {conversation_id})")
+        except Exception as e:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            logger.error(f"更新编辑消息 {message.id} 失败: {e}")
+        finally:
+            await db.close()
 
     async def _process_batch_for_conversation(self, conversation_id: int, messages: List[Message]):
         """批量处理单个会话的消息"""
@@ -1316,11 +1466,15 @@ class MessageMonitor:
             await self._load_self_user_ids()
 
             # 批量预检查已存在的消息ID（一次 IN 查询代替逐条 SELECT，消除 N+1）
+            # 必须限定本会话：TG 消息 ID 跨会话会重复，把别的会话同 ID 消息算进来会整批误跳
             all_msg_ids = [m.id for m in messages]
             existing_ids: set = set()
             if all_msg_ids:
                 result = await db.execute(
-                    select(MessageModel.id).where(MessageModel.id.in_(all_msg_ids))
+                    select(MessageModel.id).where(
+                        MessageModel.id.in_(all_msg_ids),
+                        MessageModel.conversation_id == conversation_id,
+                    )
                 )
                 existing_ids = set(result.scalars().all())
 
@@ -1509,35 +1663,12 @@ class MessageMonitor:
                 if not sender:
                     continue
 
-                # 检查消息是否已存在
-                result = await db.execute(
-                    select(MessageModel.id).where(MessageModel.id == message.id)
+                # 保存消息（复用 _save_message：同会话去重 + 跨会话ID碰撞自动换替代ID）
+                db_message = await self._save_message(
+                    db, message, conversation_id, sender.id
                 )
-                if result.scalar_one_or_none():
+                if not db_message:
                     continue
-
-                # 创建消息
-                msg_date = message.date
-                if msg_date.tzinfo is not None:
-                    from app.utils import to_utc
-                    msg_date = to_utc(msg_date).replace(tzinfo=None)
-
-                db_message = MessageModel(
-                    id=message.id,
-                    conversation_id=conversation_id,
-                    sender_id=sender.id,
-                    message_type=self._get_message_type(message),
-                    text=message.text,
-                    caption=getattr(message, "caption", None),
-                    date=msg_date,
-                    views=getattr(message, "views", None),
-                    forwards=getattr(message, "forwards", None),
-                    has_media=message.media is not None,
-                    is_reply=message.reply_to is not None,
-                    reply_to_msg_id=message.reply_to_msg_id if message.reply_to else None,
-                )
-                db.add(db_message)
-                await db.flush()
                 processed_count += 1
                 last_message_id = db_message.id
 
@@ -1546,7 +1677,7 @@ class MessageMonitor:
                     pass
                 m = _Msg()
                 m.text = db_message.text
-                m.caption = None
+                m.caption = db_message.caption  # 带图注的消息也要参与匹配
                 m.date = db_message.date
 
                 matched_keywords = await self.keyword_matcher.match_message(
@@ -1567,14 +1698,7 @@ class MessageMonitor:
             await self._update_conversation_stats(
                 db, conversation_id, last_message_id, processed_count
             )
-
-        # Maintain denormalized counter in the same transaction as the inserts
-        if processed_count > 0:
-            from sqlalchemy import text
-            await db.execute(
-                text("UPDATE conversations SET total_messages = total_messages + :inc WHERE id = :cid"),
-                {"inc": processed_count, "cid": conversation_id}
-            )
+        # 注：total_messages 计数已由 _save_message 逐条维护，此处不再重复累加
 
     async def stop_all_monitors(self):
         """停止所有监控"""

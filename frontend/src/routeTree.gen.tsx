@@ -23,6 +23,7 @@ const LazyAnalysisPage = React.lazy(() => import("@/pages/AnalysisPage").then(m 
 const LazyCasesPage = React.lazy(() => import("@/pages/CasesPage").then(m => ({ default: m.CasesPage || m.default })));
 const LazyWatchlistPage = React.lazy(() => import("@/pages/WatchlistPage").then(m => ({ default: m.WatchlistPage || m.default })));
 const LazyAuditPage = React.lazy(() => import("@/pages/AuditPage").then(m => ({ default: m.AuditPage || m.default })));
+const LazySetupPage = React.lazy(() => import("@/pages/SetupPage").then(m => ({ default: m.SetupPage || m.default })));
 
 // Loading fallback
 function LoadingFallback() {
@@ -137,6 +138,13 @@ const auditRoute = createRoute({
   component: LazyAuditPage,
 })
 
+// 初始化向导：无侧边栏布局（rootRoute 的 MainLayout 会包一层，SetupPage 自身全屏卡片样式可接受）
+const setupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/setup",
+  component: LazySetupPage,
+})
+
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   monitoringRoute,
@@ -154,4 +162,5 @@ export const routeTree = rootRoute.addChildren([
   casesRoute,
   watchlistRoute,
   auditRoute,
+  setupRoute,
 ])

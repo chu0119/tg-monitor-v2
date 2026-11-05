@@ -120,13 +120,55 @@ class DataCleanupService:
                     if not batch_ids:
                         break
 
+                    # 删除前收集受影响的会话/发送者/案件，删除后回扣计数器（否则统计永久虚高）
+                    affected = (
+                        await db.execute(
+                            select(Alert.conversation_id, Alert.sender_id, func.count(Alert.id))
+                            .where(Alert.id.in_(batch_ids))
+                            .group_by(Alert.conversation_id, Alert.sender_id)
+                        )
+                    ).all()
+                    placeholders = ",".join(map(str, batch_ids))
+                    affected_cases = (
+                        await db.execute(
+                            text(
+                                f"SELECT case_id, COUNT(*) FROM case_alerts "
+                                f"WHERE alert_id IN ({placeholders}) GROUP BY case_id"
+                            )
+                        )
+                    ).all()
+
                     await db.execute(delete(NotificationLog).where(NotificationLog.alert_id.in_(batch_ids)))
+                    await db.execute(
+                        text(f"DELETE FROM case_alerts WHERE alert_id IN ({placeholders})")
+                    )
                     await db.execute(
                         update(Message)
                         .where(Message.alert_id.in_(batch_ids))
                         .values(alert_id=None)
                     )
                     await db.execute(delete(Alert).where(Alert.id.in_(batch_ids)))
+
+                    # 回扣计数器：conversations.total_alerts / senders.alert_count / cases.alert_count
+                    for conv_id, sender_id, cnt in affected:
+                        cnt = int(cnt or 0)
+                        if cnt <= 0:
+                            continue
+                        if conv_id:
+                            await db.execute(
+                                text("UPDATE conversations SET total_alerts = GREATEST(total_alerts - :c, 0) WHERE id = :i"),
+                                {"c": cnt, "i": conv_id},
+                            )
+                        if sender_id:
+                            await db.execute(
+                                text("UPDATE senders SET alert_count = GREATEST(alert_count - :c, 0) WHERE id = :i"),
+                                {"c": cnt, "i": sender_id},
+                            )
+                    for case_id, cnt in affected_cases:
+                        await db.execute(
+                            text("UPDATE cases SET alert_count = GREATEST(alert_count - :c, 0) WHERE id = :i"),
+                            {"c": int(cnt or 0), "i": case_id},
+                        )
 
                     batch_deleted = len(batch_ids)
                     total_deleted += batch_deleted
@@ -205,7 +247,8 @@ class DataCleanupService:
                     batch_ids = (
                         await db.execute(
                             select(Message.id)
-                            .order_by(Message.created_at.asc(), Message.id.asc())
+                            # 按消息实际时间排序（idx_date 索引覆盖）；created_at 无索引会全表 filesort
+                            .order_by(Message.date.asc(), Message.id.asc())
                             .limit(limit)
                         )
                     ).scalars().all()
@@ -213,14 +256,78 @@ class DataCleanupService:
                     if not batch_ids:
                         break
 
+                    placeholders = ",".join(map(str, batch_ids))
+
+                    # 待删消息涉及的会话及条数（回扣 conversations.total_messages）
+                    conv_counts = (
+                        await db.execute(
+                            select(Message.conversation_id, func.count(Message.id))
+                            .where(Message.id.in_(batch_ids))
+                            .group_by(Message.conversation_id)
+                        )
+                    ).all()
+
+                    # 待删消息关联的告警：先收集计数（回扣 senders/conversations/cases）
+                    alert_conv_counts = (
+                        await db.execute(
+                            select(Alert.conversation_id, Alert.sender_id, func.count(Alert.id))
+                            .where(Alert.message_id.in_(batch_ids))
+                            .group_by(Alert.conversation_id, Alert.sender_id)
+                        )
+                    ).all()
                     alert_ids = (
                         await db.execute(select(Alert.id).where(Alert.message_id.in_(batch_ids)))
                     ).scalars().all()
                     if alert_ids:
+                        a_placeholders = ",".join(map(str, alert_ids))
+                        alert_cases = (
+                            await db.execute(
+                                text(
+                                    f"SELECT case_id, COUNT(*) FROM case_alerts "
+                                    f"WHERE alert_id IN ({a_placeholders}) GROUP BY case_id"
+                                )
+                            )
+                        ).all()
                         await db.execute(delete(NotificationLog).where(NotificationLog.alert_id.in_(alert_ids)))
+                        await db.execute(text(f"DELETE FROM case_alerts WHERE alert_id IN ({a_placeholders})"))
                         await db.execute(delete(Alert).where(Alert.id.in_(alert_ids)))
+                        for case_id, cnt in alert_cases:
+                            await db.execute(
+                                text("UPDATE cases SET alert_count = GREATEST(alert_count - :c, 0) WHERE id = :i"),
+                                {"c": int(cnt or 0), "i": case_id},
+                            )
+                        for conv_id, sender_id, cnt in alert_conv_counts:
+                            cnt = int(cnt or 0)
+                            if cnt <= 0:
+                                continue
+                            if conv_id:
+                                await db.execute(
+                                    text("UPDATE conversations SET total_alerts = GREATEST(total_alerts - :c, 0) WHERE id = :i"),
+                                    {"c": cnt, "i": conv_id},
+                                )
+                            if sender_id:
+                                await db.execute(
+                                    text("UPDATE senders SET alert_count = GREATEST(alert_count - :c, 0) WHERE id = :i"),
+                                    {"c": cnt, "i": sender_id},
+                                )
 
                     await db.execute(delete(Message).where(Message.id.in_(batch_ids)))
+
+                    # 回扣会话消息计数，并修正 last_message 指针（被删的可能是最新一条）
+                    for conv_id, cnt in conv_counts:
+                        cnt = int(cnt or 0)
+                        if cnt <= 0:
+                            continue
+                        await db.execute(
+                            text(
+                                "UPDATE conversations SET "
+                                "total_messages = GREATEST(total_messages - :c, 0), "
+                                "last_message_id = (SELECT m.id FROM messages m WHERE m.conversation_id = :i ORDER BY m.id DESC LIMIT 1), "
+                                "last_message_at = (SELECT m.date FROM messages m WHERE m.conversation_id = :i ORDER BY m.id DESC LIMIT 1) "
+                                "WHERE id = :i"
+                            ),
+                            {"c": cnt, "i": conv_id},
+                        )
 
                     batch_deleted = len(batch_ids)
                     total_deleted += batch_deleted

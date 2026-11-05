@@ -18,6 +18,7 @@ import {
   Briefcase,
   Eye,
   FileText,
+  BarChart3,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import InternetStatus from "@/components/InternetStatus";
@@ -28,6 +29,7 @@ const navItems = [
   { path: "/alerts", label: "告警管理", icon: AlertTriangle, mobilePriority: 2 },
   { path: "/phone-intel", label: "手机情报", icon: Phone, mobilePriority: 3 },
   { path: "/personnel", label: "人员档案", icon: UserCheck, mobilePriority: 4 },
+  { path: "/analysis", label: "数据分析", icon: BarChart3, mobilePriority: 5 },
   { path: "/proxy", label: "代理配置", icon: Globe, mobilePriority: 5 },
   { path: "/cases", label: "案件管理", icon: Briefcase, mobilePriority: 5 },
   { path: "/watchlist", label: "重点关注", icon: Eye, mobilePriority: 5 },

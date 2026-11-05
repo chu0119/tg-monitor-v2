@@ -85,7 +85,11 @@ class BackupService:
             raise
 
     async def _backup_database(self, backup_path: Path):
-        """使用 mysqldump 备份 MySQL 数据库并压缩"""
+        """使用 mysqldump 备份 MySQL 数据库并压缩
+
+        mysqldump | gzip 管道直连落盘：原实现把整个 dump 读进内存再压缩，
+        库到 10GB 级别时内存中同时存在两份完整 dump（OOM）。
+        """
         db_backup = backup_path / "tg_monitor.sql.gz"
         dump_cmd = [
             "mysqldump",
@@ -108,20 +112,25 @@ class BackupService:
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        dump_stdout, dump_stderr = await dump_process.communicate()
+        # mysqldump | gzip > 文件 全程流式，任意大小库都不占内存
+        db_backup.parent.mkdir(parents=True, exist_ok=True)
+        out_file = open(db_backup, "wb")
+        try:
+            gzip_process = await asyncio.create_subprocess_exec(
+                *gzip_cmd,
+                stdin=dump_process.stdout,
+                stdout=out_file,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            # 关闭父进程侧的读端引用，让 gzip 收到 EOF
+            dump_process.stdout.close()
 
-        if dump_process.returncode != 0:
-            error_msg = dump_stderr.decode() if dump_stderr else "未知错误"
-            raise Exception(f"数据库备份失败: {error_msg}")
-
-        # 用gzip压缩dump输出
-        gzip_process = await asyncio.create_subprocess_exec(
-            *gzip_cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        gz_data, gzip_stderr = await gzip_process.communicate(input=dump_stdout)
+            gzip_stderr = await gzip_process.stderr.read()
+            await gzip_process.wait()
+            dump_stderr = await dump_process.stderr.read()
+            await dump_process.wait()
+        finally:
+            out_file.close()
 
         if dump_process.returncode != 0:
             error_msg = dump_stderr.decode() if dump_stderr else "未知错误"
@@ -130,11 +139,8 @@ class BackupService:
             error_msg = gzip_stderr.decode() if gzip_stderr else "未知错误"
             raise Exception(f"备份压缩失败: {error_msg}")
 
-        async with aiofiles.open(db_backup, "wb") as f:
-            await f.write(gz_data)
-
-        if not db_backup.exists():
-            raise Exception("备份文件未创建")
+        if not db_backup.exists() or db_backup.stat().st_size == 0:
+            raise Exception("备份文件未创建或为空")
 
         file_size_mb = db_backup.stat().st_size / 1024 / 1024
         logger.info(f"数据库备份完成（已压缩）: {file_size_mb:.2f} MB")
@@ -244,18 +250,19 @@ class BackupService:
         else:
             raise FileNotFoundError("备份数据库文件不存在")
 
-        # 使用 mysql 命令恢复
+        # 使用 mysql 命令恢复（密码走 MYSQL_PWD 环境变量，不上命令行——ps 可见）
         mysql_cmd = [
             "mysql",
             f"-u{settings.MYSQL_USER}",
-            f"-p{settings.MYSQL_PASSWORD}",
             "-h", settings.MYSQL_HOST,
             "-P", str(settings.MYSQL_PORT),
             settings.MYSQL_DATABASE
         ]
+        restore_env = dict(**os.environ)
+        restore_env["MYSQL_PWD"] = settings.MYSQL_PASSWORD or ""
 
+        # 流式恢复：非 gzip 文件也不整读进内存（10GB 级 dump 会 OOM）
         if use_gzip:
-            # 解压并恢复
             gzip_cmd = ["gunzip", "-c", str(source_file)]
             process1 = await asyncio.create_subprocess_exec(
                 *gzip_cmd,
@@ -266,7 +273,8 @@ class BackupService:
                 *mysql_cmd,
                 stdin=process1.stdout,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                env=restore_env,
             )
             stdout, stderr = await process2.communicate()
             _, gzip_stderr = await process1.communicate()
@@ -274,20 +282,19 @@ class BackupService:
             if process1.returncode != 0:
                 error_msg = gzip_stderr.decode() if gzip_stderr else "未知错误"
                 raise Exception(f"解压失败: {error_msg}")
+            mysql_proc = process2
         else:
-            # 直接恢复
-            with open(source_file, 'r') as f:
-                sql_content = f.read()
-
             process = await asyncio.create_subprocess_exec(
                 *mysql_cmd,
-                stdin=asyncio.subprocess.PIPE,
+                stdin=open(source_file, "rb"),
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                env=restore_env,
             )
-            stdout, stderr = await process.communicate(input=sql_content.encode())
+            stdout, stderr = await process.communicate()
+            mysql_proc = process
 
-        if process2.returncode if use_gzip else process.returncode != 0:
+        if mysql_proc.returncode != 0:
             error_msg = stderr.decode() if stderr else "未知错误"
             raise Exception(f"数据库恢复失败: {error_msg}")
 
