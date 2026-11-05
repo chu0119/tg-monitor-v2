@@ -6,44 +6,45 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from app.api.deps import get_db
-from app.telegram.monitor import message_monitor
-from app.telegram.client import client_manager
-from app.models.conversation import Conversation
+from app.services.audit_service import log_audit
 from app.models.account import TelegramAccount
 
 router = APIRouter(prefix="/monitoring", tags=["监控管理"])
 
+# monitor_worker 状态/控制服务地址（监控操作必须在持有 session 文件的 monitor 进程执行，
+# API 进程只做转发，避免跨进程并发使用同一 Telethon session）
+MONITOR_CONTROL_BASE = "http://127.0.0.1:9010"
+
+
+async def _forward_to_monitor(method: str, path: str):
+    """把监控控制指令转发给 monitor_worker"""
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as c:
+        try:
+            resp = await c.request(method, f"{MONITOR_CONTROL_BASE}{path}")
+            if resp.status_code == 404:
+                detail = resp.json().get("detail", "资源不存在")
+                raise HTTPException(status_code=404, detail=detail)
+            if resp.status_code == 409:
+                detail = resp.json().get("detail", "资源不属于当前 Worker")
+                raise HTTPException(status_code=409, detail=detail)
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.ConnectError:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="monitor_worker 控制服务不可用（9010 端口），请检查 tgmonitor-monitor-0 服务状态",
+            )
+
 
 @router.post("/restart")
 async def restart_monitoring(db: AsyncSession = Depends(get_db)):
-    """重启所有监控任务"""
+    """重启所有监控任务（转发给 monitor_worker 执行）"""
     try:
-        # 停止现有监控
-        await message_monitor.stop_all_monitors()
-        logger.info("已停止所有监控任务")
-
-        # 重新连接所有账号
-        result = await db.execute(select(TelegramAccount).where(TelegramAccount.is_active == True))
-        accounts = result.scalars().all()
-
-        connected_count = 0
-        for account in accounts:
-            try:
-                client = await client_manager.get_client(account.id)
-                if client and client.is_connected():
-                    connected_count += 1
-            except Exception as e:
-                logger.warning(f"连接账号 {account.id} 失败: {e}")
-
-        # 启动所有监控
-        await message_monitor.start_all_monitors()
-        await message_monitor.start_heartbeat()
-
-        return {
-            "message": "监控已重启",
-            "connected_accounts": connected_count,
-            "active_monitors": len(message_monitor.active_monitors)
-        }
+        result = await _forward_to_monitor("POST", "/control/restart")
+        await log_audit(db, "restart_monitoring", "monitoring", detail={"result": result.get("connected_accounts")})
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"重启监控失败: {e}")
         raise HTTPException(
@@ -95,10 +96,11 @@ async def get_monitoring_status(db: AsyncSession = Depends(get_db)):
 
 @router.post("/start/{conversation_id}")
 async def start_conversation_monitor(conversation_id: int, db: AsyncSession = Depends(get_db)):
-    """启动指定会话的监控"""
+    """启动指定会话的监控（转发给 monitor_worker 执行）"""
     try:
-        await message_monitor.start_monitor(conversation_id)
-        return {"message": f"会话 {conversation_id} 监控已启动"}
+        return await _forward_to_monitor("POST", f"/control/start/{conversation_id}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"启动监控失败 (conversation_id={conversation_id}): {e}")
         raise HTTPException(
@@ -109,10 +111,11 @@ async def start_conversation_monitor(conversation_id: int, db: AsyncSession = De
 
 @router.post("/stop/{conversation_id}")
 async def stop_conversation_monitor(conversation_id: int):
-    """停止指定会话的监控"""
+    """停止指定会话的监控（转发给 monitor_worker 执行）"""
     try:
-        await message_monitor.stop_monitor(conversation_id)
-        return {"message": f"会话 {conversation_id} 监控已停止"}
+        return await _forward_to_monitor("POST", f"/control/stop/{conversation_id}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"停止监控失败 (conversation_id={conversation_id}): {e}")
         raise HTTPException(

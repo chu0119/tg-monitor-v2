@@ -333,6 +333,9 @@ async def get_phone_detail(phone: str, db: AsyncSession = Depends(get_db)):
 
     # 构建前端期望的消息上下文结构（含 context_before/match_message/context_after）
     message_contexts = []
+    # 关联的群聊（去重）——从匹配消息行直接提取（conversation_id 在查询结果的第6列）
+    conversations = []
+    seen_conv_ids = set()
     for mm in match_messages:
         msg_id = mm[0]
         conv_id = mm[5]
@@ -348,15 +351,9 @@ async def get_phone_detail(phone: str, db: AsyncSession = Depends(get_db)):
             "match_message": match_msg,
             "context_after": [],  # 前端期望的字段（暂不填充）
         })
-
-    # 提取关联的群聊（去重）
-    conversations = []
-    seen_conv_ids = set()
-    for mc in message_contexts:
-        cid = mc.get("conversation_id")
-        if cid and cid not in seen_conv_ids:
-            seen_conv_ids.add(cid)
-            conversations.append({"id": cid, "title": mc.get("conversation_title", "")})
+        if conv_id and conv_id not in seen_conv_ids:
+            seen_conv_ids.add(conv_id)
+            conversations.append({"id": conv_id, "title": mm[10] or ""})
 
     return {
         "base_info": base_info,

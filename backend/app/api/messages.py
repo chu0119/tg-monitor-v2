@@ -139,10 +139,15 @@ async def setup_fulltext_index(db: AsyncSession = Depends(get_db)):
             "ALTER TABLE messages ADD FULLTEXT INDEX ft_message_text (text) WITH PARSER ngram"
         ))
         await db.commit()
+        # 清除 list_messages 里的 FULLTEXT 可用性探测缓存，否则要重启进程才会启用
+        if hasattr(list_messages, "_fulltext_available"):
+            del list_messages._fulltext_available
         return {"message": "全文搜索索引创建成功"}
     except Exception as e:
         error_msg = str(e)
         if "Duplicate key name" in error_msg or "already exists" in error_msg.lower():
+            if hasattr(list_messages, "_fulltext_available"):
+                del list_messages._fulltext_available
             return {"message": "全文搜索索引已存在"}
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"创建全文索引失败: {error_msg}")

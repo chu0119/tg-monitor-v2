@@ -3,6 +3,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -169,7 +170,8 @@ async def _do_import(file_path: str):
         _migration_state["progress"] = "正在解压..."
         tmpdir = tempfile.mkdtemp(prefix="tg_import_")
         with tarfile.open(file_path, "r:gz") as tar:
-            tar.extractall(tmpdir)
+            # 防 TarSlip：filter="data" 拒绝绝对路径/..穿越/符号链接等危险成员（Python 3.12+）
+            tar.extractall(tmpdir, filter="data")
 
         stats = {"tables_imported": 0, "sessions_restored": 0, "env_merged": False}
 
@@ -215,25 +217,31 @@ async def _do_import(file_path: str):
             from app.core.database import AsyncSessionLocal
             from sqlalchemy import text
 
+            # 安全：只允许导入导出时支持的表，表名/列名做标识符合法性校验，
+            # 值全部走绑定参数，杜绝上传包注入 SQL
+            _IMPORTABLE_TABLES = {"keywords", "keyword_groups", "alert_rules"}
+            _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
             async with AsyncSessionLocal() as db:
                 for table, rows in json_data.items():
                     if not rows:
                         continue
+                    if table not in _IMPORTABLE_TABLES:
+                        logger.warning(f"导入跳过非白名单表: {table}")
+                        continue
+                    if not _IDENT_RE.match(table):
+                        logger.warning(f"导入跳过非法表名: {table}")
+                        continue
                     for row in rows:
-                        columns = list(row.keys())
-                        values = []
-                        placeholders = []
-                        for col in columns:
-                            val = row[col]
-                            if val is None:
-                                placeholders.append("NULL")
-                            elif isinstance(val, str):
-                                placeholders.append(f"'{val.replace(chr(39), chr(39)+chr(39))}'")
-                            else:
-                                placeholders.append(str(val))
-                        sql = f"INSERT IGNORE INTO {table} ({','.join(columns)}) VALUES ({','.join(placeholders)})"
+                        columns = [c for c in row.keys() if _IDENT_RE.match(str(c))]
+                        if not columns:
+                            continue
+                        col_sql = ",".join(columns)
+                        bind_sql = ",".join(f":p_{c}" for c in columns)
+                        bind_values = {f"p_{c}": row[c] for c in columns}
+                        sql = text(f"INSERT IGNORE INTO {table} ({col_sql}) VALUES ({bind_sql})")
                         try:
-                            await db.execute(text(sql))
+                            await db.execute(sql, bind_values)
                         except Exception as e:
                             logger.warning(f"导入 {table} 行失败: {e}")
                 await db.commit()
@@ -340,9 +348,9 @@ async def import_data(background_tasks: BackgroundTasks, file: UploadFile = File
     if _migration_state["status"] != "idle":
         return {"error": True, "message": "已有任务进行中，请稍候", "status": _migration_state}
 
-    # 保存上传文件
+    # 保存上传文件——文件名用固定名，杜绝 filename 携带路径/穿越符（攻击者完全可控）
     tmpdir = tempfile.mkdtemp(prefix="tg_import_upload_")
-    file_path = os.path.join(tmpdir, file.filename or "import.tar.gz")
+    file_path = os.path.join(tmpdir, "import.tar.gz")
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)

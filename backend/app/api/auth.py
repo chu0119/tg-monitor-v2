@@ -1,7 +1,7 @@
 """API 认证中间件"""
-from fastapi import Request, HTTPException
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 import os
 
 # API Key 配置 - 通过环境变量或 .env 文件设置
@@ -10,6 +10,18 @@ API_KEY = os.environ.get("TG_MONITOR_API_KEY", "")
 
 # 不需要认证的路径
 EXEMPT_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc"}
+
+
+def _unauthorized_response() -> JSONResponse:
+    """构造 401 响应。
+
+    注意：BaseHTTPMiddleware 中 raise HTTPException 不会被异常处理器捕获
+    （该中间件位于 ExceptionMiddleware 之外），会变成 500，因此必须直接返回响应。
+    """
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "未授权：请提供有效的 API Key (X-API-Key header 或 api_key query parameter)"},
+    )
 
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
@@ -46,8 +58,5 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         if auth_header.startswith("Bearer ") and auth_header[7:] == API_KEY:
             return await call_next(request)
         
-        # 认证失败
-        raise HTTPException(
-            status_code=401,
-            detail="未授权：请提供有效的 API Key (X-API-Key header 或 api_key query parameter)"
-        )
+        # 认证失败（不能用 raise HTTPException，见 _unauthorized_response 注释）
+        return _unauthorized_response()

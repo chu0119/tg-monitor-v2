@@ -169,6 +169,19 @@ async def batch_create_conversations(
 
         created_count += 1
 
+    # 批量更新账号的总会话数（只更新实际新增的）——必须在 commit 之前，否则随 session 关闭回滚丢失
+    if created_count > 0:
+        account_counts = defaultdict(int)
+        for conv in new_conversations:
+            account_counts[conv.account_id] += 1
+
+        for account_id, count in account_counts.items():
+            await db.execute(
+                update(TelegramAccount)
+                .where(TelegramAccount.id == account_id)
+                .values(total_conversations=TelegramAccount.total_conversations + count)
+            )
+
     # 先commit，确保数据写入数据库后再启动监控
     try:
         await db.commit()
@@ -188,19 +201,6 @@ async def batch_create_conversations(
             await message_monitor.start_monitor(conv_id)
         except Exception as e:
             logger.error(f"启动监控失败 (conversation_id={conv_id}): {e}")
-
-    # 批量更新账号的总会话数（只更新实际新增的）
-    if created_count > 0:
-        account_counts = defaultdict(int)
-        for conv in new_conversations:
-            account_counts[conv.account_id] += 1
-
-        for account_id, count in account_counts.items():
-            await db.execute(
-                update(TelegramAccount)
-                .where(TelegramAccount.id == account_id)
-                .values(total_conversations=TelegramAccount.total_conversations + count)
-            )
 
     return {
         "message": f"批量操作完成",
