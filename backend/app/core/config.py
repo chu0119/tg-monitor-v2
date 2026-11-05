@@ -52,19 +52,27 @@ class Settings(BaseSettings):
 
     @property
     def SECRET_KEY(self) -> str:
-        """获取 JWT 密钥，优先使用环境变量，否则自动生成"""
+        """获取 JWT 密钥，优先使用环境变量，否则自动生成
+
+        注意：必须在实例化时固化，不能用 secrets.token_urlsafe 直接返回——
+        property 每次访问都会生成新密钥，导致签发与校验使用不同密钥，所有 JWT 永远失效。
+        """
         if self.JWT_SECRET_KEY:
             return self.JWT_SECRET_KEY
-        # 自动生成一个安全的随机密钥
-        warnings.warn(
-            "JWT_SECRET_KEY 未设置，使用自动生成的临时密钥。"
-            "请在生产环境中设置环境变量 JWT_SECRET_KEY！"
-        )
-        logger.warning(
-            "JWT_SECRET_KEY 未设置，使用自动生成的临时密钥。"
-            "请在生产环境中设置环境变量 JWT_SECRET_KEY！"
-        )
-        return secrets.token_urlsafe(32)
+        # 进程内缓存一个稳定密钥，保证同一进程内签发/校验一致
+        cached = getattr(self, "_generated_secret_key", None)
+        if cached is None:
+            warnings.warn(
+                "JWT_SECRET_KEY 未设置，使用自动生成的临时密钥（进程重启后失效）。"
+                "请在生产环境中设置环境变量 JWT_SECRET_KEY！"
+            )
+            logger.warning(
+                "JWT_SECRET_KEY 未设置，使用自动生成的临时密钥（进程重启后失效）。"
+                "请在生产环境中设置环境变量 JWT_SECRET_KEY！"
+            )
+            cached = secrets.token_urlsafe(32)
+            self._generated_secret_key = cached
+        return cached
 
     # Telegram 配置
     TELEGRAM_API_ID: Optional[int] = None

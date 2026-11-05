@@ -21,12 +21,13 @@ class AlertAggregationService:
     # 默认聚合窗口（分钟）
     DEFAULT_AGGREGATION_WINDOW = 30
 
-    # 告警升级规则（小时 -> 升级后级别）
+    # 告警升级规则（小时 -> 升级后级别）。级别序：low < medium < high < critical
     ESCALATION_RULES = {
-        24: "medium",    # 24小时未处理 -> medium
-        48: "high",      # 48小时未处理 -> high
-        72: "critical",  # 72小时未处理 -> critical
+        24: "medium",    # 24小时未处理 -> 至少 medium
+        48: "high",      # 48小时未处理 -> 至少 high
+        72: "critical",  # 72小时未处理 -> 至少 critical
     }
+    _LEVEL_ORDER = ["low", "medium", "high", "critical"]
 
     async def get_aggregated_alerts(
         self,
@@ -95,34 +96,37 @@ class AlertAggregationService:
     async def escalate_stale_alerts(self, db: AsyncSession) -> Dict:
         """升级超时未处理的告警
 
-        根据创建时间和升级规则，自动提升告警级别
+        根据创建时间和升级规则，自动**提升**告警级别（只升不降：
+        原实现按 24/48/72h 顺序执行且只判断 alert_level != new_level，
+        会把已创建为 critical 的告警降级成 medium）。
         """
         escalated = 0
         now = now_utc()
 
-        for hours, new_level in self.ESCALATION_RULES.items():
-            cutoff = now - timedelta(hours=hours)
+        # 从高到低处理：72h 先升级到 critical，之后低档规则排除已达高级别的告警
+        sorted_rules = sorted(self.ESCALATION_RULES.items(), key=lambda x: x[0], reverse=True)
+        higher_levels: List[str] = []
 
+        for hours, target_level in sorted_rules:
+            cutoff = now - timedelta(hours=hours)
+            # 排除目标级别本身以及更高级别（已是 high/critical 的不能被 24h 规则拉回 medium）
+            excluded = set(higher_levels) | {target_level}
             result = await db.execute(
-                select(Alert).where(
+                update(Alert)
+                .where(
                     and_(
                         Alert.status == "pending",
                         Alert.created_at < cutoff,
-                        Alert.alert_level != new_level,
+                        Alert.alert_level.notin_(excluded),
                     )
-                ).limit(500)
-            )
-            alerts = result.scalars().all()
-
-            for alert in alerts:
-                old_level = alert.alert_level
-                alert.alert_level = new_level
-                escalated += 1
-                logger.info(
-                    f"告警升级: alert_id={alert.id}, "
-                    f"{old_level} -> {new_level}, "
-                    f"创建于 {alert.created_at}"
                 )
+                .values(alert_level=target_level)
+            )
+            count = result.rowcount or 0
+            if count > 0:
+                escalated += count
+                logger.info(f"告警升级: {count} 条超过 {hours}h 的告警 -> {target_level}")
+            higher_levels.append(target_level)
 
         if escalated > 0:
             await db.commit()

@@ -28,9 +28,10 @@ class DatabaseManager:
             mysql_url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/{database}"
             engine = create_async_engine(mysql_url, echo=False)
 
-            # 尝试连接
+            # 尝试连接（SQLAlchemy 2.0 要求 text() 包装）
+            from sqlalchemy import text as sa_text
             async with engine.connect() as conn:
-                await conn.execute("SELECT 1")
+                await conn.execute(sa_text("SELECT 1"))
 
             await engine.dispose()
 

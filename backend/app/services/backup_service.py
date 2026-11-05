@@ -14,6 +14,9 @@ import subprocess
 class BackupService:
     """数据备份和恢复服务 - MySQL 版本"""
 
+    # 备份名只允许字母数字下划线中横线，杜绝 ../ 路径穿越（restore/delete 可 rmtree 任意目录）
+    _NAME_RE = None  # 延迟编译（模块加载时 re 已可用）
+
     def __init__(self):
         # 项目根目录
         project_root = settings.PROJECT_DIR
@@ -24,6 +27,16 @@ class BackupService:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.sessions_dir = backend_dir / "sessions"
         self.env_file = backend_dir / ".env"
+
+    def _validate_backup_name(self, name: str) -> Path:
+        """校验备份名并返回安全的备份路径，非法名称抛 ValueError"""
+        import re
+        if not name or not re.fullmatch(r"[A-Za-z0-9_\-]+", name):
+            raise ValueError(f"非法的备份名称: {name!r}")
+        backup_path = (self.backup_dir / name).resolve()
+        if backup_path.parent != self.backup_dir.resolve():
+            raise ValueError(f"备份路径越界: {name!r}")
+        return backup_path
 
     async def create_backup(self, name: Optional[str] = None) -> dict:
         """创建完整备份
@@ -37,7 +50,7 @@ class BackupService:
         if name is None:
             name = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        backup_path = self.backup_dir / name
+        backup_path = self._validate_backup_name(name)
         backup_path.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"开始创建备份: {name}")
@@ -183,7 +196,7 @@ class BackupService:
         Returns:
             恢复结果
         """
-        backup_path = self.backup_dir / name
+        backup_path = self._validate_backup_name(name)
 
         if not backup_path.exists():
             raise ValueError(f"备份不存在: {name}")
@@ -339,7 +352,7 @@ class BackupService:
 
     async def delete_backup(self, name: str) -> bool:
         """删除备份"""
-        backup_path = self.backup_dir / name
+        backup_path = self._validate_backup_name(name)
 
         if not backup_path.exists():
             return False

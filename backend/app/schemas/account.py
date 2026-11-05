@@ -53,10 +53,8 @@ class TelegramAccountResponse(BaseModel):
     last_name: Optional[str]
     is_premium: Optional[bool] = False
     is_bot: Optional[bool] = False
-    is_active: Optional[bool] = True
-    is_authorized: Optional[bool] = False
-    is_active: bool
-    is_authorized: bool
+    is_active: bool = True
+    is_authorized: bool = False
     last_used_at: Optional[datetime]
     proxy_config: Optional[dict]
     api_id: Optional[int]
@@ -66,6 +64,13 @@ class TelegramAccountResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     note: Optional[str]
+
+    @field_serializer('api_hash')
+    def serialize_api_hash(self, v: Optional[str]) -> Optional[str]:
+        """api_hash 是 Telegram 凭据，响应中脱敏（保留前4位便于核对）"""
+        if not v:
+            return v
+        return f"{v[:4]}****"
 
     @field_serializer('last_used_at', 'created_at', 'updated_at')
     def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:

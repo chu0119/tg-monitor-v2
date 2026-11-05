@@ -19,23 +19,29 @@ async def log_audit(
     operator: str = "system",
     ip_address: str = None,
 ):
-    """记录审计日志（统一入口）"""
+    """记录审计日志（统一入口）
+
+    注意：审计写入使用独立会话并立即提交。原先复用调用方会话会中途 commit，
+    把调用方尚未完成的业务变更一并提交（提前可见/部分提交）。
+    """
     try:
-        await db.execute(
-            text(
-                "INSERT INTO audit_log (operator, action, target_type, target_id, detail, ip_address, created_at) "
-                "VALUES (:operator, :action, :target_type, :target_id, :detail, :ip_address, NOW())"
-            ),
-            {
-                "operator": operator,
-                "action": action,
-                "target_type": target_type,
-                "target_id": str(target_id) if target_id else None,
-                "detail": json.dumps(detail, ensure_ascii=False, default=str) if detail else None,
-                "ip_address": ip_address,
-            },
-        )
-        await db.commit()
+        from app.core.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as audit_db:
+            await audit_db.execute(
+                text(
+                    "INSERT INTO audit_log (operator, action, target_type, target_id, detail, ip_address, created_at) "
+                    "VALUES (:operator, :action, :target_type, :target_id, :detail, :ip_address, NOW())"
+                ),
+                {
+                    "operator": operator,
+                    "action": action,
+                    "target_type": target_type,
+                    "target_id": str(target_id) if target_id else None,
+                    "detail": json.dumps(detail, ensure_ascii=False, default=str) if detail else None,
+                    "ip_address": ip_address,
+                },
+            )
+            await audit_db.commit()
     except Exception as e:
         logger.error(f"写入审计日志失败: {e}")
 

@@ -372,19 +372,22 @@ class NotificationService:
     ) -> Tuple[bool, Optional[str]]:
         """发送Telegram通知"""
         cfg = config.config
+        import html as _html
 
+        # parse_mode=HTML 下用户消息若含 <、>、& 会导致 Telegram 400 解析错误，
+        # 重试 3 次全部失败，因此所有动态内容必须转义
         text = f"""
 🚨 <b>告警通知</b>
 
-<b>关键词组:</b> {alert_data['keyword_group_name']}
-<b>关键词:</b> {alert_data['keyword_text']}
-<b>级别:</b> {alert_data['alert_level']}
-<b>发送者:</b> {sender_data['name']}
+<b>关键词组:</b> {_html.escape(str(alert_data['keyword_group_name'] or ''))}
+<b>关键词:</b> {_html.escape(str(alert_data['keyword_text'] or ''))}
+<b>级别:</b> {_html.escape(str(alert_data['alert_level'] or ''))}
+<b>发送者:</b> {_html.escape(str(sender_data['name'] or ''))}
 
 <b>消息预览:</b>
-{alert_data['message_preview']}
+{_html.escape(str(alert_data['message_preview'] or ''))}
 
-<b>时间:</b> {alert_data['created_at_str']}
+<b>时间:</b> {_html.escape(str(alert_data['created_at_str'] or ''))}
         """
 
         url = f"https://api.telegram.org/bot{cfg['bot_token']}/sendMessage"

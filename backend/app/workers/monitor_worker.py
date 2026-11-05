@@ -153,11 +153,16 @@ async def start_monitors(worker_id: int, account_ids: list):
 
 async def run_monitor_worker(worker_id: int, account_ids: list):
     """运行Monitor Worker"""
+    global current_account_ids
+    current_account_ids = list(account_ids)
     logger.info(f"Monitor Worker {worker_id} 开始运行，账号: {account_ids}")
 
     # 初始化数据库
     await init_db()
     logger.info(f"Worker {worker_id} 数据库初始化完成")
+
+    # 注入账号归属：心跳/对账只处理本 worker 的账号，避免跨进程抢连同一 session 文件
+    message_monitor.set_assigned_accounts(account_ids)
 
     # 连接账号
     await connect_accounts(worker_id, account_ids)
@@ -205,9 +210,13 @@ async def run_monitor_worker(worker_id: int, account_ids: list):
         logger.info(f"Worker {worker_id} 已停止")
 
 
+# 本 worker 实际分配到的账号ID（run_monitor_worker 启动时写入，控制端点使用）
+current_account_ids: list = []
+
+
 def create_status_app():
     """创建状态查询API"""
-    from fastapi import FastAPI
+    from fastapi import FastAPI, HTTPException
 
     app = FastAPI(title=f"Monitor Worker {worker_manager.worker_id} Status")
 
@@ -216,7 +225,7 @@ def create_status_app():
         return {
             "worker_id": worker_manager.worker_id,
             "worker_type": "monitor",
-            "account_ids": worker_manager.get_worker_config().account_ids,
+            "account_ids": current_account_ids or worker_manager.get_worker_config().account_ids,
             "active_monitors": len(message_monitor.active_monitors),
             "connected_clients": len(client_manager.clients)
         }
@@ -224,6 +233,52 @@ def create_status_app():
     @app.get("/health")
     async def health():
         return {"status": "ok", "worker_id": worker_manager.worker_id}
+
+    # ===== 控制端点：监控操作只能在本进程执行（session 文件由本进程持有），
+    # api_worker 通过 HTTP 转发到这里，避免在 API 进程创建 Telethon 客户端 =====
+
+    @app.post("/control/restart")
+    async def control_restart():
+        await message_monitor.stop_all_monitors()
+        connected = 0
+        for aid in current_account_ids:
+            try:
+                client = await client_manager.get_client(aid)
+                if client and client.is_connected():
+                    connected += 1
+            except Exception as e:
+                logger.warning(f"重连账号 {aid} 失败: {e}")
+        await start_monitors(worker_manager.worker_id, current_account_ids)
+        await message_monitor.start_heartbeat()
+        return {
+            "message": "监控已重启",
+            "connected_accounts": connected,
+            "active_monitors": len(message_monitor.active_monitors),
+        }
+
+    @app.post("/control/start/{conversation_id}")
+    async def control_start(conversation_id: int):
+        # 校验会话归属：不是本 worker 的账号则拒绝，避免抢连
+        from sqlalchemy import select as sa_select
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                sa_select(Conversation.account_id).where(Conversation.id == conversation_id)
+            )
+            account_id = result.scalar_one_or_none()
+        if account_id is None:
+            raise HTTPException(status_code=404, detail=f"会话 {conversation_id} 不存在")
+        if account_id not in current_account_ids:
+            raise HTTPException(
+                status_code=409,
+                detail=f"会话 {conversation_id} 属于账号 {account_id}，不由本 Worker 管理"
+            )
+        await message_monitor.start_monitor(conversation_id)
+        return {"message": f"会话 {conversation_id} 监控已启动"}
+
+    @app.post("/control/stop/{conversation_id}")
+    async def control_stop(conversation_id: int):
+        await message_monitor.stop_monitor(conversation_id)
+        return {"message": f"会话 {conversation_id} 监控已停止"}
 
     return app
 
