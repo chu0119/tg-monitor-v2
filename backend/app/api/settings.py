@@ -183,6 +183,11 @@ async def update_settings(update_data: SettingsUpdate, db: AsyncSession = Depend
     await save_settings_to_db(db, _global_settings.model_dump())
     await db.commit()
     logger.info(f"Settings updated: {update_dict}")
+
+    # 审计日志
+    from app.services.audit_service import log_audit
+    await log_audit(db, "update_settings", "setting", detail={"updated_fields": list(update_dict.keys())})
+
     return _global_settings
 
 

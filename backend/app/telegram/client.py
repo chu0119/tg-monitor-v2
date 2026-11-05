@@ -218,6 +218,7 @@ class TelegramClientManager:
             api_hash,
             proxy=proxy,
             timeout=15,
+            catch_up=True,  # 断线重连后自动拉取离线期间的更新差异,避免漏消息
         )
         logger.info("create_client: 开始连接Telegram服务器...")
         try:
@@ -461,7 +462,7 @@ class TelegramClientManager:
                     self.clients[account_id] = client
                     # 在后台启动Telethon事件循环，使事件处理器生效
                     self._start_client_loop(account_id, client)
-                    logger.info(f"账号 {account_id} 客户端已就绪（使用缓存）")
+                    logger.debug(f"账号 {account_id} 客户端已就绪（使用缓存）")
                     return client
                 else:
                     logger.error(f"账号 {account_id} 未授权")
@@ -545,9 +546,9 @@ class TelegramClientManager:
                 chat_id = entity.id
                 chat_type = self._get_chat_type(entity)
 
-                # 对于频道，转换为-100前缀格式
+                # 对于频道，转换为-100前缀格式（Bot API 格式：-(1000000000000 + id)）
                 if chat_type == 'channel' and chat_id > 0:
-                    chat_id = -1000000000000 + chat_id
+                    chat_id = -(1000000000000 + chat_id)
 
                 dialogs.append({
                     "chat_id": chat_id,  # 使用标准化后的chat_id
@@ -595,7 +596,7 @@ class TelegramClientManager:
     def _start_client_loop(self, account_id: int, client: TelegramClient):
         """在后台启动Telethon事件循环，使注册的事件处理器开始工作"""
         if hasattr(client, '_event_loop_task') and not client._event_loop_task.done():
-            logger.info(f"账号 {account_id} 事件循环已在运行，跳过")
+            logger.debug(f"账号 {account_id} 事件循环已在运行，跳过")
             return  # 已在运行
         client._event_loop_task = asyncio.create_task(
             self._run_client_loop(account_id, client)

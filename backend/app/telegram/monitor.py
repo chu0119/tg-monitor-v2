@@ -44,6 +44,16 @@ class MessageMonitor:
         self._queue_stats = {"enqueued": 0, "processed": 0, "dropped": 0}
         # 追踪每个会话的最后收到消息时间(用于检测僵尸会话)
         self._session_last_message_time: Dict[int, datetime] = {}
+        # 本 worker 负责的账号集合（多进程部署时由 monitor_worker 注入）。
+        # None 表示单进程模式（main.py），监控全部账号。
+        # 心跳与对账任务必须按此过滤，否则多个 worker 会互相抢连对方的账号，
+        # 导致同一 Telethon session 文件被跨进程并发读写（database is locked）。
+        self.assigned_account_ids: Optional[Set[int]] = None
+
+    def set_assigned_accounts(self, account_ids: list):
+        """注入本 worker 负责的账号ID集合（多进程模式）"""
+        self.assigned_account_ids = set(account_ids)
+        logger.info(f"监控器账号归属已设置: {sorted(self.assigned_account_ids)}")
 
     @staticmethod
     def _get_telethon_entity_id(chat_id: int) -> int:
@@ -83,17 +93,24 @@ class MessageMonitor:
                 return
 
         # 注册消息处理器
-        await self._register_event_handler(conversation)
+        registered = await self._register_event_handler(conversation)
+        if not registered:
+            logger.warning(f"会话 {conversation_id} ({conversation.title}) 事件处理器注册失败,不加入活跃监控")
+            return
         self.active_monitors.add(conversation_id)
         logger.info(f"开始监控会话: {conversation.title} ({conversation.chat_id})")
 
-    async def _register_event_handler(self, conversation: Conversation):
-        """注册事件处理器 - 优化版,支持频道重试和统一 chat_id 处理"""
+    async def _register_event_handler(self, conversation: Conversation) -> bool:
+        """注册事件处理器 - 优化版,支持频道重试和统一 chat_id 处理
+
+        Returns:
+            bool: 注册成功返回 True
+        """
         logger.debug(f"正在为会话 {conversation.id} (账号 {conversation.account_id}) 注册事件处理器...")
         client = await client_manager.get_client(conversation.account_id)
         if not client:
             logger.error(f"账号 {conversation.account_id} 客户端未连接,跳过会话 {conversation.id}")
-            return
+            return False
 
         logger.debug(f"账号 {conversation.account_id} 客户端已就绪,正在注册 {conversation.chat_id} 的事件...")
 
@@ -136,7 +153,7 @@ class MessageMonitor:
                                 logger.warning(f"所有方式均失败，使用PeerChannel({entity_id})直接监听")
 
                     chats = entity
-                    logger.info(f"频道实体获取成功: {conversation.title} (尝试 {attempt + 1}/{max_attempts})")
+                    logger.debug(f"频道实体获取成功: {conversation.title} (尝试 {attempt + 1}/{max_attempts})")
                     break
                 except Exception as e:
                     logger.warning(f"获取频道实体失败 (尝试 {attempt + 1}/{max_attempts}): {conversation.title} - {e}")
@@ -202,7 +219,8 @@ class MessageMonitor:
             }
         ])
 
-        logger.info(f"会话 {conversation.id} ({conversation.title}) 事件处理器注册成功(新消息+编辑消息)")
+        logger.debug(f"会话 {conversation.id} ({conversation.title}) 事件处理器注册成功(新消息+编辑消息)")
+        return True
 
     async def _remove_event_handlers(self, account_id: int):
         """移除指定账号的所有事件处理器"""
@@ -262,20 +280,76 @@ class MessageMonitor:
 
         logger.info(f"账号 {account_id} 的 {len(conversations)} 个监控已重启")
 
+    async def _reconcile_monitors(self):
+        """监控对账：确保所有启用实时监控的会话都有活跃监控
+
+        自愈场景：启动时注册失败的会话、运行中新启用的会话、已禁用但仍挂着的会话。
+        不基于"是否收到消息"判断，安静会话不会被误伤。
+        """
+        async with AsyncSessionLocal() as db:
+            query = select(Conversation.id).where(
+                Conversation.status == "active",
+                Conversation.enable_realtime == True,
+            )
+            # 多进程模式：只对账本 worker 负责账号的会话，避免抢启其他 worker 的监控
+            if self.assigned_account_ids is not None:
+                if not self.assigned_account_ids:
+                    return
+                query = query.where(Conversation.account_id.in_(self.assigned_account_ids))
+            result = await db.execute(query)
+            expected_ids = {row[0] for row in result.fetchall()}
+
+        missing = expected_ids - self.active_monitors
+        stale = self.active_monitors - expected_ids
+
+        for conv_id in list(stale):
+            logger.info(f"监控对账: 会话 {conv_id} 已禁用,停止监控")
+            await self.stop_monitor(conv_id)
+
+        for conv_id in missing:
+            logger.info(f"监控对账: 会话 {conv_id} 缺失监控,尝试补启")
+            try:
+                await asyncio.wait_for(self.start_monitor(conv_id), timeout=5.0)
+            except Exception as e:
+                logger.warning(f"监控对账: 补启会话 {conv_id} 失败: {e}")
+
+        if missing or stale:
+            logger.info(f"监控对账完成: 补启 {len(missing)} 个,停止 {len(stale)} 个")
+
     async def _heartbeat_check(self):
-        """心跳检测 - 定期检查客户端连接状态和监控活跃度(优化版)"""
+        """心跳检测 - 定期检查客户端连接状态(仅基于客户端健康,不基于消息静默)
+
+        消息静默不代表故障(安静的群/频道是正常的),因此不再因"长时间无消息"重启监控。
+        会话级自愈由 _reconcile_monitors 对账任务负责。
+        """
+        reconcile_counter = 0
         while self._running:
             try:
                 await asyncio.sleep(30)  # 每30秒检查一次(从60秒缩短)
 
-                # 检查所有账号的客户端状态
+                # 每10轮(约5分钟)执行一次监控对账,补启缺失/停止多余的会话监控
+                reconcile_counter += 1
+                if reconcile_counter >= 10:
+                    reconcile_counter = 0
+                    try:
+                        await self._reconcile_monitors()
+                    except Exception as e:
+                        logger.error(f"监控对账任务异常: {e}")
+
+                # 检查账号的客户端状态（多进程模式只检查本 worker 负责的账号，
+                # 否则每个 worker 都会 force 重连全部账号，跨进程并发写同一 session 文件）
                 async with AsyncSessionLocal() as db:
-                    result = await db.execute(
-                        select(TelegramAccount).where(
-                            TelegramAccount.is_authorized == True,
-                            TelegramAccount.is_active == True
-                        )
+                    account_query = select(TelegramAccount).where(
+                        TelegramAccount.is_authorized == True,
+                        TelegramAccount.is_active == True
                     )
+                    if self.assigned_account_ids is not None:
+                        if not self.assigned_account_ids:
+                            continue
+                        account_query = account_query.where(
+                            TelegramAccount.id.in_(self.assigned_account_ids)
+                        )
+                    result = await db.execute(account_query)
                     accounts = result.scalars().all()
 
                     # 在会话内处理所有账号,避免会话泄漏
@@ -300,34 +374,6 @@ class MessageMonitor:
                                 await self.restart_monitors_for_account(account.id)
                             except Exception as e:
                                 logger.error(f"账号 {account.phone} 重连失败: {e}")
-
-                        # 检查每个活跃监控的会话是否有消息(检测僵尸会话)
-                        for conv_id in list(self.active_monitors):
-                            if conv_id in self._session_last_message_time:
-                                last_msg_time = self._session_last_message_time[conv_id]
-                                time_since_last_msg = (datetime.now() - last_msg_time).total_seconds()
-
-                                # 如果超过10分钟没有消息,尝试自动恢复
-                                if time_since_last_msg > 600:  # 10分钟
-                                    logger.warning(f"会话 {conv_id} 超过 {int(time_since_last_msg/60)} 分钟没有收到消息,尝试自动恢复")
-                                    # 自动恢复：重启该会话所属账号的监控（带冷却时间）
-                                    if not hasattr(self, '_recovery_cooldown'):
-                                        self._recovery_cooldown = {}
-                                    now_ts = datetime.now().timestamp()
-                                    last_recovery = self._recovery_cooldown.get(conv_id, 0)
-                                    if now_ts - last_recovery > 600:  # 10分钟冷却
-                                        try:
-                                            async with AsyncSessionLocal() as db:
-                                                result = await db.execute(
-                                                    select(Conversation.account_id).where(Conversation.id == conv_id)
-                                                )
-                                                acc_id = result.scalar_one_or_none()
-                                                if acc_id:
-                                                    await self.restart_monitors_for_account(acc_id)
-                                                    self._recovery_cooldown[conv_id] = now_ts
-                                                    logger.info(f"会话 {conv_id} 自动恢复完成")
-                                        except Exception as e:
-                                            logger.error(f"会话 {conv_id} 自动恢复失败: {e}")
 
             except asyncio.CancelledError:
                 break
@@ -462,9 +508,11 @@ class MessageMonitor:
                         db, db_message, sender, matched_keywords
                     )
 
-                # 通过 WebSocket 广播新消息到前端（在 commit 前，可能需要 session 数据）
+                # commit 前构建广播数据（避免 commit 后 ORM 对象过期触发刷新查询）
                 conv_title = await self._get_conversation_title(db, conversation_id)
-                await self._broadcast_new_message(db, db_message, sender, conversation_id, conv_title)
+                broadcast_payload = self._build_message_broadcast(
+                    db_message, sender, conversation_id, conv_title
+                )
 
                 # 更新会话统计
                 await self._update_conversation_stats(db, conversation_id, message.id)
@@ -476,11 +524,18 @@ class MessageMonitor:
                 try:
                     await db.commit()
                 except Exception as e:
-                    # 如果事务已经提交，这里会出错，可以忽略
-                    if "already committed" not in str(e).lower():
-                        logger.warning(f"Commit failed: {e}")
+                    # 提交失败：整条消息（含告警/统计）都会回滚，必须按失败处理，不能吞掉
+                    logger.error(f"消息 {message.id} commit 失败，回滚: {e}")
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+                    return False
 
-                logger.info(
+                # 提交成功后再广播，确保前端不会读到未提交的数据
+                await self._broadcast_messages([broadcast_payload])
+
+                logger.debug(
                     f"处理消息: {message.id} from {sender.username}, "
                     f"匹配关键词: {len(matched_keywords)}"
                 )
@@ -911,34 +966,46 @@ class MessageMonitor:
         except Exception:
             return "Unknown"
 
+    def _build_message_broadcast(self, db_message: MessageModel, sender: Sender, conversation_id: int, conversation_title: str = "Unknown") -> Dict[str, Any]:
+        """构建新消息广播数据（纯内存操作，可在 commit 前调用以捕获完整字段）"""
+        date_str = db_message.date.isoformat() if hasattr(db_message.date, 'isoformat') else str(db_message.date)
+        return {
+            "id": db_message.id,
+            "conversation_id": conversation_id,
+            "conversation_title": conversation_title,
+            "sender_id": sender.id,
+            "sender_username": sender.username or sender.first_name or "Unknown",
+            "message_type": db_message.message_type,
+            "text": db_message.text,
+            "caption": db_message.caption,
+            "date": date_str,
+            "has_media": db_message.has_media,
+            "is_reply": db_message.is_reply,
+            "alert_id": db_message.alert_id,
+        }
+
     async def _broadcast_new_message(self, db, db_message: MessageModel, sender: Sender, conversation_id: int, conversation_title: str = "Unknown"):
         """通过 WebSocket 广播新消息到前端（经 Redis pub/sub 跨进程转发）"""
         try:
             from app.core.pubsub import publish
 
-            # 格式化日期时间
-            date_str = db_message.date.isoformat() if hasattr(db_message.date, 'isoformat') else str(db_message.date)
-
-            # 构建广播数据
-            message_data: Dict[str, Any] = {
-                "id": db_message.id,
-                "conversation_id": conversation_id,
-                "conversation_title": conversation_title,
-                "sender_id": sender.id,
-                "sender_username": sender.username or sender.first_name or "Unknown",
-                "message_type": db_message.message_type,
-                "text": db_message.text,
-                "caption": db_message.caption,
-                "date": date_str,
-                "has_media": db_message.has_media,
-                "is_reply": db_message.is_reply,
-                "alert_id": db_message.alert_id,
-            }
+            message_data = self._build_message_broadcast(db_message, sender, conversation_id, conversation_title)
 
             # 发布到 Redis 频道，由 api_worker 订阅并转发到 WebSocket
             await publish("new_message", message_data)
         except Exception as e:
             logger.error(f"广播新消息失败: {e}")
+
+    async def _broadcast_messages(self, payloads: List[Dict[str, Any]]):
+        """批量发布已入库消息的广播数据（在事务提交成功后调用）"""
+        if not payloads:
+            return
+        try:
+            from app.core.pubsub import publish
+            for message_data in payloads:
+                await publish("new_message", message_data)
+        except Exception as e:
+            logger.error(f"批量广播新消息失败: {e}")
 
     async def pull_history(self, conversation_id: int, days: int = 7, limit: int = 1000, offset_date: Optional[datetime] = None):
         """拉取历史消息(支持断点续传)
@@ -1086,8 +1153,7 @@ class MessageMonitor:
                         timeout=startup_timeout
                     )
                 except asyncio.TimeoutError:
-                    logger.warning(f"启动监控超时,跳过会话: {conv.id} ({conv.title})")
-                    self.active_monitors.add(conv.id)
+                    logger.warning(f"启动监控超时,跳过会话: {conv.id} ({conv.title})（将由监控对账任务重试）")
                 except Exception as e:
                     logger.warning(f"启动监控异常,跳过会话: {conv.id}: {e}")
 
@@ -1239,6 +1305,7 @@ class MessageMonitor:
 
             # 批量创建发送者和消息
             db_messages = []
+            broadcast_payloads = []
             senders_cache = {}
             message_senders = {}
             skipped_count = 0
@@ -1247,6 +1314,15 @@ class MessageMonitor:
 
             # 加载自身账号ID用于过滤
             await self._load_self_user_ids()
+
+            # 批量预检查已存在的消息ID（一次 IN 查询代替逐条 SELECT，消除 N+1）
+            all_msg_ids = [m.id for m in messages]
+            existing_ids: set = set()
+            if all_msg_ids:
+                result = await db.execute(
+                    select(MessageModel.id).where(MessageModel.id.in_(all_msg_ids))
+                )
+                existing_ids = set(result.scalars().all())
 
             for message in messages:
                 # 排除自身账号的消息
@@ -1258,7 +1334,7 @@ class MessageMonitor:
                 if message.id in processed_ids:
                     skipped_count += 1
                     continue
-                    
+
                 # 获取或创建发送者
                 sender = None
                 if message.sender:
@@ -1273,11 +1349,8 @@ class MessageMonitor:
                 if not sender:
                     continue
 
-                # 检查消息是否已存在（数据库去重）
-                result = await db.execute(
-                    select(MessageModel.id).where(MessageModel.id == message.id)
-                )
-                if result.scalar_one_or_none():
+                # 检查消息是否已存在（数据库去重,使用预查询结果）
+                if message.id in existing_ids:
                     # 消息已存在，跳过
                     skipped_count += 1
                     processed_ids.add(message.id)  # 记录已存在
@@ -1342,7 +1415,7 @@ class MessageMonitor:
                             pass
                         m = _Msg()
                         m.text = db_message.text
-                        m.caption = None
+                        m.caption = db_message.caption  # 带图注/视频说明的消息也要参与匹配
                         m.date = db_message.date  # 添加 date 属性
                         matched_keywords = await self.keyword_matcher.match_message(
                             db, m, conversation_id
@@ -1362,6 +1435,23 @@ class MessageMonitor:
                     except Exception as e:
                         logger.error(f"消息 {db_message.id} 关键词匹配失败: {e}")
 
+                # 批量提取手机号（与单条路径保持一致，实时消息也要采情报）
+                telethon_msgs = {m.id: m for m in messages}
+                for db_message in db_messages:
+                    tm = telethon_msgs.get(db_message.id)
+                    if tm is None or not (tm.text or getattr(tm, "caption", None)):
+                        continue
+                    try:
+                        extracted_phones = extract_phones_from_message(tm)
+                        for phone_info in extracted_phones:
+                            sender = message_senders.get(db_message.id)
+                            await self._save_phone_record(
+                                db, phone_info, tm, conversation_id,
+                                tm.sender_id, sender
+                            )
+                    except Exception as e:
+                        logger.warning(f"提取手机号失败 (消息 {db_message.id}): {e}")
+
                 # 更新会话统计
                 await self._update_conversation_stats(
                     db, conversation_id, db_messages[-1].id, len(db_messages)
@@ -1370,10 +1460,22 @@ class MessageMonitor:
                 # 更新最后消息时间
                 self._session_last_message_time[conversation_id] = datetime.now()
 
+                # 预构建广播数据（commit 前构建以捕获 alert_id 等字段，避免 commit 后 ORM 对象过期触发刷新查询）
+                conv_title = await self._get_conversation_title(db, conversation_id)
+                broadcast_payloads = [
+                    self._build_message_broadcast(db_message, message_senders[db_message.id], conversation_id, conv_title)
+                    for db_message in db_messages
+                    if db_message.id in message_senders
+                ]
+
             # 提交事务
             await db.commit()
 
-            logger.info(f"批量处理完成: 会话 {conversation_id}, {len(db_messages)} 条消息, 跳过 {skipped_count} 条重复")
+            # 提交成功后再广播，确保前端不会读到未提交的数据
+            if db_messages and broadcast_payloads:
+                await self._broadcast_messages(broadcast_payloads)
+
+            logger.debug(f"批量处理完成: 会话 {conversation_id}, {len(db_messages)} 条消息, 跳过 {skipped_count} 条重复")
 
         except Exception as e:
             if db:

@@ -59,7 +59,7 @@ class AlertService:
         try:
             self._notification_queue.put_nowait(item)
             self._queue_stats["enqueued"] += 1
-            logger.info(f"通知已入队: alert_id={alert_id}, queue_size={self._notification_queue.qsize()}")
+            logger.debug(f"通知已入队: alert_id={alert_id}, queue_size={self._notification_queue.qsize()}")
         except asyncio.QueueFull:
             self._queue_stats["dropped"] += 1
             logger.error(f"通知队列已满，丢弃通知任务: alert_id={alert_id}")
@@ -196,13 +196,13 @@ class AlertService:
             )
 
             # 注意：不在此处 commit，由调用方统一管理事务
-            logger.info(f"告警已创建: alert_id={alert.id}, 等待事务提交后发送通知")
+            logger.debug(f"告警已创建: alert_id={alert.id}, 等待事务提交后发送通知")
 
             await self._enqueue_notification(alert.id, message.id, sender.id)
 
     async def _send_notification_async(self, alert_id: int, message_id: int, sender_id: int):
         """异步发送通知（后台任务）"""
-        logger.info(f"开始异步发送通知: alert_id={alert_id}, message_id={message_id}, sender_id={sender_id}")
+        logger.debug(f"开始异步发送通知: alert_id={alert_id}, message_id={message_id}, sender_id={sender_id}")
         try:
             async with AsyncSessionLocal() as db:
                 alert = None
@@ -245,11 +245,11 @@ class AlertService:
                     logger.warning(f"异步通知: 发送者不存在 sender_id={sender_id}")
                     return
 
-                logger.info(f"异步通知: 开始发送通知 alert_id={alert_id}")
+                logger.debug(f"异步通知: 开始发送通知 alert_id={alert_id}")
                 # 发送通知
                 await self._send_notification(db, alert, message, sender)
                 await db.commit()
-                logger.info(f"异步通知: 发送完成 alert_id={alert_id}")
+                logger.debug(f"异步通知: 发送完成 alert_id={alert_id}")
                 return True
         except Exception as e:
             logger.error(f"异步发送通知失败 (alert_id={alert_id}): {e}")

@@ -80,16 +80,22 @@ def create_app():
 
         # 启动 Redis pub/sub 订阅，将 monitor_worker 的事件转发到 WebSocket
         import asyncio
-        from app.core.websocket_manager import broadcast_new_message, manager
+        from app.core.websocket_manager import broadcast_new_message, broadcast_new_alert, manager
         from app.core.pubsub import subscribe
 
         _relay_task: asyncio.Task | None = None
 
         async def _relay():
             async def _handler(data):
-                # 去掉 publish 时注入的 type 字段，保持广播结构与原 broadcast_new_message 一致
-                data = {k: v for k, v in data.items() if k != "type"}
-                await broadcast_new_message(data)
+                # 按 publish 时注入的 type 字段分发到对应的广播函数
+                event_type = data.pop("type", "new_message")
+                if event_type == "new_alert":
+                    await broadcast_new_alert(data)
+                elif event_type == "stats_update":
+                    await manager.broadcast_stats(data)
+                else:
+                    # new_message 及未知类型统一走消息广播，保持向后兼容
+                    await broadcast_new_message(data)
             await subscribe(_handler)
 
         _relay_task = asyncio.create_task(_relay())
@@ -98,8 +104,79 @@ def create_app():
         # 启动 WebSocket 连接清理任务
         await manager.start_cleanup_task()
 
+        # ===== 以下后台任务原本只在 main.py 中启动，多进程架构迁移时遗漏，此处恢复 =====
+        _background_tasks: list[asyncio.Task] = []
+
+        # 1. 登录会话清理（每5分钟，清理过期的登录验证会话）
+        from app.telegram.client import client_manager
+
+        async def cleanup_login_sessions():
+            while True:
+                try:
+                    await asyncio.sleep(300)  # 每5分钟
+                    await client_manager.cleanup_expired_login_sessions()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"登录会话清理异常: {e}")
+
+        _background_tasks.append(asyncio.create_task(cleanup_login_sessions()))
+        logger.info("登录会话清理任务已启动")
+
+        # 2. 数据自动清理（按 settings 中 data_retention_days 保留策略）
+        from app.services.data_cleanup_service import data_cleanup_service
+
+        async def run_cleanup_task():
+            try:
+                await data_cleanup_service.start_auto_cleanup()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"自动清理任务异常: {e}")
+
+        _background_tasks.append(asyncio.create_task(run_cleanup_task()))
+        logger.info("自动清理任务已启动（后台运行）")
+
+        # 3. 自动备份任务
+        from app.services.auto_backup_service import auto_backup_service
+
+        async def run_backup_task():
+            try:
+                await auto_backup_service.start_auto_backup()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"自动备份任务异常: {e}")
+
+        _background_tasks.append(asyncio.create_task(run_backup_task()))
+        logger.info("自动备份任务已启动（后台运行）")
+
+        # 4. 告警自动升级任务（每30分钟检查一次）
+        from app.services.alert_aggregation_service import alert_aggregation_service
+
+        async def run_escalation_task():
+            while True:
+                try:
+                    await asyncio.sleep(1800)  # 每30分钟
+                    async with AsyncSessionLocal() as db:
+                        result = await alert_aggregation_service.escalate_stale_alerts(db)
+                        if result.get("escalated_count", 0) > 0:
+                            logger.info(f"告警自动升级完成: {result['message']}")
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"告警自动升级任务异常: {e}")
+
+        _background_tasks.append(asyncio.create_task(run_escalation_task()))
+        logger.info("告警自动升级任务已启动（每30分钟）")
+
         yield
         logger.info(f"API Worker 关闭 (ID: {worker_manager.worker_id})")
+
+        # 取消本 Worker 的后台任务
+        for task in _background_tasks:
+            if not task.done():
+                task.cancel()
 
         # 停止 WebSocket 清理任务
         await manager.stop_cleanup_task()
