@@ -1,7 +1,6 @@
 """Telegram 客户端管理"""
 import asyncio
 import time
-# fcntl不再需要，单worker用asyncio.Lock即可
 from datetime import datetime
 from typing import Dict, Optional, List
 from telethon import TelegramClient, events
@@ -17,34 +16,6 @@ from urllib.parse import urlparse
 
 
 
-class SessionFileLock:
-    """跨进程的session文件锁，使用fcntl文件锁实现
-    确保同一时间只有一个进程访问session文件
-    """
-    
-    def __init__(self, session_path: str):
-        self.lock_file = session_path + ".lock"
-        self._fd = None
-    
-    def __enter__(self):
-        # 创建锁文件
-        self._fd = open(self.lock_file, 'w')
-        # 获取排他锁（阻塞等待）
-        fcntl.flock(self._fd.fileno(), fcntl.LOCK_EX)
-        # 写入PID用于调试
-        import os
-        self._fd.write(str(os.getpid()))
-        self._fd.flush()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._fd:
-            # 释放锁
-            fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
-            self._fd.close()
-            self._fd = None
-        return False
-
 class TelegramClientManager:
     """Telegram 客户端管理器"""
 
@@ -58,9 +29,8 @@ class TelegramClientManager:
         self._unauthorized_accounts: set = set()  # 已知未授权的账号ID，跳过重复连接
         # 服务重启时清空未授权列表，允许重新尝试连接
         self._unauthorized_accounts.clear()
-        # 用于保护session文件并发访问的锁
-        import asyncio
-        # asyncio.Lock无法跨进程工作，改用SessionFileLock
+        # 并发保护：同账号的 get_client 用进程内锁串行化，防止竞态创建两个 client
+        self._client_locks: Dict[int, asyncio.Lock] = {}
 
     def _get_default_proxy(self) -> Optional[dict]:
         """从配置获取默认代理，返回 Telethon 可用的字典格式"""
@@ -429,6 +399,8 @@ class TelegramClientManager:
         """获取账号的客户端，确保已连接
 
         force=True 时跳过 _unauthorized_accounts 缓存强制重连（账号重新授权后由心跳触发）。
+        同账号并发调用用 per-account asyncio.Lock 串行化，避免竞态创建两个 client
+        （后创建者覆盖 dict，前者变成孤儿连接并双写同一 session 文件）。
         """
         # 快速跳过已知未授权的账号（避免重复连接尝试）
         if not force and account_id in self._unauthorized_accounts:
@@ -445,6 +417,22 @@ class TelegramClientManager:
                 logger.warning(f"客户端 {account_id} 已断开，将重新连接")
                 del self.clients[account_id]
 
+        # 连接创建阶段加 per-account 锁：双重检查后再创建
+        lock = self._client_locks.setdefault(account_id, asyncio.Lock())
+        async with lock:
+            # 锁内二次检查（等锁期间其他协程可能已完成创建）
+            if account_id in self.clients:
+                client = self.clients[account_id]
+                if client.is_connected():
+                    self._start_client_loop(account_id, client)
+                    return client
+                del self.clients[account_id]
+
+            client = await self._get_client_uncached(account_id)
+            return client
+
+    async def _get_client_uncached(self, account_id: int) -> Optional[TelegramClient]:
+        """创建客户端的实际逻辑（须在 per-account 锁内调用）"""
         # 先检查缓存
         cached_info = self._get_cached_account_info(account_id)
 

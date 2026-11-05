@@ -287,7 +287,7 @@ cd backend
 python init_db.py
 
 # 2. 启动后端
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.workers.api_worker:app --host 0.0.0.0 --port 8000  # 多进程架构：API 与监控分别为 api_worker/monitor_worker
 
 # 3. 访问前端进行配置
 # 前端会自动检测未初始化状态，跳转到设置向导页面

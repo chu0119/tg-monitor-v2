@@ -174,7 +174,7 @@ npm install
 # 4. 启动
 # 后端 (端口 8000)
 cd backend && source venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.workers.api_worker:app --host 0.0.0.0 --port 8000  # 多进程架构：API 与监控分别为 api_worker/monitor_worker
 
 # 前端 (端口 5173)
 cd frontend

@@ -28,31 +28,6 @@ const getApiBase = (): string => {
 
 const API_BASE = getApiBase();
 
-/**
- * 获取 WebSocket URL
- * 自动根据当前访问方式选择正确的 WebSocket 地址
- */
-function getWebSocketURL(): string {
-  const envApiBase = import.meta.env.VITE_API_BASE_URL;
-
-  if (envApiBase && envApiBase.trim() !== "") {
-    // 环境变量显式配置了后端地址
-    try {
-      const url = new URL(envApiBase);
-      const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-      return `${wsProtocol}//${url.host}/ws`;
-    } catch {
-      // URL 解析失败，降级到默认方式
-    }
-  }
-
-  // 使用当前页面的协议和主机，构建 WebSocket URL
-  // 这样可以适配任何访问方式（localhost/IP/域名）
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const host = window.location.host;
-  return `${protocol}//${host}/ws`;
-}
-
 // 统一的错误处理（带10秒超时）
 async function handleResponse(res: Response): Promise<any> {
   if (!res.ok) {
@@ -717,26 +692,3 @@ export const api = {
       fetchWithTimeout(`${API_BASE}/audit/stats`).then(handleResponse),
   },
 };
-
-// WebSocket 连接
-export function createWebSocket() {
-  const wsUrl = getWebSocketURL();
-  const ws = new WebSocket(wsUrl);
-
-  return {
-    on: (event: string, callback: (data: any) => void) => {
-      ws.addEventListener("message", (e) => {
-        const data = JSON.parse(e.data);
-        if (data.type === event) {
-          callback(data.data);
-        }
-      });
-    },
-    send: (data: any) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(data));
-      }
-    },
-    close: () => ws.close(),
-  };
-}
