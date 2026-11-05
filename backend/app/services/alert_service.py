@@ -130,16 +130,21 @@ class AlertService:
 
         return highlighted
 
+    # message_preview/highlighted_message 是 TEXT 大字段，alert 表行数百万级——
+    # 存完整原文导致表膨胀（226万行 10.5GB）；展示最多用到 200~500 字符，入库截断
+    MAX_PREVIEW_LENGTH = 500
+
     async def create_alerts(
         self,
         db,
         message: Message,
         sender: Sender,
         matched_keywords: List[dict]
-    ):
-        """创建告警"""
+    ) -> List[dict]:
+        """创建告警，返回本次新建告警的广播数据列表（调用方 commit 后推送给前端）"""
         # 获取完整消息内容
         full_message = message.text or getattr(message, "caption", None) or ""
+        created_alerts: List[dict] = []
 
         for match in matched_keywords:
             # 检查是否已存在该消息和关键词的告警
@@ -164,9 +169,9 @@ class AlertService:
                 keyword_group_name=match["group_name"],
                 alert_level=match["alert_level"],
                 status="pending",
-                matched_text=match.get("matched_text", ""),
-                message_preview=full_message,  # 存储完整消息
-                highlighted_message=highlighted_message,  # 存储带高亮的消息
+                matched_text=(match.get("matched_text") or "")[:self.MAX_PREVIEW_LENGTH],
+                message_preview=full_message[:self.MAX_PREVIEW_LENGTH],
+                highlighted_message=highlighted_message[:self.MAX_PREVIEW_LENGTH + 200],
             )
 
             db.add(alert)
@@ -198,7 +203,23 @@ class AlertService:
             # 注意：不在此处 commit，由调用方统一管理事务
             logger.debug(f"告警已创建: alert_id={alert.id}, 等待事务提交后发送通知")
 
+            created_alerts.append({
+                "id": alert.id,
+                "message_id": message.id,
+                "conversation_id": message.conversation_id,
+                "sender_id": sender.id,
+                "sender_name": sender.username or sender.first_name or f"User_{sender.user_id}",
+                "keyword_text": alert.keyword_text,
+                "keyword_group_name": alert.keyword_group_name,
+                "alert_level": alert.alert_level,
+                "status": alert.status,
+                "message_preview": alert.message_preview,
+                "created_at": alert.created_at.isoformat() if hasattr(alert.created_at, "isoformat") else str(alert.created_at),
+            })
+
             await self._enqueue_notification(alert.id, message.id, sender.id)
+
+        return created_alerts
 
     async def _send_notification_async(self, alert_id: int, message_id: int, sender_id: int):
         """异步发送通知（后台任务）"""

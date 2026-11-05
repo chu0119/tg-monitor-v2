@@ -507,9 +507,10 @@ class MessageMonitor:
                     db, message, conversation_id
                 )
 
+                alert_payloads: List[dict] = []
                 if matched_keywords:
                     # 创建告警（由下方统一 commit）
-                    await self.alert_service.create_alerts(
+                    alert_payloads = await self.alert_service.create_alerts(
                         db, db_message, sender, matched_keywords
                     )
 
@@ -539,6 +540,14 @@ class MessageMonitor:
 
                 # 提交成功后再广播，确保前端不会读到未提交的数据
                 await self._broadcast_messages([broadcast_payload])
+                # 提交成功后推送新告警事件
+                if alert_payloads:
+                    try:
+                        from app.core.pubsub import publish
+                        for alert_data in alert_payloads:
+                            await publish("new_alert", alert_data)
+                    except Exception as e:
+                        logger.error(f"推送新告警事件失败: {e}")
 
                 logger.debug(
                     f"处理消息: {message.id} from {sender.username}, "
@@ -1456,6 +1465,7 @@ class MessageMonitor:
             # 批量创建发送者和消息
             db_messages = []
             broadcast_payloads = []
+            alert_payloads: List[dict] = []
             senders_cache = {}
             message_senders = {}
             skipped_count = 0
@@ -1578,9 +1588,10 @@ class MessageMonitor:
                         if matched_keywords:
                             sender = message_senders.get(db_message.id)
                             if sender:
-                                await self.alert_service.create_alerts(
+                                new_alerts = await self.alert_service.create_alerts(
                                     db, db_message, sender, matched_keywords
                                 )
+                                alert_payloads.extend(new_alerts)
                             else:
                                 logger.warning(
                                     f"消息 {db_message.id} 匹配到 {len(matched_keywords)} 个关键词, "
@@ -1628,6 +1639,14 @@ class MessageMonitor:
             # 提交成功后再广播，确保前端不会读到未提交的数据
             if db_messages and broadcast_payloads:
                 await self._broadcast_messages(broadcast_payloads)
+            # 提交成功后推送新告警事件（大屏/告警页实时刷新）
+            if alert_payloads:
+                try:
+                    from app.core.pubsub import publish
+                    for alert_data in alert_payloads:
+                        await publish("new_alert", alert_data)
+                except Exception as e:
+                    logger.error(f"推送新告警事件失败: {e}")
 
             logger.debug(f"批量处理完成: 会话 {conversation_id}, {len(db_messages)} 条消息, 跳过 {skipped_count} 条重复")
 

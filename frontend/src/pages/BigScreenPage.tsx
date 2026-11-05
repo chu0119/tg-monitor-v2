@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "@/lib/api";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import {
   Activity,
   AlertTriangle,
@@ -357,32 +358,67 @@ export function BigScreenPage() {
   const [viewport, setViewport] = useState({ width: 1920, height: 1080 });
 
   const fetchData = useCallback(async () => {
-    const [statsRes, healthRes, alertsRes, keywordRes, senderRes, conversationRes] = await Promise.allSettled([
+    const [statsRes, healthRes, alertsRes] = await Promise.allSettled([
       api.dashboard.getStats(),
       fetch("/health").then((r) => (r.ok ? r.json() : null)),
       api.alerts.list({ page: 1, page_size: 18 }),
-      api.dashboard.getKeywordTrend(7, 6),
-      api.dashboard.getSenderRanking(8, "alerts"),
-      api.dashboard.getConversationActivity(8),
     ]);
 
     if (statsRes.status === "fulfilled") setStats(statsRes.value);
     if (healthRes.status === "fulfilled") setHealth(healthRes.value);
     if (alertsRes.status === "fulfilled") setAlerts(alertsRes.value?.items || alertsRes.value || []);
+  }, []);
+
+  // 排行/趋势类重查询低频轮询（原来与 stats 一起 5s 全拉，一天 10万+ 请求）
+  const fetchRankings = useCallback(async () => {
+    const [keywordRes, senderRes, conversationRes] = await Promise.allSettled([
+      api.dashboard.getKeywordTrend(7, 6),
+      api.dashboard.getSenderRanking(8, "alerts"),
+      api.dashboard.getConversationActivity(8),
+    ]);
     if (keywordRes.status === "fulfilled") setKeywordTrend(keywordRes.value || []);
     if (senderRes.status === "fulfilled") setSenders(senderRes.value || []);
     if (conversationRes.status === "fulfilled") setConversations(conversationRes.value || []);
   }, []);
 
+  // 实时告警：WebSocket 推送直接置顶插入，未连接时靠 15s 轮询兜底
+  const { messages: wsMessages } = useWebSocket("/ws");
+  const lastWsCountRef = useRef(0);
+  useEffect(() => {
+    for (const msg of wsMessages.slice(lastWsCountRef.current)) {
+      if (msg.type === "new_alert" && msg.data) {
+        const alertData = msg.data as AlertItem;
+        setAlerts((prev) => [alertData, ...prev].slice(0, 18));
+        setStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                alerts_today: (prev.alerts_today || 0) + 1,
+                alerts_by_level: {
+                  ...prev.alerts_by_level,
+                  [alertData.alert_level]: (prev.alerts_by_level?.[alertData.alert_level] || 0) + 1,
+                },
+              }
+            : prev
+        );
+      }
+    }
+    lastWsCountRef.current = wsMessages.length;
+  }, [wsMessages]);
+
   useEffect(() => {
     fetchData();
-    const dataTimer = window.setInterval(fetchData, 5000);
+    fetchRankings();
+    // 分级轮询：stats/告警 15s（WS 正常时告警已实时推送，轮询只兜底），排行 60s
+    const dataTimer = window.setInterval(fetchData, 15000);
+    const rankingTimer = window.setInterval(fetchRankings, 60000);
     const clockTimer = window.setInterval(() => setCurrentTime(new Date()), 1000);
     return () => {
       window.clearInterval(dataTimer);
+      window.clearInterval(rankingTimer);
       window.clearInterval(clockTimer);
     };
-  }, [fetchData]);
+  }, [fetchData, fetchRankings]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -500,7 +536,7 @@ export function BigScreenPage() {
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                 <span>TELEGRAM MONITORING & EARLY WARNING CENTER</span>
                 <span className="hidden h-1 w-1 rounded-full bg-slate-500 sm:inline-block" />
-                <span>数据刷新: 3s</span>
+                <span>告警实时推送 · 数据刷新 15s</span>
               </div>
             </div>
           </div>
