@@ -298,6 +298,20 @@ export function SettingsPage() {
 
   // --- 全量数据导出 ---
 
+  // 导出轮询定时器：必须在卸载时清理，否则离开页面后每 2s 无限请求
+  const exportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const exportPollCountRef = useRef(0);
+  const exportPollMaxRef = useRef(450); // 最多轮询 15 分钟
+
+  const stopExportPolling = () => {
+    if (exportPollRef.current) {
+      clearInterval(exportPollRef.current);
+      exportPollRef.current = null;
+    }
+  };
+
+  useEffect(() => stopExportPolling, []);
+
   const handleFullExport = async () => {
     setFullExportLoading(true);
     setImportResult("");
@@ -305,16 +319,27 @@ export function SettingsPage() {
       const res = await fetch("/api/v1/migration/export", { method: "POST" });
       const data = await res.json();
       if (data.error) { setImportResult(`❌ ${data.message}`); setFullExportLoading(false); return; }
-      const poll = setInterval(async () => {
-        const st = await (await fetch("/api/v1/migration/status")).json();
-        setMigrationStatus(st);
-        if (st.status === "idle") {
-          clearInterval(poll);
+      stopExportPolling();
+      exportPollCountRef.current = 0;
+      exportPollRef.current = setInterval(async () => {
+        exportPollCountRef.current += 1;
+        if (exportPollCountRef.current > exportPollMaxRef.current) {
+          stopExportPolling();
           setFullExportLoading(false);
-          if (st.result?.file) {
-            window.location.href = "/api/v1/migration/export/download";
-          }
+          setImportResult("❌ 导出超时，请稍后在通知/日志中确认结果");
+          return;
         }
+        try {
+          const st = await (await fetch("/api/v1/migration/status")).json();
+          setMigrationStatus(st);
+          if (st.status === "idle") {
+            stopExportPolling();
+            setFullExportLoading(false);
+            if (st.result?.file) {
+              window.location.href = "/api/v1/migration/export/download";
+            }
+          }
+        } catch {}
       }, 2000);
     } catch {
       setFullExportLoading(false);

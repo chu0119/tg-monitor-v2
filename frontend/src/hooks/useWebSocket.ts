@@ -6,7 +6,8 @@ interface WebSocketMessage {
 }
 
 const MAX_MESSAGES = 200
-const RECONNECT_DELAY = 3000
+const RECONNECT_DELAY_BASE = 3000
+const RECONNECT_DELAY_MAX = 60000
 const MAX_RECONNECT_ATTEMPTS = 999
 
 export function useWebSocket(url: string = "/ws") {
@@ -15,6 +16,8 @@ export function useWebSocket(url: string = "/ws") {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptsRef = useRef(0)
+  // 主动关闭标记：disconnect 后 onclose 不再触发重连，避免组件卸载后无限重连
+  const intentionalCloseRef = useRef(false)
   const pendingMessages = useRef<WebSocketMessage[]>([])
   const batchUpdateRef = useRef<number | null>(null)
 
@@ -31,6 +34,7 @@ export function useWebSocket(url: string = "/ws") {
       clearTimeout(reconnectTimeoutRef.current)
       reconnectTimeoutRef.current = null
     }
+    intentionalCloseRef.current = false
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
     const wsUrl = `${protocol}//${window.location.host}${url}`
     const ws = new WebSocket(wsUrl)
@@ -52,17 +56,25 @@ export function useWebSocket(url: string = "/ws") {
     ws.onerror = (error) => console.error("WebSocket error:", error)
     ws.onclose = () => {
       setIsConnected(false)
+      if (intentionalCloseRef.current) return
       if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttemptsRef.current++
-        reconnectTimeoutRef.current = setTimeout(() => connect(), RECONNECT_DELAY)
+        // 指数退避重连：3s → 6s → 12s ... 上限 60s
+        const delay = Math.min(RECONNECT_DELAY_BASE * 2 ** reconnectAttemptsRef.current, RECONNECT_DELAY_MAX)
+        reconnectTimeoutRef.current = setTimeout(() => connect(), delay)
       }
     }
     wsRef.current = ws
   }, [url, batchProcess])
 
   const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current)
+    intentionalCloseRef.current = true
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
+    }
     if (wsRef.current) wsRef.current.close()
+    wsRef.current = null
   }, [])
 
   useEffect(() => {

@@ -107,7 +107,7 @@ export function SetupPage() {
       if (withNotification && botToken && notifyChatId) {
         await api.notifications.create({
           name: "默认通知",
-          type: "telegram",
+          notification_type: "telegram",
           config: { bot_token: botToken, chat_id: notifyChatId },
         });
       }

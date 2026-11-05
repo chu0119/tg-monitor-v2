@@ -713,6 +713,8 @@ export const api = {
       const searchParams = new URLSearchParams(cleanParams as any);
       return fetchWithTimeout(`${API_BASE}/audit?${searchParams}`).then(handleResponse);
     },
+    getStats: () =>
+      fetchWithTimeout(`${API_BASE}/audit/stats`).then(handleResponse),
   },
 };
 
