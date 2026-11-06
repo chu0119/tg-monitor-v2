@@ -1,6 +1,6 @@
 """自动化报告生成服务"""
 import io
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +42,8 @@ class ReportService:
     ) -> Dict[str, any]:
         """生成日报数据"""
         if date is None:
-            date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            # Message.date 为 UTC 口径，统计窗口必须用 UTC 时钟
+            date = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
 
         next_date = date + timedelta(days=1)
 

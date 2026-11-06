@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
-from app.utils import datetime_to_iso
+from app.utils import datetime_to_iso, datetime_to_local_iso
 
 
 class TelegramAccountBase(BaseModel):
@@ -74,5 +74,5 @@ class TelegramAccountResponse(BaseModel):
 
     @field_serializer('last_used_at', 'created_at', 'updated_at')
     def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
-        """序列化datetime为ISO格式（带时区信息）"""
-        return datetime_to_iso(dt)
+        """均为库时区(+08:00)时间：last_used_at 由本地 now() 写入，created_at/updated_at 为 func.now()"""
+        return datetime_to_local_iso(dt)

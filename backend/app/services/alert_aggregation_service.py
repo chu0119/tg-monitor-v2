@@ -1,12 +1,11 @@
 """告警聚合服务 - 短时间内相同来源的告警自动合并"""
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
-from sqlalchemy import select, func, and_, update
+from sqlalchemy import select, func, and_, update, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from app.models.alert import Alert
-from app.utils import now_utc
 
 
 class AlertAggregationService:
@@ -42,10 +41,8 @@ class AlertAggregationService:
         if window_minutes is None:
             window_minutes = self.DEFAULT_AGGREGATION_WINDOW
 
-        cutoff = now_utc() - timedelta(minutes=window_minutes)
-
-        # 查询最近窗口期内的待处理告警，按会话和关键词组分组
-        conditions = [Alert.created_at >= cutoff]
+        # created_at 为 DB NOW() 口径(+08:00)，窗口用 DB 侧时钟，避免 Python UTC 时钟差 8 小时
+        conditions = [Alert.created_at >= text("NOW() - INTERVAL :m MINUTE").bindparams(m=window_minutes)]
         if status:
             conditions.append(Alert.status == status)
         else:
@@ -101,14 +98,13 @@ class AlertAggregationService:
         会把已创建为 critical 的告警降级成 medium）。
         """
         escalated = 0
-        now = now_utc()
 
-        # 从高到低处理：72h 先升级到 critical，之后低档规则排除已达高级别的告警
+        # 从高到低处理：72h 先升级到 critical，之后低档规则排除已达高级别的告警。
+        # 时间阈值用 DB 侧时钟（created_at 为 NOW() 口径，Python UTC 时钟会差 8 小时）
         sorted_rules = sorted(self.ESCALATION_RULES.items(), key=lambda x: x[0], reverse=True)
         higher_levels: List[str] = []
 
         for hours, target_level in sorted_rules:
-            cutoff = now - timedelta(hours=hours)
             # 排除目标级别本身以及更高级别（已是 high/critical 的不能被 24h 规则拉回 medium）
             excluded = set(higher_levels) | {target_level}
             result = await db.execute(
@@ -116,7 +112,7 @@ class AlertAggregationService:
                 .where(
                     and_(
                         Alert.status == "pending",
-                        Alert.created_at < cutoff,
+                        Alert.created_at < text(f"NOW() - INTERVAL {int(hours)} HOUR"),
                         Alert.alert_level.notin_(excluded),
                     )
                 )
@@ -148,7 +144,7 @@ class AlertAggregationService:
             days: 统计天数
             group_by: 分组方式 (day/hour)
         """
-        cutoff = now_utc() - timedelta(days=days)
+        cutoff = text(f"NOW() - INTERVAL {int(days)} DAY")
 
         if group_by == "hour":
             date_format = "%Y-%m-%d %H:00"

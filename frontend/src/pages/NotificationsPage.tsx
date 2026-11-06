@@ -56,7 +56,6 @@ export function NotificationsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log("NotificationsPage mounted");
     fetchConfigs();
   }, []);
 
@@ -64,9 +63,7 @@ export function NotificationsPage() {
     setLoading(true);
     setError(null);
     try {
-      console.log("Fetching notifications...");
       const data = await api.notifications.list();
-      console.log("Notifications data:", data);
       setConfigs(data);
     } catch (error) {
       console.error("Failed to fetch notification configs:", error);
@@ -115,7 +112,6 @@ export function NotificationsPage() {
     setShowModal(true);
   };
 
-  console.log("NotificationsPage rendering, loading:", loading, "configs:", configs, "error:", error);
 
   return (
     <div className="space-y-6">

@@ -1,7 +1,7 @@
 """告警服务"""
 from typing import List
 from datetime import datetime, timedelta
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 import re
 import asyncio
 from loguru import logger
@@ -108,6 +108,54 @@ class AlertService:
         else:
             self._queue_stats["failed"] += 1
             logger.error(f"通知重试耗尽: alert_id={item.get('alert_id')}, attempts={attempt}")
+            # 失败痕迹回写：否则告警界面显示"未通知"，失败无人知晓。
+            # 重试耗尽意味着所有渠道均未成功，notification_channels 此时尚未写入，可整体覆盖
+            try:
+                async with AsyncSessionLocal() as db:
+                    from sqlalchemy import update as sa_update
+                    result = await db.execute(
+                        sa_update(Alert)
+                        .where(Alert.id == item.get("alert_id"))
+                        .values(notification_status={
+                            "notification_failed": True,
+                            "failed_at": now_utc().isoformat(),
+                            "attempts": attempt + 1,
+                        })
+                    )
+                    await db.commit()
+                    if result.rowcount == 0:
+                        logger.warning(f"回写通知失败痕迹: alert {item.get('alert_id')} 不存在")
+            except Exception as e:
+                logger.warning(f"回写通知失败痕迹出错 alert_id={item.get('alert_id')}: {e}")
+
+    async def backfill_stale_notifications(self, within_hours: int = 1):
+        """补偿扫描：重启导致内存通知队列丢失时，重新入队近期未通知的告警。
+
+        只补偿"创建时间在窗口内 + 未通知 + 无通知日志"的告警，
+        幂等：已发送/已有日志的不会被重复入队。
+        """
+        try:
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import text as sa_text
+                result = await db.execute(sa_text(
+                    "SELECT a.id, a.message_id, a.sender_id FROM alerts a "
+                    "WHERE a.created_at >= NOW() - INTERVAL :h HOUR "
+                    "AND (a.notification_sent IS NULL OR a.notification_sent = 0) "
+                    "AND NOT EXISTS (SELECT 1 FROM notification_logs nl WHERE nl.alert_id = a.id) "
+                    "LIMIT 200"
+                ).bindparams(h=within_hours))
+                rows = result.fetchall()
+            requeued = 0
+            for alert_id, message_id, sender_id in rows:
+                if message_id and sender_id:
+                    await self._enqueue_notification(alert_id, message_id, sender_id)
+                    requeued += 1
+            if requeued:
+                logger.info(f"通知补偿扫描: 重新入队 {requeued} 条未通知告警（窗口 {within_hours}h）")
+            return requeued
+        except Exception as e:
+            logger.error(f"通知补偿扫描失败: {e}")
+            return 0
 
     def get_queue_stats(self) -> dict:
         return {
@@ -366,7 +414,7 @@ class AlertService:
                 content=(message.text or message.caption or "")[:2000],
                 status="success" if success else "failed",
                 error_message=error,
-                sent_at=now_utc() if success else None,
+                sent_at=func.now() if success else None,  # 与 created_at 同口径（DB NOW()）
             ))
 
             notification_results[channel_key] = {
@@ -376,11 +424,20 @@ class AlertService:
             }
 
             if success:
-                config.total_sent += 1
-                config.last_sent_at = now_utc()
+                # 原子计数 + DB 时钟：ORM 读改写在并发 worker 下会丢失更新
+                from sqlalchemy import update as sa_update
+                await db.execute(
+                    sa_update(NotificationConfig)
+                    .where(NotificationConfig.id == config.id)
+                    .values(total_sent=NotificationConfig.total_sent + 1, last_sent_at=func.now())
+                )
             else:
-                config.total_failed += 1
-                config.last_error = error
+                from sqlalchemy import update as sa_update
+                await db.execute(
+                    sa_update(NotificationConfig)
+                    .where(NotificationConfig.id == config.id)
+                    .values(total_failed=NotificationConfig.total_failed + 1, last_error=error)
+                )
 
         alert.notification_sent = True
         alert.notification_channels = notification_results
@@ -400,7 +457,7 @@ class AlertService:
         if not enabled or window_minutes <= 0:
             return False
 
-        cutoff = now_utc().replace(tzinfo=None) - timedelta(minutes=window_minutes)
+        # created_at 为 DB NOW() 口径(+08:00)，cutoff 必须用 DB 侧时钟，Python UTC 时钟会差 8 小时
         result = await db.execute(
             select(Alert.id)
             .where(
@@ -409,7 +466,7 @@ class AlertService:
                 Alert.sender_id == alert.sender_id,
                 Alert.keyword_id == alert.keyword_id,
                 Alert.notification_sent == True,
-                Alert.created_at >= cutoff,
+                Alert.created_at >= text("NOW() - INTERVAL :m MINUTE").bindparams(m=window_minutes),
             )
             .limit(1)
         )
@@ -425,25 +482,21 @@ class AlertService:
 
     async def get_pipeline_health(self, db) -> dict:
         """告警链路健康指标：用于发现“消息正常但告警/通知异常”。"""
-        now = now_utc().replace(tzinfo=None)
-        last_hour = now - timedelta(hours=1)
-        last_day = now - timedelta(days=1)
-
         latest_message = (await db.execute(select(func.max(Message.date)))).scalar()
         latest_alert = (await db.execute(select(func.max(Alert.created_at)))).scalar()
         matched_without_alert = (await db.execute(
             select(func.count(Message.id)).where(
-                Message.created_at >= last_hour,
+                Message.created_at >= text("NOW() - INTERVAL 1 HOUR"),
                 Message.matched_keywords.is_not(None),
                 Message.alert_id.is_(None),
             )
         )).scalar() or 0
         recent_alerts = (await db.execute(
-            select(func.count(Alert.id)).where(Alert.created_at >= last_hour)
+            select(func.count(Alert.id)).where(Alert.created_at >= text("NOW() - INTERVAL 1 HOUR"))
         )).scalar() or 0
         notification_failures = (await db.execute(
             select(func.count(NotificationLog.id)).where(
-                NotificationLog.created_at >= last_day,
+                NotificationLog.created_at >= text("NOW() - INTERVAL 1 DAY"),
                 NotificationLog.status == "failed",
             )
         )).scalar() or 0
@@ -487,7 +540,7 @@ class AlertService:
             alert.status = status
             alert.handler = handler
             alert.handler_note = handler_note
-            alert.handled_at = now_utc()
+            alert.handled_at = func.now()  # 与 created_at 同口径（DB NOW()）
 
             await db.commit()
 

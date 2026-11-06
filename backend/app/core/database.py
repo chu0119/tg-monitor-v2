@@ -23,6 +23,9 @@ try:
         pool_recycle=1800,
         pool_timeout=30,
         pool_use_lifo=True,
+        # 时区口径锚定：NOW()/func.now()/CURDATE() 等一律 +08:00，
+        # 不随服务器全局时区漂移（所有 server_default 列按此口径存储）
+        connect_args={"init_command": "SET time_zone='+08:00'"},
     )
     logger.info(f"MySQL 数据库引擎已创建: {settings.MYSQL_HOST}:{settings.MYSQL_PORT}/{settings.MYSQL_DATABASE}")
 except Exception as e:

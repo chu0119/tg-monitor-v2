@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from app.models.keyword import MatchType, AlertLevel
-from app.utils import datetime_to_iso
+from app.utils import datetime_to_iso, datetime_to_local_iso
 
 
 class KeywordGroupBase(BaseModel):

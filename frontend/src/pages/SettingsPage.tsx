@@ -649,7 +649,7 @@ export function SettingsPage() {
               </div>
               {cleanupStats && (
                 <div className="bg-cyber-blue/5 border border-cyber-blue/20 rounded-lg p-3 space-y-1 text-sm">
-                  <p>📊 数据库大小: <strong>{(cleanupStats.database_size_gb ?? cleanupStats.database_size_mb / 1024).toFixed(3)} GB</strong></p>
+                  <p>📊 数据库大小: <strong>{(cleanupStats.database_size_gb ?? cleanupStats.database_size_mb / 1024 ?? 0).toFixed(3)} GB</strong></p>
                   <p>📦 消息上限: <strong>{(cleanupStats.limits?.max_messages || maxMessages).toLocaleString()}</strong> 条，当前 <strong>{(cleanupStats.total?.messages || 0).toLocaleString()}</strong> 条</p>
                   <p>🚨 告警上限: <strong>{(cleanupStats.limits?.max_alerts || maxAlerts).toLocaleString()}</strong> 条，当前 <strong>{(cleanupStats.total?.alerts || 0).toLocaleString()}</strong> 条</p>
                   <p>🗑️ 将清理告警: <strong>{(cleanupStats.expired?.alerts || 0).toLocaleString()}</strong> 条</p>

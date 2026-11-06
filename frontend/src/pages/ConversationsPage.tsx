@@ -907,7 +907,7 @@ function ConversationCard({
 
         <div className="grid grid-cols-2 gap-2 sm:gap-4 py-2 sm:py-3 border-t border-b border-cyber-blue/10">
           <div>
-            <p className="text-lg sm:text-2xl font-bold">{conversation.total_messages.toLocaleString()}</p>
+            <p className="text-lg sm:text-2xl font-bold">{(conversation.total_messages ?? 0).toLocaleString()}</p>
             <p className="text-[10px] sm:text-xs text-muted-foreground">消息数</p>
           </div>
           <div>
@@ -971,7 +971,7 @@ function ConversationSettingsModal({
           <p className="text-sm text-muted-foreground mb-2">会话信息</p>
           <div className="bg-secondary/50 p-3 rounded-lg space-y-1 text-sm">
             <p>类型: {conversation.chat_type}</p>
-            <p>消息数: {conversation.total_messages.toLocaleString()}</p>
+            <p>消息数: {(conversation.total_messages ?? 0).toLocaleString()}</p>
             <p>告警数: {conversation.total_alerts}</p>
           </div>
         </div>

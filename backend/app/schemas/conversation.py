@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from app.models.conversation import ConversationType, ConversationStatus
-from app.utils import datetime_to_iso
+from app.utils import datetime_to_iso, datetime_to_local_iso
 
 
 class ConversationBase(BaseModel):
@@ -77,7 +77,7 @@ class ConversationResponse(BaseModel):
 
     @field_serializer('last_message_at', 'created_at', 'updated_at')
     def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
-        """序列化datetime为ISO格式（带时区信息）"""
-        return datetime_to_iso(dt)
+        """均为库时区(+08:00)：last_message_at 由 SQL NOW() 写入，其余为 func.now()"""
+        return datetime_to_local_iso(dt)
 
     model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')

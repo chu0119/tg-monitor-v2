@@ -45,10 +45,15 @@ class MessageResponse(BaseModel):
                 normalized.append(str(item))
         return normalized
 
-    @field_serializer('date', 'created_at')
-    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
-        """序列化datetime为ISO格式（带时区信息）"""
+    @field_serializer('date')
+    def serialize_date(self, dt: Optional[datetime]) -> Optional[str]:
+        """date 列存 UTC naive，按 UTC 序列化"""
         return datetime_to_iso(dt)
+
+    @field_serializer('created_at')
+    def serialize_created_at(self, dt: Optional[datetime]) -> Optional[str]:
+        """created_at 为 server_default=func.now()（库时区+08:00），按本地口径序列化"""
+        return datetime_to_local_iso(dt)
 
     model_config = ConfigDict(from_attributes=True, ser_json_timedelta='float')
 

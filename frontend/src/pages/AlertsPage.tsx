@@ -190,7 +190,9 @@ export function AlertsPage() {
     }
   };
 
+  const fetchAlertsSeqRef = useRef(0);
   const fetchAlerts = async () => {
+    const seq = ++fetchAlertsSeqRef.current;
     setLoading(true);
     try {
       const params: any = {
@@ -208,6 +210,7 @@ export function AlertsPage() {
       }
 
       const data = await api.alerts.list(params);
+      if (seq !== fetchAlertsSeqRef.current) return; // 旧响应丢弃
       if (data && typeof data === 'object' && 'items' in data) {
         setAlerts(data.items || []);
         setTotalCount(data.total || 0);
@@ -298,7 +301,10 @@ export function AlertsPage() {
       await api.alerts.exportCSV({
         status: filter.status || undefined,
         alert_level: filter.level || undefined,
-        keyword: search || undefined,
+        keyword: debouncedSearch || undefined,
+        has_phone: filter.has_phone || undefined,
+        sender_country: selectedCountry || undefined,
+        sender_location: selectedLocation || undefined,
         keyword_group_id: selectedKeywordGroups.length > 0 ? selectedKeywordGroups[0] : undefined,
       });
     } catch (error) {

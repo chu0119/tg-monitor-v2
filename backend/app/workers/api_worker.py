@@ -170,6 +170,23 @@ def create_app():
         _background_tasks.append(asyncio.create_task(run_escalation_task()))
         logger.info("告警自动升级任务已启动（每30分钟）")
 
+        # 5. 通知补偿扫描：重启导致内存通知队列丢失时，补发近期未通知的告警（延迟45s等数据库就绪）
+        from app.services.alert_service import alert_service
+
+        async def run_notification_backfill():
+            try:
+                await asyncio.sleep(45)
+                requeued = await alert_service.backfill_stale_notifications(within_hours=1)
+                if requeued:
+                    logger.info(f"通知补偿完成: {requeued} 条告警已重新入队")
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"通知补偿扫描异常: {e}")
+
+        _background_tasks.append(asyncio.create_task(run_notification_backfill()))
+        logger.info("通知补偿扫描已调度（启动后45秒执行一次）")
+
         yield
         logger.info(f"API Worker 关闭 (ID: {worker_manager.worker_id})")
 

@@ -393,10 +393,10 @@ export function BigScreenPage() {
           prev
             ? {
                 ...prev,
-                alerts_today: (prev.alerts_today || 0) + 1,
+                today_alerts: (prev.today_alerts || 0) + 1,
                 alerts_by_level: {
                   ...prev.alerts_by_level,
-                  [alertData.alert_level]: (prev.alerts_by_level?.[alertData.alert_level] || 0) + 1,
+                  [String(alertData.alert_level)]: (prev.alerts_by_level[String(alertData.alert_level)] || 0) + 1,
                 },
               }
             : prev
@@ -723,62 +723,6 @@ export function BigScreenPage() {
           </Panel>
         </section>
 
-        <section className="hidden gap-3">
-          <Panel title="会话活跃度" icon={Radio} className="min-h-[260px]">
-            <div className="space-y-2">
-              {conversations.slice(0, 6).map((conversation) => (
-                <div key={conversation.conversation_id} className="grid grid-cols-[1fr_auto] gap-3 rounded-md bg-white/[0.035] px-3 py-2">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm text-slate-200">{conversation.title || `会话 ${conversation.conversation_id}`}</div>
-                    <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-slate-500">
-                      <span>{conversation.chat_type}</span>
-                      <span>{conversation.sender_count} 发送者</span>
-                      <span>{conversation.alert_count} 告警</span>
-                    </div>
-                  </div>
-                  <div className="text-right font-mono text-sm text-cyan-100">{shortNumber(conversation.message_count)}</div>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel title="处置压力" icon={CircleDot} className="min-h-[260px]">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-lg bg-rose-400/10 p-4 text-center">
-                <div className="font-mono text-3xl font-bold text-rose-200">{shortNumber(stats.pending_alerts)}</div>
-                <div className="mt-1 text-xs text-rose-100/70">待处理告警</div>
-              </div>
-              <div className="rounded-lg bg-cyan-400/10 p-4 text-center">
-                <div className="font-mono text-3xl font-bold text-cyan-100">{shortNumber(health?.alert_pipeline?.recent_alerts_1h || 0)}</div>
-                <div className="mt-1 text-xs text-cyan-100/70">1小时告警</div>
-              </div>
-              <div className="rounded-lg bg-emerald-400/10 p-4 text-center">
-                <div className="font-mono text-3xl font-bold text-emerald-100">{health?.alert_pipeline?.notification_queue?.workers || 0}</div>
-                <div className="mt-1 text-xs text-emerald-100/70">通知线程</div>
-              </div>
-              <div className="rounded-lg bg-amber-400/10 p-4 text-center">
-                <div className="font-mono text-3xl font-bold text-amber-100">{health?.alert_pipeline?.notification_failures_24h || 0}</div>
-                <div className="mt-1 text-xs text-amber-100/70">24h通知失败</div>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title="数据资产概览" icon={Database} className="min-h-[260px]">
-            <div className="space-y-3 text-sm">
-              {[
-                ["累计消息", stats.total_messages, "#38bdf8"],
-                ["累计告警", stats.total_alerts, "#f43f5e"],
-                ["关键词库", stats.total_keywords, "#a78bfa"],
-                ["发送者画像", stats.total_senders, "#22c55e"],
-              ].map(([label, value, color]) => (
-                <div key={String(label)} className="flex items-center justify-between rounded-md bg-white/[0.035] px-3 py-2">
-                  <span className="text-slate-400">{label}</span>
-                  <span className="font-mono text-base font-semibold" style={{ color: String(color) }}>{shortNumber(Number(value))}</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        </section>
       </main>
       </div>
     </div>

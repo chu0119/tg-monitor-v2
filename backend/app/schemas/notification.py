@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Union
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
 from app.models.notification_config import NotificationType
-from app.utils import datetime_to_iso
+from app.utils import datetime_to_iso, datetime_to_local_iso
 
 MASKED_VALUE = "******"
 SENSITIVE_CONFIG_KEYS = {
@@ -128,10 +128,15 @@ class NotificationConfigResponse(BaseModel):
     updated_at: datetime
     note: Optional[str]
 
-    @field_serializer('last_sent_at', 'created_at', 'updated_at')
-    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
-        """序列化datetime为ISO格式（带时区信息）"""
+    @field_serializer('last_sent_at')
+    def serialize_last_sent(self, dt: Optional[datetime]) -> Optional[str]:
+        """last_sent_at 由 now_utc() 写入（UTC），按 UTC 序列化"""
         return datetime_to_iso(dt)
+
+    @field_serializer('created_at', 'updated_at')
+    def serialize_datetimes(self, dt: Optional[datetime]) -> Optional[str]:
+        """server_default=func.now()（库时区+08:00），按本地口径序列化"""
+        return datetime_to_local_iso(dt)
 
     @field_serializer('config')
     def serialize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:

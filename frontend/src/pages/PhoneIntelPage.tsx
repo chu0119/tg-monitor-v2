@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { Phone, Search, ChevronDown, ChevronRight, MessageSquare, AlertTriangle, User, RefreshCw, MapPin, Radio, Users, ExternalLink } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -143,11 +143,16 @@ export function PhoneIntelPage() {
     }
   }, [filterProvince]);
 
+  const expandSeqRef = useRef(0);
   const handleExpand = async (recordId: number, phone: string) => {
     if (expandedRecordId === recordId) { setExpandedRecordId(null); setDetail(null); return; }
+    const seq = ++expandSeqRef.current;
     setExpandedRecordId(recordId);
     setDetailLoading(true);
-    try { setDetail(await api.phoneRecords.getPhone(phone)); } catch (e) { console.error(e); } finally { setDetailLoading(false); }
+    try {
+      const d = await api.phoneRecords.getPhone(phone);
+      if (seq === expandSeqRef.current) setDetail(d); // 快速切换时丢弃旧响应
+    } catch (e) { console.error(e); } finally { if (seq === expandSeqRef.current) setDetailLoading(false); }
   };
 
   const totalPages = Math.ceil(total / pageSize);

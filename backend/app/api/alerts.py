@@ -26,7 +26,7 @@ from app.services.alert_service import alert_service
 from app.services.alert_aggregation_service import alert_aggregation_service
 from app.utils import (
     start_of_day_local, end_of_day_local, to_local,
-    to_local_naive, now_utc, format_datetime, datetime_to_iso
+    to_local_naive, now_utc, format_datetime, datetime_to_iso, datetime_to_local_iso
 )
 
 router = APIRouter(prefix="/alerts", tags=["告警管理"])
@@ -149,12 +149,16 @@ async def list_alerts(
     response_alerts = []
     for row in rows:
         alert_dict = dict(row._mapping)
-        if alert_dict.get("created_at"):
-            if isinstance(alert_dict["created_at"], datetime):
-                alert_dict["created_at"] = datetime_to_iso(alert_dict["created_at"])
-        if alert_dict.get("message_time"):
-            if isinstance(alert_dict["message_time"], datetime):
-                alert_dict["message_time"] = datetime_to_iso(alert_dict["message_time"])
+        # created_at 为 DB NOW() 口径(+08:00)，必须带偏移序列化，否则前端误当 UTC 差 8 小时；
+        # message_time 取自 messages.date（UTC），保持 UTC 口径
+        if isinstance(alert_dict.get("created_at"), datetime):
+            alert_dict["created_at"] = datetime_to_local_iso(alert_dict["created_at"])
+        if isinstance(alert_dict.get("handled_at"), datetime):
+            alert_dict["handled_at"] = datetime_to_local_iso(alert_dict["handled_at"])
+        if isinstance(alert_dict.get("updated_at"), datetime):
+            alert_dict["updated_at"] = datetime_to_local_iso(alert_dict["updated_at"])
+        if isinstance(alert_dict.get("message_time"), datetime):
+            alert_dict["message_time"] = datetime_to_iso(alert_dict["message_time"])
         response_alerts.append(alert_dict)
 
     # 返回分页格式
@@ -169,7 +173,12 @@ async def list_alerts(
 
 @router.get("/stats", response_model=AlertStats)
 async def get_alert_stats(db: AsyncSession = Depends(get_db)):
-    """获取告警统计"""
+    """获取告警统计（60秒缓存）"""
+    from app.utils.cache import memory_cache
+    cached = memory_cache.get("alert_stats", ttl=60)
+    if cached is not None:
+        return cached
+
     stats = await alert_service.get_alert_stats()
 
     # 获取按关键词组统计
@@ -232,6 +241,7 @@ async def get_alert_stats(db: AsyncSession = Depends(get_db)):
         })
     stats["trend"] = trend_data
 
+    memory_cache.set("alert_stats", stats)
     return AlertStats(**stats)
 
 
@@ -291,9 +301,8 @@ async def export_alerts_csv(
         except ValueError:
             logger.warning(f"Invalid end_date format: {end_date}")
 
-    # 流式分批查询，避免全量加载 OOM
+    # 流式分批查询，避免全量加载 OOM（键集分页，游标在生成器内维护）
     BATCH_SIZE = 1000
-    offset = 0
 
     # 构建 WHERE 子句（原生SQL）
     where_clauses_export = []
@@ -349,98 +358,86 @@ async def export_alerts_csv(
 
     where_sql_export = (" WHERE " + " AND ".join(where_clauses_export)) if where_clauses_export else ""
 
-    # 创建 CSV 内容
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    # 写入表头
-    headers = [
-        "告警ID",
-        "消息时间",
-        "创建时间",
-        "告警级别",
-        "状态",
-        "关键词",
-        "关键词组",
-        "匹配文本",
-        "消息ID",
-        "会话ID",
-        "会话标题",
-        "发送者ID",
-        "发送者用户名",
-        "发送者名称",
-        "发送者手机号",
-        "处理人",
-        "处理时间",
-        "处理备注",
-        "通知已发送",
-    ]
-    writer.writerow(headers)
-
-    # 分批读取并写入 CSV
-    while True:
-        export_sql = f"""
-            SELECT a.id, a.created_at, a.alert_level, a.status,
-                   a.keyword_text, a.keyword_group_name, a.matched_text,
-                   a.message_id, a.conversation_id, a.sender_id,
-                   a.handler, a.handled_at, a.handler_note, a.notification_sent,
-                   COALESCE(s.username, COALESCE(s.first_name, CONCAT('User_', s.user_id))) AS sender_username,
-                   s.first_name AS sender_first_name,
-                   s.phone AS sender_phone,
-                   c.title AS conversation_title,
-                   m.date AS message_time
-            FROM alerts a
-            LEFT JOIN senders s ON a.sender_id = s.id
-            LEFT JOIN conversations c ON a.conversation_id = c.id
-            LEFT JOIN messages m ON a.message_id = m.id
-            {where_sql_export}
-            ORDER BY a.created_at DESC
-            LIMIT :batch_size OFFSET :batch_offset
-        """
-        params_export["batch_size"] = BATCH_SIZE
-        params_export["batch_offset"] = offset
-        result = await db.execute(text(export_sql), params_export)
-        rows = result.fetchall()
-        if not rows:
-            break
-        for row in rows:
-            d = dict(row._mapping)
-            writer.writerow([
-                d.get("id", ""),
-                format_datetime(d.get("message_time")) if d.get("message_time") else "",
-                format_datetime(d.get("created_at")) if d.get("created_at") else "",
-                d.get("alert_level", ""),
-                d.get("status", ""),
-                d.get("keyword_text") or "",
-                d.get("keyword_group_name") or "",
-                d.get("matched_text") or "",
-                d.get("message_id") or "",
-                d.get("conversation_id") or "",
-                d.get("conversation_title") or "",
-                d.get("sender_id") or "",
-                d.get("sender_username") or "",
-                d.get("sender_first_name") or "",
-                d.get("sender_phone") or "",
-                d.get("handler") or "",
-                format_datetime(d.get("handled_at")) if d.get("handled_at") else "",
-                d.get("handler_note") or "",
-                "是" if d.get("notification_sent") else "否",
-            ])
-        offset += BATCH_SIZE
-        if len(rows) < BATCH_SIZE:
-            break
-
-    # 准备响应
-    output.seek(0)
-    csv_content = output.getvalue()
-
     # 生成文件名
     now_local_dt = to_local_naive(now_utc())
     filename = f"alerts_export_{now_local_dt.strftime('%Y%m%d_%H%M%S')}.csv"
 
-    # 返回 CSV 文件
+    async def _generate():
+        """流式生成 CSV：键集分页(id游标)避免 OFFSET 在大表上 O(n²) 重排序，
+        逐批 yield 避免百万行全量进内存。"""
+        # UTF-8 BOM 支持 Excel
+        yield b"\xef\xbb\xbf"
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "告警ID", "消息时间", "创建时间", "告警级别", "状态",
+            "关键词", "关键词组", "匹配文本", "消息ID", "会话ID", "会话标题",
+            "发送者ID", "发送者用户名", "发送者名称", "发送者手机号",
+            "处理人", "处理时间", "处理备注", "通知已发送",
+        ])
+        yield buf.getvalue().encode("utf-8-sig")
+        buf.seek(0); buf.truncate()
+
+        last_id = None
+        while True:
+            id_clause = " AND a.id < :last_id" if last_id is not None else ""
+            export_sql = f"""
+                SELECT a.id, a.created_at, a.alert_level, a.status,
+                       a.keyword_text, a.keyword_group_name, a.matched_text,
+                       a.message_id, a.conversation_id, a.sender_id,
+                       a.handler, a.handled_at, a.handler_note, a.notification_sent,
+                       COALESCE(s.username, COALESCE(s.first_name, CONCAT('User_', s.user_id))) AS sender_username,
+                       s.first_name AS sender_first_name,
+                       s.phone AS sender_phone,
+                       c.title AS conversation_title,
+                       m.date AS message_time
+                FROM alerts a
+                LEFT JOIN senders s ON a.sender_id = s.id
+                LEFT JOIN conversations c ON a.conversation_id = c.id
+                LEFT JOIN messages m ON a.message_id = m.id
+                {where_sql_export}{id_clause}
+                ORDER BY a.id DESC
+                LIMIT :batch_size
+            """
+            batch_params = dict(params_export)
+            batch_params["batch_size"] = BATCH_SIZE
+            if last_id is not None:
+                batch_params["last_id"] = last_id
+            result = await db.execute(text(export_sql), batch_params)
+            rows = result.fetchall()
+            if not rows:
+                break
+            for row in rows:
+                d = dict(row._mapping)
+                writer.writerow([
+                    d.get("id", ""),
+                    format_datetime(d.get("message_time")) if d.get("message_time") else "",
+                    format_datetime(d.get("created_at")) if d.get("created_at") else "",
+                    d.get("alert_level", ""),
+                    d.get("status", ""),
+                    d.get("keyword_text") or "",
+                    d.get("keyword_group_name") or "",
+                    d.get("matched_text") or "",
+                    d.get("message_id") or "",
+                    d.get("conversation_id") or "",
+                    d.get("conversation_title") or "",
+                    d.get("sender_id") or "",
+                    d.get("sender_username") or "",
+                    d.get("sender_first_name") or "",
+                    d.get("sender_phone") or "",
+                    d.get("handler") or "",
+                    format_datetime(d.get("handled_at")) if d.get("handled_at") else "",
+                    d.get("handler_note") or "",
+                    "是" if d.get("notification_sent") else "否",
+                ])
+            last_id = rows[-1][0]
+            yield buf.getvalue().encode("utf-8-sig")
+            buf.seek(0); buf.truncate()
+            if len(rows) < BATCH_SIZE:
+                break
+
     return StreamingResponse(
-        io.BytesIO(csv_content.encode("utf-8-sig")),  # 使用 UTF-8 BOM 以支持 Excel
+        _generate(),
         media_type="text/csv",
         headers={
             "Content-Disposition": f"attachment; filename={filename}"

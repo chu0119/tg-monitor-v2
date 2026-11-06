@@ -272,7 +272,7 @@ function AccountCard({ account, onDisconnect, onDelete, onRelogin, onSyncDialogs
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-gradient-to-br from-cyber-blue to-cyber-purple flex items-center justify-center text-white text-lg font-bold">
-              {(account.first_name || account.username || account.phone)[0].toUpperCase()}
+              {(account.first_name || account.username || account.phone || "?")[0].toUpperCase()}
             </div>
             <div>
               <CardTitle className="text-base">

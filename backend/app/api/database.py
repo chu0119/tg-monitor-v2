@@ -232,34 +232,35 @@ async def initialize_database():
 
 @router.get("/stats", response_model=DatabaseStats)
 async def get_database_statistics():
-    """获取数据库统计信息"""
+    """获取数据库统计信息（大表用 information_schema 近似值 + 60s 缓存）"""
     try:
+        from app.utils.cache import memory_cache
+        cached = memory_cache.get("database_stats", ttl=60)
+        if cached is not None:
+            return DatabaseStats(**cached)
+
         # 获取表统计
         tables = await get_table_stats()
 
-        # 获取详细统计
+        def _approx(table_name: str) -> int:
+            return int(tables.get(table_name) or 0)
+
         async with AsyncSessionLocal() as db:
-            # 消息总数
-            msg_result = await db.execute(select(func.count()).select_from(Message))
-            total_messages = msg_result.scalar() or 0
+            # messages/alerts 为百万行大表：COUNT(*) 精确统计代价高，用近似值
+            total_messages = _approx("messages")
+            total_alerts = _approx("alerts")
 
-            # 告警总数
-            alert_result = await db.execute(select(func.count()).select_from(Alert))
-            total_alerts = alert_result.scalar() or 0
-
-            # 会话总数
+            # 小表精确 COUNT
             conv_result = await db.execute(select(func.count()).select_from(Conversation))
             total_conversations = conv_result.scalar() or 0
 
-            # 发送者总数
             sender_result = await db.execute(select(func.count()).select_from(Sender))
             total_senders = sender_result.scalar() or 0
 
-            # 关键词总数
             kw_result = await db.execute(select(func.count()).select_from(Keyword))
             total_keywords = kw_result.scalar() or 0
 
-        return DatabaseStats(
+        data = dict(
             tables=tables,
             total_messages=total_messages,
             total_alerts=total_alerts,
@@ -267,6 +268,8 @@ async def get_database_statistics():
             total_senders=total_senders,
             total_keywords=total_keywords
         )
+        memory_cache.set("database_stats", data)
+        return DatabaseStats(**data)
     except Exception as e:
         logger.error(f"获取数据库统计失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

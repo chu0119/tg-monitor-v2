@@ -29,34 +29,13 @@ async def list_accounts(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(TelegramAccount))
     accounts = result.scalars().all()
 
-    # 实时统计每个账号的消息数和会话数 - 批量子查询替代N+1
-    if accounts:
-        account_ids = [a.id for a in accounts]
-        placeholders = ",".join([f":id{i}" for i in range(len(account_ids))])
-        id_params = {f"id{i}": aid for i, aid in enumerate(account_ids)}
-
-        # 批量查询消息数
-        msg_counts_result = await db.execute(text(f"""
-            SELECT c.account_id, COUNT(m.id) as cnt
-            FROM messages m
-            JOIN conversations c ON m.conversation_id = c.id
-            WHERE c.account_id IN ({placeholders})
-            GROUP BY c.account_id
-        """), id_params)
-        msg_counts = {row[0]: row[1] for row in msg_counts_result.fetchall()}
-
-        # 批量查询会话数
-        conv_counts_result = await db.execute(text(f"""
-            SELECT account_id, COUNT(*) as cnt
-            FROM conversations
-            WHERE account_id IN ({placeholders})
-            GROUP BY account_id
-        """), id_params)
-        conv_counts = {row[0]: row[1] for row in conv_counts_result.fetchall()}
-
-        for account in accounts:
-            account.total_messages = msg_counts.get(account.id, 0)
-            account.total_conversations = conv_counts.get(account.id, 0)
+    # total_messages/total_conversations 为冗余计数列（会话创建/消息入库时原子维护），
+    # 直接读取；避免每次打开账号页都对 300 万行 messages 做 JOIN 聚合
+    for account in accounts:
+        if account.total_messages is None:
+            account.total_messages = 0
+        if account.total_conversations is None:
+            account.total_conversations = 0
 
     return accounts
 

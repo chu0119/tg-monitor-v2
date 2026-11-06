@@ -55,22 +55,11 @@ interface Conversation {
   last_message_at?: string;
 }
 
-interface MonitoringStatus {
-  account_id: number;
-  account_phone: string;
-  conversation_id: number;
-  conversation_title: string;
-  is_monitoring: boolean;
-  messages_last_hour: number;
-  alerts_last_hour: number;
-  last_activity: string;
-}
 
 export function MonitoringPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<number | null>(null);
   const [filter, setFilter] = useState("");
   const [phoneFilter, setPhoneFilter] = useState(false);
@@ -98,8 +87,7 @@ export function MonitoringPage() {
   const [conversationsWithNewMessages, setConversationsWithNewMessages] = useState<Set<number>>(new Set());
   const [showNewMessageBadge, setShowNewMessageBadge] = useState<Record<number, number>>({});
 
-  // 自动轮询状态（当WebSocket断开时启用）
-  const [pollingInterval, setPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null);
+  // 自动轮询状态（当WebSocket断开时启用；interval 存 ref，见下方 effect）
   const [isPolling, setIsPolling] = useState(false);
 
   // 声音通知状态
@@ -196,12 +184,14 @@ export function MonitoringPage() {
     };
   }, [loadSortPreferences, isConnected]);
 
-  // 当会话或分页参数变化时重新获取消息
+  // 当会话/分页/筛选参数变化时重新获取消息（globalSearch 勾选也要触发）
   useEffect(() => {
-    if (selectedConversation) {
+    if (globalSearch && filter) {
+      fetchMessages();
+    } else if (!globalSearch && selectedConversation) {
       fetchMessages();
     }
-  }, [selectedConversation, currentPage, pageSize, filter, messageTypeFilter, alertFilter, phoneFilter]);
+  }, [selectedConversation, currentPage, pageSize, filter, messageTypeFilter, alertFilter, phoneFilter, globalSearch]);
 
   // 监听 WebSocket 消息，实时更新消息列表
   useEffect(() => {
@@ -278,26 +268,25 @@ export function MonitoringPage() {
   }, [wsMessages, selectedConversation, clearMessages]);
 
   // 监控WebSocket连接状态，断开时启用自动轮询
-  useEffect(() => {
-    if (!isConnected && !pollingInterval) {
-      // WebSocket断开，启动自动轮询
-      console.log("WebSocket断开，启用自动轮询");
-      setIsPolling(true);
+  // interval 存 ref：轮询回调通过 ref 读取最新会话/搜索状态，
+  // 避免把 selectedConversation/globalSearch 放进依赖导致 interval 反复销毁重建
+  const selectedConvRef = useRef(selectedConversation);
+  const globalSearchRef = useRef(globalSearch);
+  useEffect(() => { selectedConvRef.current = selectedConversation; }, [selectedConversation]);
+  useEffect(() => { globalSearchRef.current = globalSearch; }, [globalSearch]);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-      const interval = setInterval(async () => {
-        // 轮询当前选中的会话消息
-        if (selectedConversation && !globalSearch) {
+  useEffect(() => {
+    if (!isConnected && pollingIntervalRef.current === null) {
+      setIsPolling(true);
+      pollingIntervalRef.current = setInterval(async () => {
+        const conv = selectedConvRef.current;
+        if (conv && !globalSearchRef.current) {
           try {
-            const params: any = {
-              ...(globalSearch ? {} : { conversation_id: selectedConversation }),
-              page: 1,
-              page_size: 10, // 只获取最新的10条消息
-            };
+            const params: any = { conversation_id: conv, page: 1, page_size: 10 };
             const response = await api.messages.list(params);
             const newMessages = Array.isArray(response) ? response : response.items || [];
-
             if (newMessages.length > 0) {
-              // 检查是否有新消息
               setMessages((prev) => {
                 const existingIds = new Set(prev.map((m) => m.id));
                 const trulyNew = newMessages.filter((m: Message) => !existingIds.has(m.id));
@@ -307,33 +296,26 @@ export function MonitoringPage() {
                 return prev;
               });
             }
-
-            // 同时更新会话列表
             fetchConversations();
           } catch (error) {
             console.error("轮询失败:", error);
           }
         }
-      }, 5000); // 每5秒轮询一次
-
-      setPollingInterval(interval);
-    } else if (isConnected && pollingInterval) {
-      // WebSocket恢复，停止自动轮询
-      console.log("WebSocket恢复，停止自动轮询");
-      clearInterval(pollingInterval);
-      setPollingInterval(null);
+      }, 5000);
+    } else if (isConnected && pollingIntervalRef.current !== null) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
       setIsPolling(false);
     }
 
-    // 清理函数
     return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-        setPollingInterval(null);
+      if (pollingIntervalRef.current !== null) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
         setIsPolling(false);
       }
     };
-  }, [isConnected, selectedConversation, pollingInterval, globalSearch]);
+  }, [isConnected]);
 
   const fetchGlobalStats = async () => {
     try {
@@ -510,20 +492,11 @@ export function MonitoringPage() {
     return sortOrder === "asc" ? <ArrowUp size={14} /> : <ArrowDown size={14} />;
   };
 
-  const fetchMonitoringStatus = async () => {
-    try {
-      // 使用 dashboard API 获取监控状态
-      const stats = await api.dashboard.getStats();
-      // 将 dashboard stats 转换为 MonitoringStatus 格式
-      setMonitoringStatus(stats.monitoring_status || []);
-    } catch (error) {
-      console.error("Failed to fetch monitoring status:", error);
-    }
-  };
-
+  const fetchMessagesSeqRef = useRef(0);
   const fetchMessages = async () => {
     if (!globalSearch && !selectedConversation) return;
     if (globalSearch && !filter) return;
+    const seq = ++fetchMessagesSeqRef.current;
     try {
       if (globalSearch) setSearchLoading(true);
       const params: any = {
@@ -540,6 +513,7 @@ export function MonitoringPage() {
       if (phoneFilter) params.has_phone = true;
 
       const response = await api.messages.list(params);
+      if (seq !== fetchMessagesSeqRef.current) return; // 已有更新的请求，丢弃旧响应
 
       // API 返回的数据结构可能是 { items: [], total: } 或直接是数组
       const newMessages = Array.isArray(response) ? response : response.items || [];
@@ -845,7 +819,7 @@ export function MonitoringPage() {
                     placeholder="搜索消息..."
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
-                    onKeyPress={(e) => {
+                    onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         setCurrentPage(1);
                         fetchMessages();

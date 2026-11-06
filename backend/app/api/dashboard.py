@@ -219,10 +219,12 @@ async def get_message_trend(
     if conversation_id:
         base_query_filter.append(Message.conversation_id == conversation_id)
 
+    # date 列为 UTC：按北京时间日期聚合（CONVERT_TZ），否则 0-8 点的消息会记到前一天
+    local_day = func.date(func.convert_tz(Message.date, '+00:00', '+08:00'))
     trend_result = await db.execute(
-        select(func.date(Message.date), func.count(Message.id))
+        select(local_day, func.count(Message.id))
         .where(*base_query_filter)
-        .group_by(func.date(Message.date))
+        .group_by(local_day)
     )
     trend_map = {str(row[0]): row[1] for row in trend_result.all()}
 
@@ -243,10 +245,11 @@ async def get_message_trend(
     top_conv_map = {c[0]: c[1] for c in top_conv_rows}
 
     if top_conv_ids:
+        local_day2 = func.date(func.convert_tz(Message.date, '+00:00', '+08:00')).label('day')
         trend_result = await db.execute(
             select(
                 Message.conversation_id,
-                func.date(Message.date).label('day'),
+                local_day2,
                 func.count(Message.id).label('count')
             )
             .where(
@@ -254,7 +257,7 @@ async def get_message_trend(
                 Message.date >= today_utc_start - timedelta(days=days - 1),
                 Message.date < today_utc_start + timedelta(days=1)
             )
-            .group_by(Message.conversation_id, func.date(Message.date))
+            .group_by(Message.conversation_id, local_day2)
         )
         trend_map = {}
         for row in trend_result.all():
@@ -416,15 +419,13 @@ async def get_sender_ranking(
         if cached:
             return [SenderRanking(**item) for item in cached]
 
+        # 按告警数排序：直接用 senders.alert_count 冗余列（告警创建时原子维护），
+        # 原全表 GROUP BY alerts 在 226 万行上代价过高
         sql = text("""
-            SELECT s.id, s.username, s.first_name, s.message_count, COALESCE(a.alert_count, 0) as alert_count
+            SELECT s.id, s.username, s.first_name, s.message_count, s.alert_count
             FROM senders s
-            LEFT JOIN (
-                SELECT sender_id, COUNT(*) as alert_count
-                FROM alerts
-                GROUP BY sender_id
-            ) a ON s.id = a.sender_id
-            ORDER BY alert_count DESC, s.message_count DESC
+            WHERE s.alert_count > 0
+            ORDER BY s.alert_count DESC, s.message_count DESC
             LIMIT :limit
         """)
         result = await db.execute(sql, {"limit": limit})

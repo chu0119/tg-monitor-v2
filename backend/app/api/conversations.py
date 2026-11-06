@@ -467,9 +467,9 @@ async def list_conversations(
     result = await db.execute(query)
     conversations = result.scalars().all()
 
-    items = []
-    for c in conversations:
-        items.append(c)
+    # 经 response 模型序列化：统一时间口径（+08:00 列带偏移量输出），
+    # 裸 ORM 对象会被 jsonable_encoder 序列化成 naive ISO，前端会误当 UTC
+    items = [ConversationResponse.model_validate(c).model_dump(mode="json") for c in conversations]
 
     # 返回分页格式
     return {

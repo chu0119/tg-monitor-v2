@@ -28,6 +28,19 @@ const getApiBase = (): string => {
 
 const API_BASE = getApiBase();
 
+/**
+ * 统一的 query 参数拼装：过滤 undefined/null/空串，
+ * 避免 `days=&conversation_id=` 触发 FastAPI 422
+ */
+export function buildParams(params?: Record<string, any>): string {
+  if (!params) return "";
+  const clean = Object.entries(params).filter(
+    ([, v]) => v !== undefined && v !== null && v !== ""
+  );
+  if (clean.length === 0) return "";
+  return new URLSearchParams(clean as [string, string][]).toString();
+}
+
 // 统一的错误处理（带10秒超时）
 async function handleResponse(res: Response): Promise<any> {
   if (!res.ok) {
@@ -49,7 +62,15 @@ async function handleResponse(res: Response): Promise<any> {
     }
     throw new Error(errorMessage);
   }
-  return res.json();
+  // 204 No Content 等无响应体状态不能 res.json()
+  if (res.status === 204 || res.status === 205) return null;
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 // 带超时的 fetch 包装（10秒 AbortController 超时）
@@ -148,7 +169,7 @@ export const api = {
         body: JSON.stringify({ conversation_ids: conversationIds }),
       }).then(handleResponse),
     pullHistory: (id: number, days?: number, limit?: number) =>
-      fetchWithTimeout(`${API_BASE}/conversations/${id}/pull-history?days=${days || ""}&limit=${limit || ""}`, {
+      fetchWithTimeout(`${API_BASE}/conversations/${id}/pull-history?${buildParams({ days, limit })}`, {
         method: "POST",
       }).then(handleResponse),
     batchSync: (accountId: number) =>
@@ -296,6 +317,9 @@ export const api = {
       status?: string;
       alert_level?: string;
       keyword_group_id?: number;
+      has_phone?: boolean;
+      sender_country?: string;
+      sender_location?: string;
       conversation_id?: number;
       sender_id?: number;
       keyword?: string;
@@ -356,7 +380,7 @@ export const api = {
   dashboard: {
     getStats: () => fetchWithTimeout(`${API_BASE}/dashboard/stats`).then(handleResponse),
     getMessageTrend: (days?: number, conversationId?: number) =>
-      fetchWithTimeout(`${API_BASE}/dashboard/message-trend?days=${days || 7}&conversation_id=${conversationId || ""}`).then(
+      fetchWithTimeout(`${API_BASE}/dashboard/message-trend?${buildParams({ days: days || 7, conversation_id: conversationId })}`).then(
         handleResponse
       ),
     getKeywordTrend: (days?: number, limit?: number) =>
@@ -610,7 +634,7 @@ export const api = {
   } ,
   phoneRecords: {
     list: (params?: Record<string, any>) =>
-      fetchWithTimeout(`${API_BASE}/phone-records?${new URLSearchParams(params || {}).toString()}`).then(handleResponse),
+      fetchWithTimeout(`${API_BASE}/phone-records?${buildParams(params as any)}`).then(handleResponse),
     stats: () =>
       fetchWithTimeout(`${API_BASE}/phone-records/stats`).then(handleResponse),
     getPhone: (phone: string) =>
