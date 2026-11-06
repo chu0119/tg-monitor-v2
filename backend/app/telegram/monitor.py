@@ -813,44 +813,41 @@ class MessageMonitor:
             # 同会话消息已存在，返回 None 表示重复
             return None
 
-        # 尝试插入，如果因并发导致主键冲突则返回 None
+        # 尝试插入，冲突时用 SAVEPOINT 隔离重试（不用整库 rollback：
+        # 整库回滚会把同事务中已加载的 ORM 对象全部过期，后续属性访问触发同步懒加载 → MissingGreenlet）
         try:
-            # 创建新消息
-            db_message = MessageModel(
-                id=message.id,
-                conversation_id=conversation_id,
-                sender_id=sender_id,
-                message_type=self._get_message_type(message),
-                text=message.text,
-                caption=getattr(message, "caption", None),
-                date=msg_date,  # 存储为UTC naive datetime
-                views=getattr(message, "views", None),
-                forwards=getattr(message, "forwards", None),
-                has_media=message.media is not None,
-                is_reply=message.reply_to is not None,
-                reply_to_msg_id=message.reply_to_msg_id if message.reply_to else None,
-            )
-            db.add(db_message)
-            await db.flush()
+            async with db.begin_nested():
+                db_message = MessageModel(
+                    id=message.id,
+                    conversation_id=conversation_id,
+                    sender_id=sender_id,
+                    message_type=self._get_message_type(message),
+                    text=message.text,
+                    caption=getattr(message, "caption", None),
+                    date=msg_date,  # 存储为UTC naive datetime
+                    views=getattr(message, "views", None),
+                    forwards=getattr(message, "forwards", None),
+                    has_media=message.media is not None,
+                    is_reply=message.reply_to is not None,
+                    reply_to_msg_id=message.reply_to_msg_id if message.reply_to else None,
+                )
+                db.add(db_message)
+                await db.flush()
 
-            # Maintain denormalized counter in the same transaction as the insert
-            from sqlalchemy import text
-            await db.execute(
-                text("UPDATE conversations SET total_messages = total_messages + 1 WHERE id = :cid"),
-                {"cid": conversation_id}
-            )
-
+                # Maintain denormalized counter in the same transaction as the insert
+                from sqlalchemy import text
+                await db.execute(
+                    text("UPDATE conversations SET total_messages = total_messages + 1 WHERE id = :cid"),
+                    {"cid": conversation_id}
+                )
+            # savepoint 正常释放，外层事务保持活跃
             return db_message
         except Exception as e:
-            # 主键冲突：区分"同会话重复"(丢弃)与"跨会话碰撞"(换替代ID重试)
+            # savepoint 已自动回滚（外层事务不受影响）
             from sqlalchemy.exc import IntegrityError
             if not isinstance(e, IntegrityError):
                 logger.warning(f"消息 {message.id} 保存失败(非冲突): {e}")
                 return None
-            try:
-                await db.rollback()
-            except Exception:
-                pass
             # 检查是否真的已存在同会话同ID消息（并发写入或 pull_history 已入库）
             result = await db.execute(
                 select(MessageModel.id, MessageModel.conversation_id).where(
@@ -862,34 +859,35 @@ class MessageMonitor:
                 logger.debug(f"消息 {message.id} 已存在(会话 {conversation_id})，跳过")
                 return None
 
-            # 跨会话碰撞：用替代ID重试一次
+            # 跨会话碰撞：用替代ID重试一次（同样走 SAVEPOINT）
             surrogate_id = self._make_surrogate_message_id(message.id, conversation_id)
             logger.info(
                 f"消息 ID {message.id} 跨会话碰撞(占用者会话 {existing[1] if existing else '?'}), "
                 f"会话 {conversation_id} 使用替代ID {surrogate_id}"
             )
             try:
-                db_message = MessageModel(
-                    id=surrogate_id,
-                    conversation_id=conversation_id,
-                    sender_id=sender_id,
-                    message_type=self._get_message_type(message),
-                    text=message.text,
-                    caption=getattr(message, "caption", None),
-                    date=msg_date,
-                    views=getattr(message, "views", None),
-                    forwards=getattr(message, "forwards", None),
-                    has_media=message.media is not None,
-                    is_reply=message.reply_to is not None,
-                    reply_to_msg_id=message.reply_to_msg_id if message.reply_to else None,
-                )
-                db.add(db_message)
-                await db.flush()
-                from sqlalchemy import text
-                await db.execute(
-                    text("UPDATE conversations SET total_messages = total_messages + 1 WHERE id = :cid"),
-                    {"cid": conversation_id}
-                )
+                async with db.begin_nested():
+                    db_message = MessageModel(
+                        id=surrogate_id,
+                        conversation_id=conversation_id,
+                        sender_id=sender_id,
+                        message_type=self._get_message_type(message),
+                        text=message.text,
+                        caption=getattr(message, "caption", None),
+                        date=msg_date,
+                        views=getattr(message, "views", None),
+                        forwards=getattr(message, "forwards", None),
+                        has_media=message.media is not None,
+                        is_reply=message.reply_to is not None,
+                        reply_to_msg_id=message.reply_to_msg_id if message.reply_to else None,
+                    )
+                    db.add(db_message)
+                    await db.flush()
+                    from sqlalchemy import text
+                    await db.execute(
+                        text("UPDATE conversations SET total_messages = total_messages + 1 WHERE id = :cid"),
+                        {"cid": conversation_id}
+                    )
                 return db_message
             except Exception as e2:
                 logger.error(f"消息 {message.id} 替代ID {surrogate_id} 也冲突，跳过: {e2}")

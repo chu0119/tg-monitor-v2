@@ -152,10 +152,29 @@ async def optimize_alerts() -> None:
     print("  ✔ alerts 表空间回收完成")
 
 
+async def widen_last_message_id(conn) -> None:
+    """conversations.last_message_id 从 INT 扩到 BIGINT（替代消息ID ~10^14 超 INT 范围）"""
+    result = await conn.execute(text(
+        "SELECT DATA_TYPE FROM information_schema.columns "
+        "WHERE table_schema = DATABASE() AND table_name='conversations' AND column_name='last_message_id'"
+    ))
+    dtype = (result.scalar() or "").lower()
+    if dtype == "bigint":
+        print("  = conversations.last_message_id 已是 BIGINT")
+        return
+    print(f"  ~ conversations.last_message_id: {dtype} -> BIGINT ...")
+    await conn.execute(text(
+        "ALTER TABLE conversations MODIFY last_message_id BIGINT NULL"
+    ))
+    print("  ✔ conversations.last_message_id 已扩为 BIGINT")
+
+
 async def main():
     skip_optimize = "--skip-optimize" in sys.argv
     print("=== TG Monitor v3 数据库治理迁移 ===")
     async with engine.begin() as conn:
+        print("[0/3] 列类型修正:")
+        await widen_last_message_id(conn)
         print("[1/3] 补缺失索引:")
         await add_indexes(conn)
         print("[2/3] 删冗余索引:")

@@ -52,7 +52,8 @@ class Conversation(Base):
     # 统计信息
     total_messages = Column(Integer, default=0)
     total_alerts = Column(Integer, default=0)
-    last_message_id = Column(Integer)
+    # BigInteger：跨会话碰撞时消息会使用替代ID（tg_msg_id*10^7+slot），超 INT 范围
+    last_message_id = Column(BigInteger)
     last_message_at = Column(DateTime)
 
     # 元数据
