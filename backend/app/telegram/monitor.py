@@ -646,22 +646,25 @@ class MessageMonitor:
         """)
 
         try:
-            await db.execute(sql, {
-                "user_id": sender_id,
-                "username": new_username or "",
-                "first_name": new_first_name or "",
-                "last_name": new_last_name or "",
-                "phone": new_phone or "",
-                "country_code": country_code,
-                "country": country,
-                "phone_location": phone_location,
-                "is_bot": 1 if getattr(message.sender, 'bot', False) else 0,
-                "is_verified": 1 if getattr(message.sender, 'verified', False) else 0,
-                "is_premium": 1 if getattr(message.sender, 'premium', False) else 0,
-            })
-            await db.flush()
+            # SAVEPOINT 防护：flush 会连带 flush 本事务其他待插入对象（如批路径中的消息），
+            # 它们的冲突不应毒化 sender 创建与整个会话；失败只回滚到保存点
+            async with db.begin_nested():
+                await db.execute(sql, {
+                    "user_id": sender_id,
+                    "username": new_username or "",
+                    "first_name": new_first_name or "",
+                    "last_name": new_last_name or "",
+                    "phone": new_phone or "",
+                    "country_code": country_code,
+                    "country": country,
+                    "phone_location": phone_location,
+                    "is_bot": 1 if getattr(message.sender, 'bot', False) else 0,
+                    "is_verified": 1 if getattr(message.sender, 'verified', False) else 0,
+                    "is_premium": 1 if getattr(message.sender, 'premium', False) else 0,
+                })
+                await db.flush()
 
-            # 查询并返回 Sender 对象
+            # 查询并返回 Sender 对象（保存点外，行已在事务内可见）
             result = await db.execute(
                 select(Sender).where(Sender.user_id == sender_id)
             )
@@ -702,8 +705,10 @@ class MessageMonitor:
                     is_premium=getattr(message.sender, "premium", False),
                     message_count=1,
                 )
-                db.add(sender)
-                await db.flush()
+                # SAVEPOINT 防护：flush 失败只回滚到保存点，不毒化外层事务
+                async with db.begin_nested():
+                    db.add(sender)
+                    await db.flush()
                 return sender
 
             except Exception as e:
@@ -711,7 +716,7 @@ class MessageMonitor:
                     await asyncio.sleep(0.1 * (attempt + 1))
                     continue
                 logger.error(f"回退方法失败(user_id={sender_id}): {e}")
-                await db.rollback()
+                # 保存点已自动回滚，不再整库 rollback（会毒化会话并触发 MissingGreenlet）
                 return None
 
 
@@ -1486,6 +1491,11 @@ class MessageMonitor:
                 )
                 existing_ids = set(result.scalars().all())
 
+            # 两段式处理：先创建全部 sender，再统一 add 消息。
+            # 关键：_get_or_create_sender 内部会 flush，若此时 session 里已有待插入消息
+            # （可能跨会话碰撞），会把消息的 IntegrityError 混进 sender 创建里，
+            # 毒化整个会话（整库 rollback → 后续全部 MissingGreenlet）。
+            pending_items = []  # [(message, sender), ...]
             for message in messages:
                 # 排除自身账号的消息
                 if message.sender_id and message.sender_id in self._self_user_ids:
@@ -1497,7 +1507,7 @@ class MessageMonitor:
                     skipped_count += 1
                     continue
 
-                # 获取或创建发送者
+                # 获取或创建发送者（第一段：此时 session 无待插入消息，flush 安全）
                 sender = None
                 if message.sender:
                     sender_id = message.sender_id
@@ -1518,7 +1528,11 @@ class MessageMonitor:
                     processed_ids.add(message.id)  # 记录已存在
                     continue
 
-                # 创建消息对象（但不立即flush）
+                pending_items.append((message, sender))
+                processed_ids.add(message.id)  # 记录已处理
+
+            # 第二段：统一创建消息对象（sender 已全部就绪，flush 只会看到消息）
+            for message, sender in pending_items:
                 msg_date = message.date
                 if msg_date.tzinfo is not None:
                     from app.utils import to_utc
@@ -1541,7 +1555,6 @@ class MessageMonitor:
                 db_messages.append(db_message)
                 db.add(db_message)
                 message_senders[db_message.id] = sender
-                processed_ids.add(message.id)  # 记录已处理
 
             if skipped_count > 0:
                 logger.debug(f"批量处理跳过 {skipped_count} 条重复消息")
