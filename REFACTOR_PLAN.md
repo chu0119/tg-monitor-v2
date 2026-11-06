@@ -83,6 +83,19 @@ TG 群消息 → 实时采集(多账号) → 关键词匹配 → 告警产生 �
 
 ---
 
+## 〇、迭代状态
+
+| 迭代 | 状态 | 内容 |
+|---|---|---|
+| 迭代1（2026-11-06 已上线 60ce65d） | ✅ | 时区口径统一（+08:00锚定/SQL NOW()比较/序列化分流）、通知可靠性（原子计数/失败痕迹/补偿扫描）、性能快赢（stats缓存4.8s→2.9ms/键集分页导出/冗余列）、前端竞态修复、safe_optimize.sh |
+| 迭代2 | 待做 | 消息主键长期迁移（自增PK+UNIQUE(conv,tg_id)，需停机窗口）、alerts OPTIMIZE（用 scripts/safe_optimize.sh 手动执行）、键集分页全覆盖 |
+| 迭代3 | 待做 | 移动端深度适配、大屏演示模式（手机号脱敏开关）、系统健康可视化页 |
+
+时区口径约定（后续开发必读）：
+- `created_at`/`updated_at`/`handled_at` 等服务器列 = DB NOW() 口径（+08:00）→ 序列化用 `datetime_to_local_iso`，比较用 SQL `NOW() - INTERVAL`
+- `messages.date`/`keywords.last_matched_at` = UTC → 序列化用 `datetime_to_iso`，比较用 Python `now_utc()`
+- 连接时区已由 init_command 锚定，勿在会话里再 SET time_zone
+
 ## 四、阶段计划
 
 ### 阶段 2：架构收敛与数据正确性（本地改造）
