@@ -18,7 +18,10 @@ import asyncio
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# 切到 backend 目录再导入 app：config.py 在 import 时会用相对路径创建
+# sessions/exports 等目录，依赖 CWD（必须先 chdir，否则在 scripts/ 下运行会 FileNotFoundError）
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.getcwd())
 
 from sqlalchemy import text
 from app.core.database import AsyncSessionLocal, engine
