@@ -18,8 +18,9 @@ class MessageResponse(BaseModel):
     date: datetime
     views: Optional[int]
     forwards: Optional[int]
-    has_media: bool
-    is_reply: bool
+    # 历史/特殊路径可能为 NULL，严格 bool 会 500
+    has_media: Optional[bool] = False
+    is_reply: Optional[bool] = False
     matched_keywords: Optional[List[str]]
     alert_id: Optional[int]
     created_at: datetime
