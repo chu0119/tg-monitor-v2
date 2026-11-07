@@ -49,3 +49,6 @@ aiofiles>=24.1
 
 # 手机号归属地解析（phone_service）
 phonenumbers==8.13.40
+
+# Redis 客户端（pubsub / redis_cache / health）
+redis==5.0.8
