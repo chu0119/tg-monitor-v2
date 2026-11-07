@@ -81,3 +81,6 @@ logs.old-*/
 tg-auto-backup.lock
 backend/tg-auto-backup.lock
 workers/config.json
+
+# git bundle 临时文件
+*.bundle
