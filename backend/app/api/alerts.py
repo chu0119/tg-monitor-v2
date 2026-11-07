@@ -125,7 +125,7 @@ async def list_alerts(
                a.keyword_text, a.keyword_group_name, a.alert_level, a.status,
                a.matched_text, a.message_preview, a.highlighted_message,
                a.handler, a.handler_note, a.handled_at,
-               a.notification_sent, a.notification_channels, a.notification_status,
+               a.notification_sent, a.notification_channels, a.notification_status, a.occurrence_count,
                a.created_at, a.updated_at,
                s.user_id AS sender_tg_id,
                COALESCE(s.username, COALESCE(s.first_name, CONCAT('User_', s.user_id))) AS sender_username,

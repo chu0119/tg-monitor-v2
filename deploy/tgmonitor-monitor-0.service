@@ -1,0 +1,20 @@
+[Unit]
+Description=TG Monitor Worker 0 (Telegram Accounts)
+After=network.target mysql.service redis-server.service tgmonitor-api-0.service
+Wants=mysql.service redis-server.service
+
+[Service]
+Type=simple
+User=__APP_USER__
+WorkingDirectory=__REPO_DIR__/backend
+ExecStart=__VENV__/bin/python -m app.workers.monitor_worker
+Environment=WORKER_ID=0
+Environment=WORKER_TYPE=monitor
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=15
+# Telethon 客户端 + 消息队列内存水位
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target

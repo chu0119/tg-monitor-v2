@@ -33,6 +33,7 @@ import {
 interface Alert {
   id: number;
   keyword_text: string;
+  occurrence_count?: number;
   keyword_group_name: string;
   alert_level: string;
   status: string;
@@ -907,6 +908,11 @@ function AlertRow({ alert, onClick, levelColor, levelLabel, isSelected, onToggle
                 <span className="text-xs sm:text-sm text-muted-foreground truncate">
                   {alert.keyword_group_name} · {alert.keyword_text}
                 </span>
+                {(alert.occurrence_count ?? 1) > 1 && (
+                  <Badge variant="outline" className="text-xs shrink-0 text-cyber-blue border-cyber-blue/40">
+                    ×{alert.occurrence_count}
+                  </Badge>
+                )}
               </div>
               <p
                 className="text-xs sm:text-sm text-gray-300 line-clamp-2 sm:line-clamp-3"

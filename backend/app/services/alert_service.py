@@ -189,13 +189,20 @@ class AlertService:
         sender: Sender,
         matched_keywords: List[dict]
     ) -> List[dict]:
-        """创建告警，返回本次新建告警的广播数据列表（调用方 commit 后推送给前端）"""
+        """创建告警，返回本次新建告警的广播数据列表（调用方 commit 后推送给前端）
+
+        窗口聚合：同会话+同关键词在聚合窗口内（默认30分钟）的后续命中不再新建行，
+        而是合并到窗口内最新的 pending 告警（occurrence_count+1、引用最新消息）。
+        广告/诈骗组刷屏场景（每消息命中多词）可将告警行数降低一个数量级。
+        """
         # 获取完整消息内容
         full_message = message.text or getattr(message, "caption", None) or ""
         created_alerts: List[dict] = []
+        from app.services.alert_aggregation_service import alert_aggregation_service
+        window_minutes = alert_aggregation_service.DEFAULT_AGGREGATION_WINDOW
 
         for match in matched_keywords:
-            # 检查是否已存在该消息和关键词的告警
+            # 检查是否已存在该消息和关键词的告警（消息级精确去重）
             existing = await db.execute(
                 select(Alert).where(
                     Alert.message_id == message.id,
@@ -203,6 +210,34 @@ class AlertService:
                 )
             )
             if existing.scalar_one_or_none():
+                continue
+
+            # 窗口聚合：同会话+同关键词的窗口内 pending 告警 → 合并而非新建
+            agg_result = await db.execute(
+                select(Alert).where(
+                    Alert.conversation_id == message.conversation_id,
+                    Alert.keyword_id == match["keyword_id"],
+                    Alert.status == "pending",
+                    Alert.created_at >= text("NOW() - INTERVAL :m MINUTE").bindparams(m=window_minutes),
+                )
+                .order_by(Alert.created_at.desc())
+                .limit(1)
+            )
+            agg_alert = agg_result.scalar_one_or_none()
+            if agg_alert is not None:
+                # 合并：计数+1、引用最新消息与内容（updated_at 由 onupdate 自动刷新）
+                agg_alert.occurrence_count = (agg_alert.occurrence_count or 1) + 1
+                agg_alert.message_id = message.id
+                agg_alert.message_preview = full_message[:self.MAX_PREVIEW_LENGTH]
+                existing_keywords = message.matched_keywords or []
+                message.matched_keywords = existing_keywords + [match["word"]]
+                if message.alert_id is None:
+                    message.alert_id = agg_alert.id
+                logger.debug(
+                    f"告警聚合: alert_id={agg_alert.id} 命中+1 "
+                    f"(occurrence_count={agg_alert.occurrence_count}, 会话 {message.conversation_id})"
+                )
+                # 不重复通知：窗口内首条已通知；不重复广播：列表自动展示最新内容
                 continue
 
             # 生成带高亮的消息内容
@@ -262,6 +297,7 @@ class AlertService:
                 "alert_level": alert.alert_level,
                 "status": alert.status,
                 "message_preview": alert.message_preview,
+                "occurrence_count": 1,
                 "created_at": alert.created_at.isoformat() if hasattr(alert.created_at, "isoformat") else str(alert.created_at),
             })
 

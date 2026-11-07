@@ -169,12 +169,30 @@ async def widen_last_message_id(conn) -> None:
     print("  ✔ conversations.last_message_id 已扩为 BIGINT")
 
 
+async def add_occurrence_count(conn) -> None:
+    """alerts 加 occurrence_count 列（窗口聚合功能）"""
+    result = await conn.execute(text(
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_schema = DATABASE() AND table_name='alerts' AND column_name='occurrence_count'"
+    ))
+    if (result.scalar() or 0) > 0:
+        print("  = alerts.occurrence_count 已存在")
+        return
+    print("  ~ alerts 加 occurrence_count 列 ...")
+    await conn.execute(text(
+        "ALTER TABLE alerts ADD COLUMN occurrence_count INT NOT NULL DEFAULT 1 "
+        "COMMENT '聚合命中次数' AFTER merged_into_id"
+    ))
+    print("  ✔ alerts.occurrence_count 已添加")
+
+
 async def main():
     skip_optimize = "--skip-optimize" in sys.argv
     print("=== TG Monitor v3 数据库治理迁移 ===")
     async with engine.begin() as conn:
         print("[0/3] 列类型修正:")
         await widen_last_message_id(conn)
+        await add_occurrence_count(conn)
         print("[1/3] 补缺失索引:")
         await add_indexes(conn)
         print("[2/3] 删冗余索引:")

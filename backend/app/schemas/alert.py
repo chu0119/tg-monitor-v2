@@ -26,6 +26,7 @@ class AlertResponse(BaseModel):
     handler_note: Optional[str]
     handled_at: Optional[datetime]
     notification_sent: bool
+    occurrence_count: int = 1
     created_at: datetime
     updated_at: datetime
 

@@ -72,6 +72,8 @@ class Alert(Base):
     priority_score = Column(Integer, index=True, comment="优先级评分")
     is_merged = Column(Boolean, default=False, comment="是否已合并")
     merged_into_id = Column(BigInteger, comment="合并到的主告警ID")
+    # 窗口聚合：同会话+同关键词在窗口内的后续命中合并进首条告警并累加此计数
+    occurrence_count = Column(Integer, default=1, comment="聚合命中次数")
 
     # 关系 - 移除循环引用
     message = relationship("Message", foreign_keys=[message_id])

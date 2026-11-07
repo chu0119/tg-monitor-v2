@@ -1,6 +1,8 @@
 <div align="center">
 
 # 🔥 听风追影
+
+> **部署**：全新机器一键部署见 [deploy/README.md](deploy/README.md)（install.sh / update.sh / systemd 单元）。当前生产架构为多进程 worker（api_worker + monitor_worker + watchdog）。
 ### —— 群组数据预警分析系统
 
 <p>

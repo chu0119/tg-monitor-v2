@@ -1,0 +1,15 @@
+[Unit]
+Description=TG Monitor Session Protector
+After=tgmonitor-monitor-0.service
+
+[Service]
+Type=simple
+User=__APP_USER__
+WorkingDirectory=__REPO_DIR__/backend
+ExecStart=/usr/bin/python3 __REPO_DIR__/backend/session_protector.py
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

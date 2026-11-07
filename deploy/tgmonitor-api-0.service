@@ -1,0 +1,20 @@
+[Unit]
+Description=TG Monitor API Worker 0
+After=network.target mysql.service redis-server.service
+Wants=mysql.service redis-server.service
+
+[Service]
+Type=simple
+User=__APP_USER__
+WorkingDirectory=__REPO_DIR__/backend
+ExecStart=__VENV__/bin/python -m app.workers.api_worker
+Environment=WORKER_ID=0
+Environment=WORKER_TYPE=api
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=10
+# 内存保护：泄漏超过 2G 自动拉起
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

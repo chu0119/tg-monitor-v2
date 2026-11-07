@@ -1,0 +1,15 @@
+[Unit]
+Description=TG Monitor Watchdog
+After=tgmonitor-api-0.service tgmonitor-monitor-0.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__REPO_DIR__
+ExecStart=/usr/bin/python3 __REPO_DIR__/tg_watchdog.py
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
