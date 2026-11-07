@@ -230,8 +230,8 @@ fi
 if [[ -z "$MYSQL_READY" ]]; then
     warn "安装 MySQL 8"
     if [[ "$PKG_MGR" == "apt" ]]; then
-        HAS_MYSQL_PKG=$(apt-cache policy mysql-server 2>/dev/null | grep -c 'Candidate: [^ ]' || true)
-        HAS_MYSQL_PKG8=$(apt-cache policy mysql-server-8.0 2>/dev/null | grep -c 'Candidate: [^ ]' || true)
+        HAS_MYSQL_PKG=$(apt-cache policy mysql-server 2>/dev/null | awk '/Candidate:/{print $2}' | grep -vc none || true)
+        HAS_MYSQL_PKG8=$(apt-cache policy mysql-server-8.0 2>/dev/null | awk '/Candidate:/{print $2}' | grep -vc none || true)
         if [[ "${HAS_MYSQL_PKG:-0}" != "0" || "${HAS_MYSQL_PKG8:-0}" != "0" ]]; then
             apt-get install -y -qq mysql-server >/dev/null && systemctl enable --now mysql && MYSQL_READY=1
         else
