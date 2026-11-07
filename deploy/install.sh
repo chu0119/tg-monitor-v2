@@ -202,10 +202,11 @@ if command -v node >/dev/null; then
 fi
 if [[ -z "$NODE_OK" ]]; then
     NODE_VER="v20.18.1"
+    NODE_ARCH="x64"; [[ "$ARCH" == "aarch64" ]] && NODE_ARCH="arm64"
     if [[ "$CN_NETWORK" == 1 ]]; then
-        NODE_URL="https://npmmirror.com/mirrors/node/${NODE_VER}/node-${NODE_VER}-linux-${ARCH/x86_64/x64/aarch64/arm64}.tar.xz"
+        NODE_URL="https://npmmirror.com/mirrors/node/${NODE_VER}/node-${NODE_VER}-linux-${NODE_ARCH}.tar.xz"
     else
-        NODE_URL="https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-${ARCH/x86_64/x64/aarch64/arm64}.tar.xz"
+        NODE_URL="https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-${NODE_ARCH}.tar.xz"
     fi
     warn "安装 Node.js ${NODE_VER}（二进制包）"
     curl -fsSL "$NODE_URL" -o /tmp/node.tar.xz \
