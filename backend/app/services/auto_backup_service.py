@@ -110,22 +110,40 @@ class AutoBackupService:
                 try:
                     need_backup = True
                     try:
+                        # 判断"最近是否已有备份"要看两类产物：
+                        # 1) backup_service 目录式备份（含 metadata.json）
+                        # 2) backups/ 下的裸 .sql.gz（人工/外部 dump，如 post_v3_backup_*.sql.gz）
+                        # 只看前者会导致每次重启都误判"从未备份过"而发起 40 分钟全量 dump，
+                        # 与大表 DDL 撞 metadata lock（2026-11-07 两次事故根因）
+                        latest_ts: Optional[datetime] = None
+
                         backups = await backup_service.list_backups()
-                        if backups:
+                        for b in backups:
+                            ca = b.get("created_at")
+                            if ca:
+                                dt = datetime.fromisoformat(str(ca))
+                                if dt.tzinfo is not None:
+                                    dt = dt.replace(tzinfo=None)
+                                if latest_ts is None or dt > latest_ts:
+                                    latest_ts = dt
+
+                        backup_root = Path(backup_service.backup_dir)
+                        if backup_root.exists():
+                            for gz in backup_root.glob("*.sql.gz"):
+                                mtime = datetime.fromtimestamp(gz.stat().st_mtime)
+                                if latest_ts is None or mtime > latest_ts:
+                                    latest_ts = mtime
+
+                        if latest_ts is not None:
                             from datetime import timedelta
-                            latest = backups[0].get("created_at")
-                            if latest:
-                                from app.utils import now_utc
-                                latest_dt = datetime.fromisoformat(str(latest))
-                                if latest_dt.tzinfo is None:
-                                    latest_dt = latest_dt.replace(tzinfo=None)
-                                age = now_utc().replace(tzinfo=None) - latest_dt
-                                if age < timedelta(seconds=self._backup_interval):
-                                    need_backup = False
-                                    logger.info(
-                                        f"距上次自动备份仅 {int(age.total_seconds() // 3600)} 小时，"
-                                        f"{self._backup_interval - int(age.total_seconds())} 秒后执行下次备份"
-                                    )
+                            from app.utils import now_utc
+                            age = now_utc().replace(tzinfo=None) - latest_ts
+                            if age < timedelta(seconds=self._backup_interval):
+                                need_backup = False
+                                logger.info(
+                                    f"距上次备份仅 {int(age.total_seconds() // 3600)} 小时，"
+                                    f"{self._backup_interval - int(age.total_seconds())} 秒后执行下次备份"
+                                )
                     except Exception as e:
                         logger.warning(f"检查上次备份时间失败，执行兜底备份: {e}")
 
