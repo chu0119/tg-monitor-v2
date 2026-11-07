@@ -59,14 +59,34 @@ async def advanced_search_messages(
         ).exists()
         conditions.append(alert_subq)
 
-    # 关键词搜索 - 使用 ILIKE 模糊匹配
+    # 关键词搜索 - 优先 FULLTEXT 索引（3.3M 行 ILIKE 全扫会超时），降级 ILIKE
     if keyword:
-        conditions.append(
-            or_(
-                Message.text.ilike(f"%{keyword}%"),
-                Message.caption.ilike(f"%{keyword}%"),
+        from sqlalchemy import text as sa_text
+        safe_kw = chr(34) + keyword + chr(34)
+        use_fulltext = False
+        try:
+            if not hasattr(advanced_search_messages, "_fulltext_available"):
+                try:
+                    await db.execute(sa_text(
+                        "SELECT 1 FROM messages WHERE MATCH(text) AGAINST(:kw IN BOOLEAN MODE) LIMIT 1"
+                    ).bindparams(kw="test"))
+                    advanced_search_messages._fulltext_available = True
+                except Exception:
+                    advanced_search_messages._fulltext_available = False
+            use_fulltext = advanced_search_messages._fulltext_available
+        except Exception:
+            use_fulltext = False
+        if use_fulltext:
+            conditions.append(
+                sa_text("MATCH(text) AGAINST(:kw IN BOOLEAN MODE)").bindparams(kw=safe_kw)
             )
-        )
+        else:
+            conditions.append(
+                or_(
+                    Message.text.ilike(f"%{keyword}%"),
+                    Message.caption.ilike(f"%{keyword}%"),
+                )
+            )
 
     # 日期过滤
     if start_date:
@@ -111,7 +131,7 @@ async def advanced_search_messages(
 
     response_messages = []
     for msg in messages:
-        msg_dict = MessageResponse.model_validate(msg).model_dump()
+        msg_dict = MessageResponse.model_validate(msg).model_dump(mode="json")
         if msg.sender:
             msg_dict["sender_username"] = msg.sender.username or msg.sender.first_name or f"User_{msg.sender.user_id}"
             msg_dict["sender_first_name"] = msg.sender.first_name
@@ -282,7 +302,7 @@ async def list_messages(
     # 补充关联信息 - 已通过 selectinload 预加载，直接使用
     response_messages = []
     for msg in messages:
-        msg_dict = MessageResponse.model_validate(msg).model_dump()
+        msg_dict = MessageResponse.model_validate(msg).model_dump(mode="json")
 
         # 获取发送者信息 - 已预加载，直接访问
         if msg.sender:
