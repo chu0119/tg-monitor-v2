@@ -230,7 +230,15 @@ fi
 if [[ -z "$MYSQL_READY" ]]; then
     warn "安装 MySQL 8"
     if [[ "$PKG_MGR" == "apt" ]]; then
-        apt-get install -y -qq mysql-server >/dev/null && systemctl enable --now mysql && MYSQL_READY=1
+        if apt-cache show mysql-server >/dev/null 2>&1 || apt-cache show mysql-server-8.0 >/dev/null 2>&1; then
+            apt-get install -y -qq mysql-server >/dev/null && systemctl enable --now mysql && MYSQL_READY=1
+        else
+            # Debian 12 等：官方源无 MySQL，走 MySQL 官方 apt 仓库
+            warn "发行版源无 mysql-server，添加 MySQL 官方仓库"
+            export DEBIAN_FRONTEND=noninteractive
+            curl -fsSL https://dev.mysql.com/get/mysql-apt-config_0.8.33-1_all.deb -o /tmp/mysql-apt.deb                 && dpkg -i /tmp/mysql-apt.deb >/dev/null 2>&1                 && apt-get update -qq                 && apt-get install -y -qq mysql-community-server >/dev/null                 && systemctl enable --now mysql && MYSQL_READY=1
+            rm -f /tmp/mysql-apt.deb
+        fi
     else
         # RHEL 系走 MySQL 官方仓库
         MYSQL_REPO_RPM="mysql80-community-release"
