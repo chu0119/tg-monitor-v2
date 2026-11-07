@@ -43,6 +43,18 @@ sudo bash update.sh           # git pull → 前端构建 → 跑迁移 → 滚�
 | tg-watchdog.service | 看门狗单元 |
 | tgmonitor-session-protector.service | Session 保护器单元 |
 
+## 实测记录（Docker 干净容器，2026-11-07）
+
+install.sh 在 Ubuntu 24.04 与 Debian 12 的 systemd 特权容器中完整实测，过程中修复：
+1. ensurepip 缺失（Ubuntu 需 python3-venv）→ venv 缺 pip 时硬失败并提示
+2. Debian 12 无 mysql-server 包 → 自动配 repo.mysql.com 官方源（失败回退 MariaDB+降级警告）
+3. apt-cache show 对不存在包也返回 0 → 改 apt-cache policy 判断候选
+4. bash 变量多级替换语法错误导致 Node URL 404 → 多源重试链（nodejs.org→npmmirror→aliyun）
+5. systemd WorkingDirectory 权限 → 服务用户不可达时回退 root
+6. 重跑时 ALTER USER 换随机密码与保留的 .env 漂移 → 沿用 .env 既有密码
+7. localhost 解析 IPv6 连不上 MySQL → .env 固定 127.0.0.1
+8. sites-enabled 是目录，`[[ -f ]]` 判断永假 → `-d`
+
 ## 关键约定（务必遵守）
 
 1. **session 文件归 monitor 进程独占**：API 进程不得为已监控账号创建 Telethon 客户端（监控控制走 HTTP 转发 9010）。新增机器扩到多个 monitor worker 时，账号轮询分配自动生效，勿手动同时在两个进程连同一账号
