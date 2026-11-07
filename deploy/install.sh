@@ -81,12 +81,19 @@ else
     HAS_SYSTEMD=0; warn "systemd 不可用（容器环境?），服务将由脚本直接启动，仅用于测试"
 fi
 
-# 内存/磁盘预检
-MEM_GB=$(free -g | awk '/^Mem:/{print $2}')
-DISK_GB=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
-(( MEM_GB >= 2 ))   || { err "内存不足（需要 ≥2G，当前 ${MEM_GB}G）"; exit 1; }
-(( DISK_GB >= 20 )) || { err "根分区剩余空间不足（需要 ≥20G，当前 ${DISK_GB}G）"; exit 1; }
-log "资源: ${MEM_GB}G 内存 / ${DISK_GB}G 可用磁盘"
+# 内存/磁盘预检（free 输出格式因发行版/locale 而异，解析失败仅警告不阻断）
+MEM_GB=$(free -m 2>/dev/null | awk '/^Mem(:| )/{print $2}' | head -1)
+DISK_GB=$(df -BG / 2>/dev/null | tail -1 | awk '{print $4}' | tr -dc '0-9')
+if [[ -n "$MEM_GB" && "$MEM_GB" -ge 0 ]] 2>/dev/null; then
+    MEM_GB=$(( MEM_GB / 1024 ))
+    if (( MEM_GB < 2 )); then err "内存不足（需要 ≥2G，当前 ${MEM_GB}G）"; exit 1; fi
+    log "资源: ${MEM_GB}G 内存 / ${DISK_GB:-?}G 可用磁盘"
+else
+    warn "无法解析内存信息（free 格式异常），跳过内存预检"
+fi
+if [[ -n "$DISK_GB" ]] 2>/dev/null; then
+    (( DISK_GB >= 20 )) || { err "根分区剩余空间不足（需要 ≥20G，当前 ${DISK_GB}G）"; exit 1; }
+fi
 
 # 网络区域检测（决定镜像源）
 if (( FORCE_CN )) || [[ -z "${SKIP_CN_CHECK:-}" ]] && curl -sf -m 3 -o /dev/null http://connect.rom.miui.com/generate_204 2>/dev/null; then
