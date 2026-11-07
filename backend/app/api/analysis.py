@@ -129,6 +129,22 @@ async def analyze_conversation_sentiment(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/risk-lexicon")
+async def get_risk_lexicon():
+    """查看内置风险词库（透明化：分析器使用的全部内置规则词，按类别返回）"""
+    from app.data.lexicons import risk_lexicon_flat, LEXICON_VERSION, risk_lexicon_stats
+    flat = risk_lexicon_flat()
+    return {
+        "version": LEXICON_VERSION,
+        "stats": risk_lexicon_stats(),
+        "categories": [
+            {"category": cat, "words": sorted(words)}
+            for cat, words in sorted(flat.items())
+        ],
+        "note": "内置词库只做分析标注（内容风险构成），不产生告警；产生告警的是用户自建关键词组。",
+    }
+
+
 @router.get("/sentiment/trend/{conversation_id}")
 async def get_sentiment_trend(
     conversation_id: int,

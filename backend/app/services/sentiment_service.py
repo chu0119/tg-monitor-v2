@@ -21,48 +21,14 @@ from loguru import logger
 
 from app.core.database import AsyncSessionLocal
 from app.models.message import Message
+from app.data.lexicons import (
+    risk_lexicon_flat, NEGATIVE_WORDS, POSITIVE_WORDS,
+    INTENSIFIERS, NEGATION_WORDS, LEXICON_VERSION,
+)
 
-ANALYZER_VERSION = "hybrid-lexicon-v1"
+ANALYZER_VERSION = "hybrid-lexicon-v2"
 
-# ============ 情感词典 ============
-# 负面情绪/冲突（不含风险词——风险词由系统词库负责）
-NEGATIVE_WORDS = {
-    '垃圾', '骗子', '诈骗', '跑路', '杀猪', '坑', '坑人', '骗', '忽悠', '套路',
-    '恶心', '气愤', '愤怒', '举报', '曝光', '黑心', '无耻', '下流', '卑鄙',
-    '失败', '亏', '亏了', '亏死', '血亏', '被割', '割韭菜', '韭菜', '被套',
-    '完蛋', '完了', '完犊子', '凉了', '凉凉', '废了', '倒霉', '背运',
-    '生气', '气死', '烦', '烦死', '讨厌', '恶心他妈给恶心开门',
-    '失望', '绝望', '崩溃', '无语', '服了', '醉了', '离谱', '逆天',
-    '后悔', '上当', '受骗', '吃亏', '被坑', '背刺', '捅刀',
-    '差评', '垃圾站', '狗屎', '屎', '粪', '傻逼', 'sb', 'nmsl', '妈的', 'tm', 'tmd',
-    '烂', '烂透了', '稀烂', '破', '破烂', '渣', '渣渣', '菜', '菜鸡',
-    '滚', '滚蛋', '闭嘴', '脑残', '弱智', '白痴', '低能', '蠢', '蠢货',
-    '哭', '哭了', '想哭', '泪目', '惨', '惨了', '太惨', '可怜',
-    '焦虑', '抑郁', 'emo', '破防', '绷不住', '蚌埠住了',
-    '浪费', '耽误', '坑爹', '无奈', '难受', '后悔莫及', '血本无归', '债', '负债',
-    'warn', 'warning', 'scam', 'fraud', 'fake', 'shit', 'fuck', 'damn',
-}
-
-# 正面情绪/收益
-POSITIVE_WORDS = {
-    '好', '很好', '太好', '好棒', '棒', '真棒', '太棒', '优秀', '赞', '点赞',
-    '厉害', '牛', '牛批', '牛逼', 'nb', '666', 'yyds', '绝了', '无敌',
-    '喜欢', '爱了', '开心', '快乐', '高兴', '舒服', '爽', '舒坦', '痛快',
-    '满意', '不错', '可以', '稳', '稳了', '靠谱', '可靠', '信任', '放心',
-    '成功', '成了', '成了!', '赢了', '赚', '赚了', '赚到', '血赚', '赚麻',
-    '盈利', '收益', '分红', '返现到账', '到账', '秒到账', '钱包鼓了',
-    '感谢', '谢谢', '感恩', '多谢', '辛苦', '辛苦了',
-    '恭喜', '祝贺', '喜提', '好运', '幸运', '锦鲤', '欧', '欧气', '天选',
-    '完美', '满分', '好评', '五星', '推荐', '安利', '种草',
-    '加油', '冲', '冲啊', '搞起', '干就完了', '起飞', '起飞了', '拉升', '暴涨',
-    'good', 'great', 'nice', 'perfect', 'excellent', 'awesome', 'thanks', 'love',
-}
-
-# 程度副词（加权）
-INTENSIFIERS = {'很', '太', '超', '超级', '非常', '特别', '极', '极其', '贼', '巨', '真的', '实锤', '绝对'}
-
-# 否定词（翻转相邻情感词）
-NEGATION_WORDS = {'不', '没', '没有', '别', '莫', '非', '无', '毫不', '从不', '毫无'}
+# 情感词典来自 app/data/lexicons.py（单一来源，v2 扩充）
 
 try:
     import jieba
@@ -89,6 +55,14 @@ class SentimentService:
         self._pos = tuple(POSITIVE_WORDS)
         self._intens = tuple(INTENSIFIERS)
         self._negation = tuple(NEGATION_WORDS)
+        # 内置风险词库：词 -> 类别（子串匹配，高精度词典）
+        self._builtin_risk: Dict[str, str] = {}
+        for cat, words in risk_lexicon_flat().items():
+            for w in words:
+                w = w.strip().lower()
+                if w and w not in self._builtin_risk:
+                    self._builtin_risk[w] = cat
+        self._builtin_risk_items = tuple(self._builtin_risk.items())
 
     # ---------- 单条消息判定（纯内存，供批量循环调用） ----------
     def _classify_text(self, text: str) -> str:
@@ -135,6 +109,14 @@ class SentimentService:
         if raw_pos > raw_neg:
             return 'positive'
         return 'normal'
+
+    def _scan_builtin_risk(self, text_lower: str) -> List[str]:
+        """扫描内置风险词库，返回命中的 (词|类别) 列表"""
+        hits = []
+        for w, cat in self._builtin_risk_items:
+            if w in text_lower:
+                hits.append(f"{w}|{cat}")
+        return hits
 
     # ---------- 会话级分析 ----------
     async def analyze_conversation_sentiment(
@@ -185,23 +167,27 @@ class SentimentService:
         risk_count = neg_count = pos_count = normal_count = 0
         score_sum = 0.0
         keyword_counter: Counter = Counter()
+        builtin_cat_counter: Counter = Counter()
         by_day: Dict[str, Dict] = {}
 
         texts = [r[0] or '' for r in rows]
-        # 分词批量放线程池（jieba 首次加载词典 ~1s，不能阻塞事件循环）
+        # 分词+内置词库扫描放线程池（jieba 首次加载词典 ~1s，不能阻塞事件循环）
         loop = __import__('asyncio').get_running_loop()
         classifications = await loop.run_in_executor(
-            None, lambda: [self._classify_text(t) for t in texts]
+            None, lambda: [
+                (self._classify_text(t), self._scan_builtin_risk(t.lower()))
+                for t in texts
+            ]
         )
 
-        for (msg_text, matched_kw, msg_date), cls in zip(rows, classifications):
+        for (msg_text, matched_kw, msg_date), (cls, builtin_hits) in zip(rows, classifications):
             day = msg_date.strftime('%Y-%m-%d')
             bucket = by_day.setdefault(
                 day, {'risk': 0, 'negative': 0, 'positive': 0, 'normal': 0, 'total': 0}
             )
             bucket['total'] += 1
 
-            # 信号1：系统风险词库命中（真实数据，最强信号）
+            # 信号1：用户关键词组命中（与告警同源，最强信号）
             msg_risk_words: List[str] = []
             if matched_kw:
                 try:
@@ -210,12 +196,24 @@ class SentimentService:
                 except Exception:
                     msg_risk_words = []
 
+            # 信号2：内置风险词库命中（词|类别）
+            if builtin_hits:
+                for hit in builtin_hits:
+                    w, cat = hit.split('|', 1)
+                    keyword_counter[w] += 1
+                    builtin_cat_counter[cat] += 1
+
             if msg_risk_words:
                 cls_final = 'risk'
                 risk_count += 1
                 bucket['risk'] += 1
                 for w in msg_risk_words:
                     keyword_counter[w] += 1
+            elif builtin_hits:
+                # 内置词库命中 → 也判风险
+                cls_final = 'risk'
+                risk_count += 1
+                bucket['risk'] += 1
             else:
                 cls_final = cls
                 if cls == 'negative':
@@ -244,7 +242,10 @@ class SentimentService:
             "average_score": round(average_score, 3),
             "risk_ratio": round(risk_count / total, 4) if total else 0.0,
             "top_risk_keywords": [
-                {"word": w, "count": c} for w, c in keyword_counter.most_common(10)
+                {"word": w, "count": c} for w, c in keyword_counter.most_common(12)
+            ],
+            "risk_categories": [
+                {"category": cat, "count": c} for cat, c in builtin_cat_counter.most_common()
             ],
             "by_day": [
                 {
@@ -260,8 +261,9 @@ class SentimentService:
             ],
             "method": ANALYZER_VERSION,
             "description": (
-                "风险=命中系统关键词组(诈骗/广告等)；负面/正面=情感词典+否定词/程度词规则；"
-                "其余=正常。全部规则可解释，风险词命中来自本系统关键词库的真实匹配。"
+                "风险=命中系统关键词组(诈骗/广告等)或内置风险词库"
+                f"({LEXICON_VERSION}，9类222条：诈骗传销/赌博/跑分/黑灰产等)；"
+                "负面/正面=情感词典+否定词/程度词规则；其余=正常。全部规则可解释。"
             ),
         }
         self._cache[cache_key] = (now, payload)
