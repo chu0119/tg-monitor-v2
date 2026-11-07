@@ -230,7 +230,9 @@ fi
 if [[ -z "$MYSQL_READY" ]]; then
     warn "安装 MySQL 8"
     if [[ "$PKG_MGR" == "apt" ]]; then
-        if apt-cache show mysql-server >/dev/null 2>&1 || apt-cache show mysql-server-8.0 >/dev/null 2>&1; then
+        HAS_MYSQL_PKG=$(apt-cache policy mysql-server 2>/dev/null | grep -c 'Candidate: [^ ]' || true)
+        HAS_MYSQL_PKG8=$(apt-cache policy mysql-server-8.0 2>/dev/null | grep -c 'Candidate: [^ ]' || true)
+        if [[ "${HAS_MYSQL_PKG:-0}" != "0" || "${HAS_MYSQL_PKG8:-0}" != "0" ]]; then
             apt-get install -y -qq mysql-server >/dev/null && systemctl enable --now mysql && MYSQL_READY=1
         else
             # Debian 12 等：官方源无 MySQL，走 MySQL 官方 apt 仓库
@@ -277,14 +279,23 @@ nginx -t >/dev/null 2>&1 && log "Nginx: 配置正常"
 # ============================================================
 step "6/10 Python 虚拟环境"
 $PY_BIN -m venv "$BACKEND/venv"
+if [[ ! -x "$BACKEND/venv/bin/pip" ]]; then
+    err "venv 缺少 pip（ensurepip 不可用）。请安装: apt install python3-venv python3-pip 后重跑"
+    exit 1
+fi
 PIP_ARGS=(-q --upgrade pip)
 if [[ "$CN_NETWORK" == 1 ]]; then PIP_ARGS+=(-i https://pypi.tuna.tsinghua.edu.cn/simple); fi
 "$BACKEND/venv/bin/pip" install "${PIP_ARGS[@]}"
-if ! "$BACKEND/venv/bin/pip" install -q -r "$BACKEND/requirements.txt" ${CN_NETWORK:+-i https://pypi.tuna.tsinghua.edu.cn/simple}; then
-    err "pip 安装失败，重试官方源"
-    "$BACKEND/venv/bin/pip" install -q -r "$BACKEND/requirements.txt"
+PIP_OK=1
+"$BACKEND/venv/bin/pip" install -q -r "$BACKEND/requirements.txt" ${CN_NETWORK:+-i https://pypi.tuna.tsinghua.edu.cn/simple} || PIP_OK=0
+if (( ! PIP_OK )); then
+    warn "主源安装失败，重试官方源"
+    "$BACKEND/venv/bin/pip" install -q -r "$BACKEND/requirements.txt" || {
+        err "Python 依赖安装失败（两次均失败），完整错误见上方；常见原因: 网络/编译缺 build-essential"
+        exit 1
+    }
 fi
-"$BACKEND/venv/bin/python" -c "import fastapi, telethon, sqlalchemy; print('Python 依赖: OK')"
+"$BACKEND/venv/bin/python" -c "import fastapi, telethon, sqlalchemy, uvicorn; print('Python 依赖: OK')"
 
 # ============================================================
 # 7. MySQL 库/用户/.env
