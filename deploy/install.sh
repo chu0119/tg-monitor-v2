@@ -235,11 +235,16 @@ if [[ -z "$MYSQL_READY" ]]; then
         if [[ "${HAS_MYSQL_PKG:-0}" != "0" || "${HAS_MYSQL_PKG8:-0}" != "0" ]]; then
             apt-get install -y -qq mysql-server >/dev/null && systemctl enable --now mysql && MYSQL_READY=1
         else
-            # Debian 12 等：官方源无 MySQL，走 MySQL 官方 apt 仓库
-            warn "发行版源无 mysql-server，添加 MySQL 官方仓库"
+            # Debian 12 等：官方源无 MySQL，直接配置 repo.mysql.com 源（deb822 格式）
+            warn "发行版源无 mysql-server，配置 repo.mysql.com 官方源"
             export DEBIAN_FRONTEND=noninteractive
-            curl -fsSL --retry 3 -m 180 https://dev.mysql.com/get/mysql-apt-config_0.8.33-1_all.deb -o /tmp/mysql-apt.deb                 && dpkg -i /tmp/mysql-apt.deb 2>&1 | tail -2                 && apt-get install -y -qq -f >/dev/null 2>&1                 && apt-get update -qq                 && { echo "mysql-community-server mysql-community-server/root-pass password $DB_PASS";                      echo "mysql-community-server mysql-community-server/re-root-pass password $DB_PASS";                    } | debconf-set-selections                 && apt-get install -y -qq mysql-community-server 2>&1 | tail -2                 && systemctl enable --now mysql && MYSQL_READY=1
-            rm -f /tmp/mysql-apt.deb
+            apt-get install -y -qq gnupg >/dev/null
+            if curl -fsSL --retry 3 -m 60 https://repo.mysql.com/RPM-GPG-KEY-mysql-2023 | gpg --dearmor -o /usr/share/keyrings/mysql.gpg                 && echo "deb [signed-by=/usr/share/keyrings/mysql.gpg] http://repo.mysql.com/apt/debian $(. /etc/os-release && echo $VERSION_CODENAME) mysql-8.0" > /etc/apt/sources.list.d/mysql.list                 && apt-get update -qq                 && { echo "mysql-community-server mysql-community-server/root-pass password $DB_PASS";                      echo "mysql-community-server mysql-community-server/re-root-pass password $DB_PASS";                    } | debconf-set-selections                 && apt-get install -y -qq mysql-community-server 2>&1 | tail -2                 && systemctl enable --now mysql && MYSQL_READY=1; then
+                log "MySQL 官方仓库安装完成"
+            else
+                warn "MySQL 官方仓库安装失败（网络或仓库不可达），回退 MariaDB（全文搜索将降级为 LIKE）"
+                apt-get install -y -qq mariadb-server >/dev/null && systemctl enable --now mariadb && MYSQL_READY=1
+            fi
         fi
     else
         # RHEL 系走 MySQL 官方仓库
