@@ -405,7 +405,7 @@ server {
 NGINX
 [[ -f /etc/nginx/sites-enabled ]] && ln -sf /etc/nginx/sites-available/tgmonitor /etc/nginx/sites-enabled/tgmonitor \
     && rm -f /etc/nginx/sites-enabled/default
-[[ -f /etc/nginx/conf.d ]] && ln -sf /etc/nginx/sites-available/tgmonitor /etc/nginx/conf.d/tgmonitor.conf
+[[ -d /etc/nginx/conf.d ]] && ln -sf /etc/nginx/sites-available/tgmonitor /etc/nginx/conf.d/tgmonitor.conf
 nginx -t && { systemctl reload nginx 2>/dev/null || systemctl restart nginx; }
 log "nginx 站点已配置（端口 $APP_PORT）"
 
