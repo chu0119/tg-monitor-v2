@@ -11,6 +11,7 @@ Telethon==1.40.0
 sqlalchemy==2.0.36
 alembic==1.14.0
 aiomysql==0.2.0
+PyMySQL==1.1.1  # aiomysql依赖,>1.1会与SQLAlchemy pool_pre_ping不兼容(TypeError ping)
 
 # 认证和安全 (python-jose 已弃用且有CVE，替换为 PyJWT)
 PyJWT==2.10.1
