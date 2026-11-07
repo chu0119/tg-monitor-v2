@@ -102,14 +102,20 @@ else
     CN_NETWORK=0; log "网络: 国际线路"
 fi
 
-# 端口占用预检
+# 端口占用预检（若占用者是本系统已部署服务，视为重跑/升级，放行）
+UPGRADE_MODE=0
+systemctl list-unit-files 2>/dev/null | grep -q '^tgmonitor-api-0.service' && UPGRADE_MODE=1
 for port in $APP_PORT $API_PORT $STATUS_PORT; do
     if ss -tln 2>/dev/null | grep -q ":${port} "; then
-        err "端口 $port 已被占用，请先释放: ss -tlnp | grep $port"
-        exit 1
+        if (( UPGRADE_MODE )); then
+            warn "端口 $port 被占用（本系统已在运行，按升级模式继续）"
+        else
+            err "端口 $port 已被占用，请先释放: ss -tlnp | grep $port"
+            exit 1
+        fi
     fi
 done
-log "端口 ${APP_PORT}/${API_PORT}/${STATUS_PORT} 空闲"
+(( UPGRADE_MODE )) && log "检测到已有部署：升级模式" || log "端口 ${APP_PORT}/${API_PORT}/${STATUS_PORT} 空闲"
 
 # 旧部署冲突检测
 OLD_UNITS="tgmonitor-backend.service tg-monitor-frontend.service"
