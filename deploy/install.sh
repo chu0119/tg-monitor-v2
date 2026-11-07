@@ -308,6 +308,11 @@ fi
 step "7/10 MySQL 库与配置"
 DB_NAME="tg_monitor_v2"
 DB_USER="tgmonitor"
+if [[ -z "$DB_PASS" ]] && [[ -f "$BACKEND/.env" ]]; then
+    # 重跑场景：.env 已有密码，必须沿用（否则 ALTER USER 换密码后与 .env 漂移 → Access denied）
+    DB_PASS=$(grep '^MYSQL_PASSWORD=' "$BACKEND/.env" | cut -d= -f2)
+    [[ -n "$DB_PASS" ]] && log "沿用 backend/.env 中的既有数据库密码"
+fi
 if [[ -z "$DB_PASS" ]]; then
     DB_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
     log "生成随机数据库密码: $DB_PASS （已写入 backend/.env）"
