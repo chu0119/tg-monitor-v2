@@ -14,7 +14,7 @@ aiomysql==0.2.0
 PyMySQL==1.1.1  # aiomysql依赖,>1.1会与SQLAlchemy pool_pre_ping不兼容(TypeError ping)
 
 # 认证和安全 (python-jose 已弃用且有CVE，替换为 PyJWT)
-PyJWT==2.10.1
+PyJWT==2.15.0
 cryptography==44.0.0
 passlib[bcrypt]==1.7.4
 libpass==1.9.3
