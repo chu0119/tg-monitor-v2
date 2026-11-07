@@ -325,7 +325,8 @@ fi
 if [[ ! -f "$BACKEND/.env" ]]; then
     cat > "$BACKEND/.env" <<EOF
 DATABASE_TYPE=mysql
-MYSQL_HOST=localhost
+# 用 127.0.0.1 而非 localhost：部分环境 localhost 解析为 IPv6 而 MySQL 只监听 IPv4
+MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3306
 MYSQL_USER=$DB_USER
 MYSQL_PASSWORD=$DB_PASS
