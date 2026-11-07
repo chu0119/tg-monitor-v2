@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { ShieldAlert, Shield, AlertTriangle, Smile, Info } from "lucide-react";
+import { ShieldAlert, Shield, AlertTriangle, Smile, Info, Frown } from "lucide-react";
 
 interface SentimentAnalysisProps {
   conversationId: number;
