@@ -112,23 +112,45 @@ class BackupService:
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        # mysqldump | gzip > 文件 全程流式，任意大小库都不占内存
+        # mysqldump | gzip > 文件 全程流式，任意大小库都不占内存。
+        # 注意：asyncio 子进程的 stdout 是 StreamReader（无 fileno），不能直接作为
+        # 另一个子进程的 stdin——必须用泵协程在两个管道间搬运数据。
         db_backup.parent.mkdir(parents=True, exist_ok=True)
         out_file = open(db_backup, "wb")
+        gzip_process = None
+        pump_task = None
         try:
             gzip_process = await asyncio.create_subprocess_exec(
                 *gzip_cmd,
-                stdin=dump_process.stdout,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=out_file,
                 stderr=asyncio.subprocess.PIPE,
             )
-            # 关闭父进程侧的读端引用，让 gzip 收到 EOF
-            dump_process.stdout.close()
 
-            gzip_stderr = await gzip_process.stderr.read()
-            await gzip_process.wait()
+            async def _pump():
+                while True:
+                    chunk = await dump_process.stdout.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    gzip_process.stdin.write(chunk)
+                    await gzip_process.stdin.drain()
+                gzip_process.stdin.close()
+
+            pump_task = asyncio.create_task(_pump())
+            await pump_task
+
             dump_stderr = await dump_process.stderr.read()
             await dump_process.wait()
+            gzip_stderr = await gzip_process.stderr.read()
+            await gzip_process.wait()
+        except Exception:
+            # 泵中断/异常时清掉两个子进程，避免僵尸
+            for proc in (dump_process, gzip_process):
+                if proc and proc.returncode is None:
+                    proc.kill()
+            if pump_task and not pump_task.done():
+                pump_task.cancel()
+            raise
         finally:
             out_file.close()
 

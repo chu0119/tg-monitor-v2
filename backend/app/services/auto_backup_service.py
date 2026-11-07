@@ -127,8 +127,15 @@ class AutoBackupService:
                                 if latest_ts is None or dt > latest_ts:
                                     latest_ts = dt
 
-                        backup_root = Path(backup_service.backup_dir)
-                        if backup_root.exists():
+                        scan_dirs = {Path(backup_service.backup_dir)}
+                        # 仓库根 backups/ 也扫（人工/外部 dump 常放这里）
+                        try:
+                            scan_dirs.add(Path(backup_service.backup_dir).parent.parent / "backups")
+                        except Exception:
+                            pass
+                        for backup_root in scan_dirs:
+                            if not backup_root.exists():
+                                continue
                             for gz in backup_root.glob("*.sql.gz"):
                                 mtime = datetime.fromtimestamp(gz.stat().st_mtime)
                                 if latest_ts is None or mtime > latest_ts:
