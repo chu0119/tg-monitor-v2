@@ -38,6 +38,28 @@ class WordCloudService:
         }
         return stopwords
 
+    @staticmethod
+    def _find_cjk_font() -> str:
+        """探测系统 CJK 字体：无则中文渲染为方块（假图）"""
+        import glob
+        candidates = [
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc',
+            '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+            '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+            'C:/Windows/Fonts/msyh.ttc',
+            'C:/Windows/Fonts/simhei.ttf',
+        ]
+        for c in candidates:
+            if glob.glob(c):
+                return c
+        found = glob.glob('/usr/share/fonts/**/*CJK*', recursive=True) or glob.glob('/usr/share/fonts/**/wqy*', recursive=True)
+        if found:
+            return found[0]
+        logger.warning('未找到 CJK 字体，词云中文将显示为方块。请安装 fonts-noto-cjk')
+        return None
+
     async def generate_wordcloud(
         self,
         db: AsyncSession,
@@ -70,7 +92,7 @@ class WordCloudService:
                 relative_scaling=0.5,
                 min_font_size=10,
                 prefer_horizontal=0.7,
-                font_path=None  # 使用默认字体
+                font_path=self._find_cjk_font()  # 默认西文字体渲染中文全是方块，必须显式 CJK 字体
             ).generate_from_frequencies(dict(word_freq))
 
             img_buffer = io.BytesIO()
