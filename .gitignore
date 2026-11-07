@@ -84,3 +84,5 @@ workers/config.json
 
 # git bundle 临时文件
 *.bundle
+
+prod_pkgs.txt
