@@ -238,7 +238,7 @@ if [[ -z "$MYSQL_READY" ]]; then
             # Debian 12 等：官方源无 MySQL，走 MySQL 官方 apt 仓库
             warn "发行版源无 mysql-server，添加 MySQL 官方仓库"
             export DEBIAN_FRONTEND=noninteractive
-            curl -fsSL https://dev.mysql.com/get/mysql-apt-config_0.8.33-1_all.deb -o /tmp/mysql-apt.deb                 && dpkg -i /tmp/mysql-apt.deb >/dev/null 2>&1                 && apt-get update -qq                 && apt-get install -y -qq mysql-community-server >/dev/null                 && systemctl enable --now mysql && MYSQL_READY=1
+            curl -fsSL --retry 3 -m 180 https://dev.mysql.com/get/mysql-apt-config_0.8.33-1_all.deb -o /tmp/mysql-apt.deb                 && dpkg -i /tmp/mysql-apt.deb 2>&1 | tail -2                 && apt-get install -y -qq -f >/dev/null 2>&1                 && apt-get update -qq                 && { echo "mysql-community-server mysql-community-server/root-pass password $DB_PASS";                      echo "mysql-community-server mysql-community-server/re-root-pass password $DB_PASS";                    } | debconf-set-selections                 && apt-get install -y -qq mysql-community-server 2>&1 | tail -2                 && systemctl enable --now mysql && MYSQL_READY=1
             rm -f /tmp/mysql-apt.deb
         fi
     else

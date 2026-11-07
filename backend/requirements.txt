@@ -45,3 +45,6 @@ python-dateutil==2.9.0.post0
 psutil==6.1.1
 greenlet>=3.0
 aiofiles>=24.1
+
+# 手机号归属地解析（phone_service）
+phonenumbers==8.13.40
