@@ -422,6 +422,16 @@ NGINX
 nginx -t && { systemctl reload nginx 2>/dev/null || systemctl restart nginx; }
 log "nginx 站点已配置（端口 $APP_PORT）"
 
+# nginx worker 必须能读到 dist：代码放在受限目录（如 /root）时补 o+x 并警告
+NGX_USER="www-data"; getent passwd nginx >/dev/null 2>&1 && NGX_USER="nginx"
+_d="$FRONTEND/dist"
+while [[ "$_d" != "/" ]]; do
+    if ! sudo -u "$NGX_USER" test -x "$_d" 2>/dev/null; then
+        chmod o+x "$_d" 2>/dev/null && warn "已对 ${_d} 补 o+x（nginx 读取需要）"
+    fi
+    _d=$(dirname "$_d")
+done
+
 # 防火墙放行
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "active"; then
     ufw allow "$APP_PORT/tcp" >/dev/null; ufw allow "$API_PORT/tcp" >/dev/null
