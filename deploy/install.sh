@@ -301,11 +301,15 @@ mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PA
 mysql -e "ALTER USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';"
 mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost'; FLUSH PRIVILEGES;"
 
-# 运行用户
+# 运行用户（服务以非 root 跑；代码目录必须对其可读，否则 systemd CHDIR 失败）
 APP_USER=$(stat -c '%U' "$REPO_DIR" 2>/dev/null || echo root)
 [[ "$APP_USER" == "root" ]] && APP_USER="tgmonitor"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin "$APP_USER"
 chown -R "$APP_USER":"$APP_USER" "$REPO_DIR" 2>/dev/null || true
+if ! sudo -u "$APP_USER" test -x "$REPO_DIR" 2>/dev/null; then
+    warn "用户 $APP_USER 无法进入 $REPO_DIR（代码在受限目录?），服务改以 root 运行"
+    APP_USER=root
+fi
 
 if [[ ! -f "$BACKEND/.env" ]]; then
     cat > "$BACKEND/.env" <<EOF
