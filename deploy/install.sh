@@ -352,6 +352,14 @@ EOF
     log "backend/.env 已生成（记住填 TELEGRAM_API_ID/HASH）"
 else
     log "backend/.env 已存在（保留现配置）"
+    # 校验现有配置指向的 MySQL 是否可达（离线包/旧环境常见漂移）
+    _EH=$(grep '^MYSQL_HOST=' "$BACKEND/.env" | cut -d= -f2)
+    _EP=$(grep '^MYSQL_PORT=' "$BACKEND/.env" | cut -d= -f2)
+    _EU=$(grep '^MYSQL_USER=' "$BACKEND/.env" | cut -d= -f2)
+    _EPW=$(grep '^MYSQL_PASSWORD=' "$BACKEND/.env" | cut -d= -f2)
+    if ! MYSQL_PWD="$_EPW" mysql -h "${_EH:-127.0.0.1}" -P "${_EP:-3306}" -u "${_EU:-tgmonitor}" -e 'SELECT 1' >/dev/null 2>&1; then
+        warn "现有 backend/.env 指向的 MySQL 不可达（$_EH:$_EP），请手工核对！"
+    fi
 fi
 
 mkdir -p "$BACKEND/sessions" "$REPO_DIR/logs" "$REPO_DIR/backups" "$REPO_DIR/exports" "$REPO_DIR/uploads"
