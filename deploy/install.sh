@@ -264,6 +264,9 @@ if [[ -z "$MYSQL_READY" ]]; then
     [[ -n "$MYSQL_READY" ]] || { err "MySQL 安装失败，请手动安装 MySQL 8 后重跑"; exit 1; }
     log "MySQL 安装完成"
 fi
+# binlog 3 天过期（默认 30 天，大写入量下会吃掉几十 GB 磁盘）
+mysql -e "SET PERSIST binlog_expire_logs_seconds = 259200;" 2>/dev/null || true
+
 # 等待 socket 就绪
 for i in $(seq 1 30); do
     mysqladmin ping >/dev/null 2>&1 && break
